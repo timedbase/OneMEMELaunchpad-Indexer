@@ -229,10 +229,28 @@ curl "http://localhost:3001/api/v1/tokens/0xd3ad...1111"
     "buyCount": 84,
     "sellCount": 12,
     "volumeBNB": "3200000000000000000000",
-    "raisedBNB": "2800000000000000000000"
+    "raisedBNB": "2800000000000000000000",
+    "metaURI": "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
+    "metadata": {
+      "name": "DogeMeme",
+      "symbol": "DOGE",
+      "description": "The first meme token on OneMEME Launchpad",
+      "image": "https://ipfs.io/ipfs/bafkreihdwdcef.../image.png",
+      "imageRaw": "ipfs://bafkreihdwdcef.../image.png",
+      "website": "https://dogememe.io",
+      "socials": {
+        "twitter": "https://twitter.com/dogememe",
+        "telegram": "https://t.me/dogememe",
+        "discord": "https://discord.gg/dogememe"
+      }
+    }
   }
 }
 ```
+
+> `metaURI` is the raw on-chain value (`ipfs://` or `https://`).
+> `metadata.image` is always an HTTP URL — IPFS gateway applied automatically.
+> Both are `null` when the token has no `metaURI` or the metadata fetch fails.
 
 **Response `404 Not Found`**
 

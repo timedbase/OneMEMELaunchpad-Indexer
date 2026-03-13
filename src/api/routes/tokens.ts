@@ -20,6 +20,8 @@ import {
   parseOrderDir,
   serverError,
 } from "../helpers";
+import { getMetaURI } from "../rpc";
+import { fetchMetadata } from "../metadata";
 
 const app = new Hono();
 
@@ -96,7 +98,18 @@ app.get("/:address", async (c) => {
     const [row] = await sql`SELECT * FROM token WHERE id = ${address.toLowerCase()}`;
     if (!row) return notFound(c, `Token ${address} not found`);
 
-    return c.json({ data: row });
+    // Fetch off-chain metadata in parallel with nothing (non-blocking).
+    // getMetaURI never throws; fetchMetadata never throws.
+    const metaURI  = await getMetaURI(address.toLowerCase() as `0x${string}`);
+    const metadata = metaURI ? await fetchMetadata(metaURI) : null;
+
+    return c.json({
+      data: {
+        ...row,
+        metaURI:  metaURI  || null,
+        metadata: metadata ?? null,
+      },
+    });
   } catch (err) {
     return serverError(c, err);
   }
