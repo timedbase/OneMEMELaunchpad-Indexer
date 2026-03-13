@@ -1,0 +1,216 @@
+[
+  {
+    "type": "event",
+    "name": "TokenCreated",
+    "inputs": [
+      { "name": "token",          "type": "address", "indexed": true  },
+      { "name": "tokenType",      "type": "uint8",   "indexed": false },
+      { "name": "creator",        "type": "address", "indexed": true  },
+      { "name": "totalSupply",    "type": "uint256", "indexed": false },
+      { "name": "antibotEnabled", "type": "bool",    "indexed": false },
+      { "name": "tradingBlock",   "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TokenBought",
+    "inputs": [
+      { "name": "token",        "type": "address", "indexed": true  },
+      { "name": "buyer",        "type": "address", "indexed": true  },
+      { "name": "bnbIn",        "type": "uint256", "indexed": false },
+      { "name": "tokensOut",    "type": "uint256", "indexed": false },
+      { "name": "tokensToDead", "type": "uint256", "indexed": false },
+      { "name": "raisedBNB",    "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TokenSold",
+    "inputs": [
+      { "name": "token",     "type": "address", "indexed": true  },
+      { "name": "seller",    "type": "address", "indexed": true  },
+      { "name": "tokensIn",  "type": "uint256", "indexed": false },
+      { "name": "bnbOut",    "type": "uint256", "indexed": false },
+      { "name": "raisedBNB", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TokenMigrated",
+    "inputs": [
+      { "name": "token",           "type": "address", "indexed": true  },
+      { "name": "pair",            "type": "address", "indexed": true  },
+      { "name": "liquidityBNB",    "type": "uint256", "indexed": false },
+      { "name": "liquidityTokens", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TWAPUpdated",
+    "inputs": [
+      { "name": "priceAvg",    "type": "uint256", "indexed": false },
+      { "name": "blockNumber", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "DefaultParamsUpdated",
+    "inputs": [
+      { "name": "virtualBNBUSD",       "type": "uint256", "indexed": false },
+      { "name": "migrationTargetUSD",  "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "FeesWithdrawn",
+    "inputs": [
+      { "name": "recipient", "type": "address", "indexed": false },
+      { "name": "amount",    "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "RouterUpdated",
+    "inputs": [
+      { "name": "router", "type": "address", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "FeeRecipientUpdated",
+    "inputs": [
+      { "name": "recipient", "type": "address", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TradeFeeUpdated",
+    "inputs": [
+      { "name": "feeBps", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "UsdcPairUpdated",
+    "inputs": [
+      { "name": "usdcToken", "type": "address", "indexed": false },
+      { "name": "pair",      "type": "address", "indexed": false },
+      { "name": "isToken0",  "type": "bool",    "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TwapMaxAgeBlocksUpdated",
+    "inputs": [
+      { "name": "blocks", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getAmountOut",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "token",    "type": "address" },
+      { "name": "amountIn", "type": "uint256" }
+    ],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "name": "getAmountOutSell",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "token",    "type": "address" },
+      { "name": "amountIn", "type": "uint256" }
+    ],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "name": "getSpotPrice",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "token", "type": "address" }
+    ],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "name": "tokens",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "", "type": "address" }
+    ],
+    "outputs": [
+      { "name": "token",           "type": "address" },
+      { "name": "tokenType",       "type": "uint8"   },
+      { "name": "creator",         "type": "address" },
+      { "name": "totalSupply",     "type": "uint256" },
+      { "name": "liquidityTokens", "type": "uint256" },
+      { "name": "creatorTokens",   "type": "uint256" },
+      { "name": "bcTokensTotal",   "type": "uint256" },
+      { "name": "bcTokensSold",    "type": "uint256" },
+      { "name": "virtualBNB",      "type": "uint256" },
+      { "name": "k",               "type": "uint256" },
+      { "name": "raisedBNB",       "type": "uint256" },
+      { "name": "migrationTarget", "type": "uint256" },
+      { "name": "antibotEnabled",  "type": "bool"    },
+      { "name": "creationBlock",   "type": "uint256" },
+      { "name": "tradingBlock",    "type": "uint256" },
+      { "name": "migrated",        "type": "bool"    }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "allTokens",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "", "type": "uint256" }
+    ],
+    "outputs": [{ "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "name": "tradeFee",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "name": "feeRecipient",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "name": "accumulatedFees",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "name": "twapPriceAvg",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "name": "usdToBNB",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "usdAmount", "type": "uint256" }
+    ],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  }
+]

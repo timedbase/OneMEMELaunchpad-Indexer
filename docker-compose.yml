@@ -1,0 +1,32 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OneMEME Launchpad Indexer — Local Development Stack
+#
+# Starts a PostgreSQL instance suitable for local indexer development.
+# Usage:
+#   docker compose up -d          # start in background
+#   docker compose down           # stop and remove containers
+#   docker compose down -v        # also wipe the database volume
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB:       onememe_indexer
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

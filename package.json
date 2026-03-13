@@ -1,0 +1,37 @@
+{
+  "name": "onememelaunchpad-indexer",
+  "version": "1.0.0",
+  "description": "Real-time on-chain indexer for the OneMEME Launchpad (BSC) — built with Ponder",
+  "license": "MIT",
+  "author": "OneMEME Launchpad Contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/timedbase/OneMEMELaunchpad-Indexer.git"
+  },
+  "private": true,
+  "scripts": {
+    "dev":         "ponder dev",
+    "start":       "ponder start",
+    "codegen":     "ponder codegen",
+    "db:generate": "ponder db generate",
+    "db:migrate":  "ponder db migrate",
+    "api":         "tsx src/api/server.ts",
+    "api:dev":     "tsx watch src/api/server.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "dotenv":            "^16.4.7",
+    "hono":              "^4.6.14",
+    "postgres":          "^3.4.5",
+    "ponder":            "^0.8.17",
+    "viem":              "^2.21.45"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "tsx":         "^4.19.2",
+    "typescript":  "^5.5.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

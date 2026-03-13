@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Ponder build artifacts and generated types
+.ponder/
+
+# Environment secrets — never commit the real .env
+.env
+
+# TypeScript build output
+dist/
+
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+*.log

@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target":            "ES2022",
+    "module":            "ES2022",
+    "moduleResolution":  "Bundler",
+    "esModuleInterop":   true,
+    "strict":            true,
+    "resolveJsonModule": true,
+    "skipLibCheck":      true,
+    "outDir":            "dist",
+    "paths": {
+      "ponder:registry": [".ponder/registry.d.ts"],
+      "ponder:schema":   [".ponder/schema.d.ts"]
+    }
+  },
+  "include": ["src", "ponder.config.ts", "ponder.schema.ts", "abis"],
+  "exclude": ["node_modules", "dist", ".ponder"]
+}
