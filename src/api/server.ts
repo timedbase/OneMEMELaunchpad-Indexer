@@ -14,8 +14,9 @@
  *
  * Rate limits (per IP, per minute):
  *   /api/v1/stats                  10  req/min  (heavy aggregation)
- *   /api/v1/tokens/*/quote/*       20  req/min  (triggers RPC calls to BSC)
+ *   /api/v1/tokens/:addr/quote/... 20  req/min  (triggers RPC calls to BSC)
  *   /api/v1/tokens/:addr (detail)  120 req/min  (lightweight DB lookup)
+ *   /api/v1/activity/stream        SSE — long-lived connection, no rate limit
  *   Everything else                60  req/min  (paginated lists)
  */
 
@@ -35,13 +36,15 @@ import {
   limitStats,
 } from "./ratelimit";
 
-import tokenRoutes     from "./routes/tokens";
-import tradeRoutes     from "./routes/trades";
+import tokenRoutes    from "./routes/tokens";
+import tradeRoutes    from "./routes/trades";
 import migrationRoutes from "./routes/migrations";
-import twapRoutes      from "./routes/twap";
-import factoryRoutes   from "./routes/factory";
-import statsRoutes     from "./routes/stats";
-import quoteRoutes     from "./routes/quotes";
+import twapRoutes     from "./routes/twap";
+import factoryRoutes  from "./routes/factory";
+import statsRoutes    from "./routes/stats";
+import quoteRoutes    from "./routes/quotes";
+import activityRoutes from "./routes/activity";
+import discoverRoutes from "./routes/discover";
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -96,6 +99,14 @@ v1.get("/", (c) =>
       "GET /api/v1/factory/events":                 "Factory admin/config events",
       // Stats
       "GET /api/v1/stats":                          "Platform-wide aggregated stats",
+      // Activity feed
+      "GET /api/v1/activity":                       "Unified create/buy/sell event feed (paginated)",
+      "GET /api/v1/activity/stream":                "Real-time SSE stream of create/buy/sell events",
+      // Discovery
+      "GET /api/v1/discover/trending":              "Tokens most traded in the last 30 min",
+      "GET /api/v1/discover/new":                   "Freshly created tokens, newest first",
+      "GET /api/v1/discover/bonding":               "Bonding-curve tokens closest to migration",
+      "GET /api/v1/discover/migrated":              "Tokens graduated to PancakeSwap",
       // By actor
       "GET /api/v1/creators/:address/tokens":       "Tokens deployed by a creator",
       "GET /api/v1/traders/:address/trades":        "Trades by a wallet",
@@ -121,7 +132,11 @@ v1.use("/tokens/:address",            limitDetail);
 v1.use("/tokens/:address/migration",  limitDetail);
 v1.use("/twap/latest",                limitDetail);
 
-// 4. Everything else (60 req/min) — paginated lists, leaderboards, etc.
+// 4. Activity SSE stream — long-lived connection, excluded from rate limiting.
+//    Must be registered before the catch-all limitList middleware.
+v1.use("/activity/stream", async (_c, next) => next());
+
+// 5. Everything else (60 req/min) — paginated lists, leaderboards, etc.
 v1.use("/*", limitList);
 
 // ─── Mount route handlers ─────────────────────────────────────────────────────
@@ -131,6 +146,8 @@ v1.route("/trades",     tradeRoutes);
 v1.route("/migrations", migrationRoutes);
 v1.route("/twap",       twapRoutes);
 v1.route("/factory",    factoryRoutes);
+v1.route("/activity",   activityRoutes);
+v1.route("/discover",   discoverRoutes);
 
 // Cross-cutting "by actor" routes reuse the same handlers.
 v1.route("/creators",   tokenRoutes);  // /creators/:addr/tokens
