@@ -46,26 +46,17 @@
   },
   {
     "type": "event",
-    "name": "TWAPUpdated",
-    "inputs": [
-      { "name": "priceAvg",    "type": "uint256", "indexed": false },
-      { "name": "blockNumber", "type": "uint256", "indexed": false }
-    ]
-  },
-  {
-    "type": "event",
     "name": "DefaultParamsUpdated",
     "inputs": [
-      { "name": "virtualBNBUSD",       "type": "uint256", "indexed": false },
-      { "name": "migrationTargetUSD",  "type": "uint256", "indexed": false }
+      { "name": "virtualBNB",      "type": "uint256", "indexed": false },
+      { "name": "migrationTarget", "type": "uint256", "indexed": false }
     ]
   },
   {
     "type": "event",
-    "name": "FeesWithdrawn",
+    "name": "CreationFeeUpdated",
     "inputs": [
-      { "name": "recipient", "type": "address", "indexed": false },
-      { "name": "amount",    "type": "uint256", "indexed": false }
+      { "name": "fee", "type": "uint256", "indexed": false }
     ]
   },
   {
@@ -84,25 +75,53 @@
   },
   {
     "type": "event",
-    "name": "TradeFeeUpdated",
+    "name": "CharityWalletUpdated",
+    "inputs": [
+      { "name": "wallet", "type": "address", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "PlatformFeeUpdated",
     "inputs": [
       { "name": "feeBps", "type": "uint256", "indexed": false }
     ]
   },
   {
     "type": "event",
-    "name": "UsdcPairUpdated",
+    "name": "CharityFeeUpdated",
     "inputs": [
-      { "name": "usdcToken", "type": "address", "indexed": false },
-      { "name": "pair",      "type": "address", "indexed": false },
-      { "name": "isToken0",  "type": "bool",    "indexed": false }
+      { "name": "feeBps", "type": "uint256", "indexed": false }
     ]
   },
   {
     "type": "event",
-    "name": "TwapMaxAgeBlocksUpdated",
+    "name": "ManagerAdded",
     "inputs": [
-      { "name": "blocks", "type": "uint256", "indexed": false }
+      { "name": "manager", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ManagerRemoved",
+    "inputs": [
+      { "name": "manager", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferProposed",
+    "inputs": [
+      { "name": "current",  "type": "address", "indexed": true },
+      { "name": "proposed", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      { "name": "prev", "type": "address", "indexed": true },
+      { "name": "next", "type": "address", "indexed": true }
     ]
   },
   {
@@ -113,7 +132,7 @@
       { "name": "token",    "type": "address" },
       { "name": "amountIn", "type": "uint256" }
     ],
-    "outputs": [{ "name": "", "type": "uint256" }]
+    "outputs": [{ "name": "", "type": "uint256" }, { "name": "", "type": "uint256" }]
   },
   {
     "type": "function",
@@ -123,7 +142,7 @@
       { "name": "token",    "type": "address" },
       { "name": "amountIn", "type": "uint256" }
     ],
-    "outputs": [{ "name": "", "type": "uint256" }]
+    "outputs": [{ "name": "", "type": "uint256" }, { "name": "", "type": "uint256" }]
   },
   {
     "type": "function",
@@ -178,13 +197,6 @@
   },
   {
     "type": "function",
-    "name": "tradeFee",
-    "stateMutability": "view",
-    "inputs": [],
-    "outputs": [{ "name": "", "type": "uint256" }]
-  },
-  {
-    "type": "function",
     "name": "feeRecipient",
     "stateMutability": "view",
     "inputs": [],
@@ -192,25 +204,9 @@
   },
   {
     "type": "function",
-    "name": "accumulatedFees",
+    "name": "totalTokensLaunched",
     "stateMutability": "view",
     "inputs": [],
-    "outputs": [{ "name": "", "type": "uint256" }]
-  },
-  {
-    "type": "function",
-    "name": "twapPriceAvg",
-    "stateMutability": "view",
-    "inputs": [],
-    "outputs": [{ "name": "", "type": "uint256" }]
-  },
-  {
-    "type": "function",
-    "name": "usdToBNB",
-    "stateMutability": "view",
-    "inputs": [
-      { "name": "usdAmount", "type": "uint256" }
-    ],
     "outputs": [{ "name": "", "type": "uint256" }]
   }
 ]

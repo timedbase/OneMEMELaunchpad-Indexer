@@ -9,7 +9,6 @@ import { HealthController }    from "./health.controller";
 import { TokensModule }        from "./modules/tokens/tokens.module";
 import { TradesModule }        from "./modules/trades/trades.module";
 import { MigrationsModule }    from "./modules/migrations/migrations.module";
-import { TwapModule }          from "./modules/twap/twap.module";
 import { FactoryModule }       from "./modules/factory/factory.module";
 import { StatsModule }         from "./modules/stats/stats.module";
 import { QuotesModule }        from "./modules/quotes/quotes.module";
@@ -29,7 +28,6 @@ import {
     TokensModule,
     TradesModule,
     MigrationsModule,
-    TwapModule,
     FactoryModule,
     StatsModule,
     QuotesModule,

@@ -28,30 +28,27 @@ Complete reference of every endpoint with `curl` commands and expected JSON resp
    - [All trades](#51-all-trades)
    - [Trades by wallet](#52-trades-by-wallet)
 6. [Migrations](#6-migrations)
-7. [TWAP Oracle](#7-twap-oracle)
-   - [Latest TWAP](#71-latest-twap)
-   - [TWAP history](#72-twap-history)
-8. [Factory Events](#8-factory-events)
-9. [Creators](#9-creators)
-10. [Activity Feed](#10-activity-feed)
-    - [Paginated feed](#101-paginated-feed)
-    - [Real-time SSE stream](#102-real-time-sse-stream)
-    - [Real-time WebSocket (WSS)](#103-real-time-websocket-wss)
-11. [Discovery](#11-discovery)
-    - [Trending](#111-trending)
-    - [New tokens](#112-new-tokens)
-    - [Bonding](#113-bonding)
-    - [Migrated](#114-migrated)
-12. [Leaderboard](#12-leaderboard)
-    - [Traders by volume](#121-traders-by-volume)
-13. [Metadata Upload (IPFS)](#13-metadata-upload-ipfs)
-    - [Full flow](#131-full-flow)
-    - [Upload](#132-upload)
-    - [Frontend integration](#133-frontend-integration)
-14. [HTTPS / WSS Setup](#14-https--wss-setup)
-15. [Rate Limit Response](#15-rate-limit-response)
-16. [Origin Restriction (403)](#16-origin-restriction-403)
-17. [Error Shapes](#17-error-shapes)
+7. [Factory Events](#7-factory-events)
+8. [Creators](#8-creators)
+9. [Activity Feed](#9-activity-feed)
+   - [Paginated feed](#91-paginated-feed)
+   - [Real-time SSE stream](#92-real-time-sse-stream)
+   - [Real-time WebSocket (WSS)](#93-real-time-websocket-wss)
+10. [Discovery](#10-discovery)
+    - [Trending](#101-trending)
+    - [New tokens](#102-new-tokens)
+    - [Bonding](#103-bonding)
+    - [Migrated](#104-migrated)
+11. [Leaderboard](#11-leaderboard)
+    - [Traders by volume](#111-traders-by-volume)
+12. [Metadata Upload (IPFS)](#12-metadata-upload-ipfs)
+    - [Full flow](#121-full-flow)
+    - [Upload](#122-upload)
+    - [Frontend integration](#123-frontend-integration)
+13. [HTTPS / WSS Setup](#13-https--wss-setup)
+14. [Rate Limit Response](#14-rate-limit-response)
+15. [Origin Restriction (403)](#15-origin-restriction-403)
+16. [Error Shapes](#16-error-shapes)
 
 ---
 
@@ -557,41 +554,7 @@ curl "https://localhost:3001/api/v1/migrations?orderBy=liquidityBNB&limit=10"
 
 ---
 
-## 7. TWAP Oracle
-
-### 7.1 Latest TWAP
-
-```bash
-curl "https://localhost:3001/api/v1/twap/latest"
-```
-
-**Response `200 OK`**
-
-```json
-{
-  "data": {
-    "id":               "0xtxhash...-0",
-    "priceAvg":         "310000000000000000",
-    "priceBlockNumber": "42000000",
-    "blockNumber":      "42001000",
-    "timestamp":        1741823900
-  }
-}
-```
-
----
-
-### 7.2 TWAP history
-
-```bash
-curl "https://localhost:3001/api/v1/twap?limit=5"
-```
-
-**Query params:** `from`, `to`, `page`, `limit`
-
----
-
-## 8. Factory Events
+## 7. Factory Events
 
 Admin and configuration-change events emitted by the `LaunchpadFactory`.
 
@@ -599,15 +562,15 @@ Admin and configuration-change events emitted by the `LaunchpadFactory`.
 # All factory events
 curl "https://localhost:3001/api/v1/factory/events"
 
-# Fee withdrawals only
-curl "https://localhost:3001/api/v1/factory/events?type=FeesWithdrawn"
+# Platform fee updates only
+curl "https://localhost:3001/api/v1/factory/events?type=PlatformFeeUpdated"
 ```
 
 **Query params:**
 
 | Param | Values |
 |---|---|
-| `type` | `DefaultParamsUpdated` \| `FeesWithdrawn` \| `RouterUpdated` \| `FeeRecipientUpdated` \| `TradeFeeUpdated` \| `UsdcPairUpdated` \| `TwapMaxAgeBlocksUpdated` |
+| `type` | `DefaultParamsUpdated` \| `CreationFeeUpdated` \| `RouterUpdated` \| `FeeRecipientUpdated` \| `CharityWalletUpdated` \| `PlatformFeeUpdated` \| `CharityFeeUpdated` \| `ManagerAdded` \| `ManagerRemoved` \| `OwnershipTransferProposed` \| `OwnershipTransferred` |
 | `from`, `to` | Unix timestamp bounds |
 | `page`, `limit` | Pagination |
 
@@ -617,22 +580,21 @@ curl "https://localhost:3001/api/v1/factory/events?type=FeesWithdrawn"
 {
   "data": [
     {
-      "id":        "FeesWithdrawn-0xtxhash...-0",
-      "eventType": "FeesWithdrawn",
-      "recipient": "0xfeerecipient...",
-      "amount":    "50000000000000000000",
+      "id":          "PlatformFeeUpdated-0xtxhash...-0",
+      "eventType":   "PlatformFeeUpdated",
+      "feeBps":      "100",
       "blockNumber": "42003000",
-      "txHash":    "0xtxhash...",
-      "timestamp": 1741840000
+      "txHash":      "0xtxhash...",
+      "timestamp":   1741840000
     }
   ],
-  "pagination": { "page": 1, "limit": 20, "total": 7, "pages": 1, "hasMore": false }
+  "pagination": { "page": 1, "limit": 20, "total": 4, "pages": 1, "hasMore": false }
 }
 ```
 
 ---
 
-## 9. Creators
+## 8. Creators
 
 Tokens deployed by a specific creator wallet.
 
@@ -644,11 +606,11 @@ curl "https://localhost:3001/api/v1/creators/0xcreator.../tokens?limit=10"
 
 ---
 
-## 10. Activity Feed
+## 9. Activity Feed
 
 Unified stream of create/buy/sell events across all tokens. Restricted to `ALLOWED_ORIGINS`.
 
-### 10.1 Paginated feed
+### 9.1 Paginated feed
 
 ```bash
 curl "https://localhost:3001/api/v1/activity" \
@@ -697,7 +659,7 @@ curl "https://localhost:3001/api/v1/activity?token=0xabc...1111" \
 
 ---
 
-### 10.2 Real-time SSE stream
+### 9.2 Real-time SSE stream
 
 Pushes new events as they are indexed (2 s DB poll, 15 s keepalive). Long-lived connection — no rate limit.
 
@@ -732,7 +694,7 @@ data:
 
 ---
 
-### 10.3 Real-time WebSocket (WSS)
+### 9.3 Real-time WebSocket (WSS)
 
 Same data as SSE but over a persistent WebSocket connection. Automatically WSS when the server has TLS configured.
 
@@ -774,11 +736,11 @@ ws.onclose   = ()  => console.log("Disconnected");
 
 ---
 
-## 11. Discovery
+## 10. Discovery
 
 All discovery endpoints are restricted to `ALLOWED_ORIGINS` and return paginated token lists. Rate limit: **60 req/min**.
 
-### 11.1 Trending
+### 10.1 Trending
 
 Tokens ranked by trade count in the last 30 minutes (configurable).
 
@@ -820,7 +782,7 @@ curl "https://localhost:3001/api/v1/discover/trending?window=300" \
 
 ---
 
-### 11.2 New tokens
+### 10.2 New tokens
 
 Freshly launched, non-migrated tokens newest first.
 
@@ -837,7 +799,7 @@ curl "https://localhost:3001/api/v1/discover/new?type=Tax" \
 
 ---
 
-### 11.3 Bonding
+### 10.3 Bonding
 
 Active bonding-curve tokens sorted by `raisedBNB` descending — closest to migrating first.
 
@@ -861,7 +823,7 @@ _(24 h window)_
 
 ---
 
-### 11.4 Migrated
+### 10.4 Migrated
 
 Tokens graduated to PancakeSwap V2, joined with migration data.
 
@@ -887,11 +849,11 @@ curl "https://localhost:3001/api/v1/discover/migrated?orderBy=liquidityBNB&limit
 
 ---
 
-## 12. Leaderboard
+## 11. Leaderboard
 
 Traders ranked by total BNB trading volume (buys + sells). No origin restriction.
 
-### 12.1 Traders by volume
+### 11.1 Traders by volume
 
 ```bash
 # All-time leaderboard (default)
@@ -947,13 +909,13 @@ curl "https://localhost:3001/api/v1/leaderboard/traders?period=30d"
 
 ---
 
-## 13. Metadata Upload (IPFS)
+## 12. Metadata Upload (IPFS)
 
 Upload token metadata to IPFS via Pinata. Returns an IPFS URI the token creator passes directly to `setMetaURI()` on their token contract.
 
 **Requires** `PINATA_JWT` in `.env`.
 
-### 13.1 Full flow
+### 12.1 Full flow
 
 ```
 Token creator
@@ -967,7 +929,7 @@ Token creator
 
 ---
 
-### 13.2 Upload
+### 12.2 Upload
 
 ```bash
 curl -X POST https://localhost:3001/api/v1/metadata/upload \
@@ -1015,7 +977,7 @@ curl -X POST https://localhost:3001/api/v1/metadata/upload \
 
 ---
 
-### 13.3 Frontend integration
+### 12.3 Frontend integration
 
 ```js
 // React / Next.js example
@@ -1064,7 +1026,7 @@ async function setTokenMetadata(tokenContract, metaURI) {
 
 ---
 
-## 14. HTTPS / WSS Setup
+## 13. HTTPS / WSS Setup
 
 The API detects TLS at startup based on two environment variables:
 
@@ -1095,7 +1057,7 @@ curl -k https://localhost:3001/health
 
 ---
 
-## 15. Rate Limit Response
+## 14. Rate Limit Response
 
 When a rate limit is exceeded the API returns **`429 Too Many Requests`**:
 
@@ -1129,7 +1091,7 @@ Limits are keyed by **client IP only** (not IP+path). Rotating token addresses d
 
 ---
 
-## 16. Origin Restriction (403)
+## 15. Origin Restriction (403)
 
 Endpoints restricted to the launchpad UI return `403 Forbidden` when the `Origin` header is not in `ALLOWED_ORIGINS`:
 
@@ -1171,7 +1133,7 @@ In development (`NODE_ENV=development`), all `http://localhost:*` and `http://12
 
 ---
 
-## 17. Error Shapes
+## 16. Error Shapes
 
 All errors follow the NestJS standard exception shape:
 

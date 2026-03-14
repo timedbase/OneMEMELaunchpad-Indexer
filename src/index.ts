@@ -6,10 +6,11 @@
  *
  * Events handled:
  *   Token lifecycle:  TokenCreated, TokenBought, TokenSold, TokenMigrated
- *   Oracle:           TWAPUpdated
- *   Factory admin:    DefaultParamsUpdated, FeesWithdrawn, RouterUpdated,
- *                     FeeRecipientUpdated, TradeFeeUpdated, UsdcPairUpdated,
- *                     TwapMaxAgeBlocksUpdated
+ *   Factory admin:    DefaultParamsUpdated, CreationFeeUpdated, RouterUpdated,
+ *                     FeeRecipientUpdated, CharityWalletUpdated,
+ *                     PlatformFeeUpdated, CharityFeeUpdated,
+ *                     ManagerAdded, ManagerRemoved,
+ *                     OwnershipTransferProposed, OwnershipTransferred
  */
 
 import { ponder } from "ponder:registry";
@@ -164,60 +165,39 @@ ponder.on("LaunchpadFactory:TokenMigrated", async ({ event, context }) => {
     .set({ migrated: true, pairAddress: pair });
 });
 
-// ─── TWAP Oracle ──────────────────────────────────────────────────────────────
-
-/**
- * Emitted whenever the factory's 30-minute TWAP oracle is refreshed.
- *
- * The price average is used internally to convert USD-denominated parameters
- * (creation fee, virtual BNB, migration target) to BNB at runtime.
- */
-ponder.on("LaunchpadFactory:TWAPUpdated", async ({ event, context }) => {
-  const { priceAvg, blockNumber: priceBlockNumber } = event.args;
-
-  await context.db.insert(schema.twapUpdate).values({
-    id:               `${event.transaction.hash}-${event.log.logIndex}`,
-    priceAvg,
-    priceBlockNumber,
-    blockNumber:      event.block.number,
-    timestamp:        Number(event.block.timestamp),
-  });
-});
-
 // ─── Factory Admin Events ─────────────────────────────────────────────────────
 
 /**
  * Emitted when the factory owner updates the default virtual BNB or migration
- * target USD values applied to newly created tokens.
+ * target values applied to newly created tokens.
  */
 ponder.on("LaunchpadFactory:DefaultParamsUpdated", async ({ event, context }) => {
-  const { virtualBNBUSD, migrationTargetUSD } = event.args;
+  const { virtualBNB, migrationTarget } = event.args;
 
   await context.db.insert(schema.factoryEvent).values({
-    id:                `DefaultParamsUpdated-${event.transaction.hash}-${event.log.logIndex}`,
-    eventType:         "DefaultParamsUpdated",
-    blockNumber:       event.block.number,
-    txHash:            event.transaction.hash,
-    timestamp:         Number(event.block.timestamp),
-    virtualBNBUSD,
-    migrationTargetUSD,
+    id:              `DefaultParamsUpdated-${event.transaction.hash}-${event.log.logIndex}`,
+    eventType:       "DefaultParamsUpdated",
+    blockNumber:     event.block.number,
+    txHash:          event.transaction.hash,
+    timestamp:       Number(event.block.timestamp),
+    virtualBNB,
+    migrationTarget,
   });
 });
 
 /**
- * Emitted when the factory owner withdraws accumulated platform fees.
+ * Emitted when the fixed BNB fee charged per token launch is updated.
  */
-ponder.on("LaunchpadFactory:FeesWithdrawn", async ({ event, context }) => {
-  const { recipient, amount } = event.args;
+ponder.on("LaunchpadFactory:CreationFeeUpdated", async ({ event, context }) => {
+  const { fee } = event.args;
 
   await context.db.insert(schema.factoryEvent).values({
-    id:               `FeesWithdrawn-${event.transaction.hash}-${event.log.logIndex}`,
-    eventType:        "FeesWithdrawn",
-    blockNumber:      event.block.number,
-    txHash:           event.transaction.hash,
-    timestamp:        Number(event.block.timestamp),
-    withdrawRecipient: recipient,
-    withdrawAmount:    amount,
+    id:          `CreationFeeUpdated-${event.transaction.hash}-${event.log.logIndex}`,
+    eventType:   "CreationFeeUpdated",
+    blockNumber: event.block.number,
+    txHash:      event.transaction.hash,
+    timestamp:   Number(event.block.timestamp),
+    creationFee: fee,
   });
 });
 
@@ -254,14 +234,31 @@ ponder.on("LaunchpadFactory:FeeRecipientUpdated", async ({ event, context }) => 
 });
 
 /**
- * Emitted when the bonding-curve trade fee (in basis points) is updated.
+ * Emitted when the charity wallet address is updated.
  */
-ponder.on("LaunchpadFactory:TradeFeeUpdated", async ({ event, context }) => {
+ponder.on("LaunchpadFactory:CharityWalletUpdated", async ({ event, context }) => {
+  const { wallet } = event.args;
+
+  await context.db.insert(schema.factoryEvent).values({
+    id:            `CharityWalletUpdated-${event.transaction.hash}-${event.log.logIndex}`,
+    eventType:     "CharityWalletUpdated",
+    blockNumber:   event.block.number,
+    txHash:        event.transaction.hash,
+    timestamp:     Number(event.block.timestamp),
+    charityWallet: wallet,
+  });
+});
+
+/**
+ * Emitted when the platform fee (in basis points) charged on bonding-curve
+ * trades is updated. Max 250 BPS (2.5%).
+ */
+ponder.on("LaunchpadFactory:PlatformFeeUpdated", async ({ event, context }) => {
   const { feeBps } = event.args;
 
   await context.db.insert(schema.factoryEvent).values({
-    id:          `TradeFeeUpdated-${event.transaction.hash}-${event.log.logIndex}`,
-    eventType:   "TradeFeeUpdated",
+    id:          `PlatformFeeUpdated-${event.transaction.hash}-${event.log.logIndex}`,
+    eventType:   "PlatformFeeUpdated",
     blockNumber: event.block.number,
     txHash:      event.transaction.hash,
     timestamp:   Number(event.block.timestamp),
@@ -270,36 +267,85 @@ ponder.on("LaunchpadFactory:TradeFeeUpdated", async ({ event, context }) => {
 });
 
 /**
- * Emitted when the USDC/WBNB pair used by the TWAP oracle is reconfigured.
+ * Emitted when the charity fee (in basis points) charged on bonding-curve
+ * trades is updated. Max 250 BPS (2.5%).
  */
-ponder.on("LaunchpadFactory:UsdcPairUpdated", async ({ event, context }) => {
-  const { usdcToken, pair, isToken0 } = event.args;
+ponder.on("LaunchpadFactory:CharityFeeUpdated", async ({ event, context }) => {
+  const { feeBps } = event.args;
 
   await context.db.insert(schema.factoryEvent).values({
-    id:           `UsdcPairUpdated-${event.transaction.hash}-${event.log.logIndex}`,
-    eventType:    "UsdcPairUpdated",
-    blockNumber:  event.block.number,
-    txHash:       event.transaction.hash,
-    timestamp:    Number(event.block.timestamp),
-    usdcToken,
-    usdcPair:     pair,
-    usdcIsToken0: isToken0,
+    id:          `CharityFeeUpdated-${event.transaction.hash}-${event.log.logIndex}`,
+    eventType:   "CharityFeeUpdated",
+    blockNumber: event.block.number,
+    txHash:      event.transaction.hash,
+    timestamp:   Number(event.block.timestamp),
+    feeBps,
   });
 });
 
 /**
- * Emitted when the maximum age (in blocks) before a TWAP reading is considered
- * stale is updated.
+ * Emitted when a new manager is granted elevated permissions on the factory.
  */
-ponder.on("LaunchpadFactory:TwapMaxAgeBlocksUpdated", async ({ event, context }) => {
-  const { blocks } = event.args;
+ponder.on("LaunchpadFactory:ManagerAdded", async ({ event, context }) => {
+  const { manager } = event.args;
 
   await context.db.insert(schema.factoryEvent).values({
-    id:               `TwapMaxAgeBlocksUpdated-${event.transaction.hash}-${event.log.logIndex}`,
-    eventType:        "TwapMaxAgeBlocksUpdated",
-    blockNumber:      event.block.number,
-    txHash:           event.transaction.hash,
-    timestamp:        Number(event.block.timestamp),
-    twapMaxAgeBlocks: blocks,
+    id:          `ManagerAdded-${event.transaction.hash}-${event.log.logIndex}`,
+    eventType:   "ManagerAdded",
+    blockNumber: event.block.number,
+    txHash:      event.transaction.hash,
+    timestamp:   Number(event.block.timestamp),
+    manager,
+  });
+});
+
+/**
+ * Emitted when a manager's elevated permissions are revoked.
+ */
+ponder.on("LaunchpadFactory:ManagerRemoved", async ({ event, context }) => {
+  const { manager } = event.args;
+
+  await context.db.insert(schema.factoryEvent).values({
+    id:          `ManagerRemoved-${event.transaction.hash}-${event.log.logIndex}`,
+    eventType:   "ManagerRemoved",
+    blockNumber: event.block.number,
+    txHash:      event.transaction.hash,
+    timestamp:   Number(event.block.timestamp),
+    manager,
+  });
+});
+
+/**
+ * Emitted when the current owner nominates a new owner (two-step transfer).
+ * The proposed owner must call acceptOwnership() to complete the transfer.
+ */
+ponder.on("LaunchpadFactory:OwnershipTransferProposed", async ({ event, context }) => {
+  const { current, proposed } = event.args;
+
+  await context.db.insert(schema.factoryEvent).values({
+    id:          `OwnershipTransferProposed-${event.transaction.hash}-${event.log.logIndex}`,
+    eventType:   "OwnershipTransferProposed",
+    blockNumber: event.block.number,
+    txHash:      event.transaction.hash,
+    timestamp:   Number(event.block.timestamp),
+    prevOwner:   current,
+    nextOwner:   proposed,
+  });
+});
+
+/**
+ * Emitted when the proposed owner accepts and ownership transfer is complete.
+ */
+ponder.on("LaunchpadFactory:OwnershipTransferred", async ({ event, context }) => {
+  const { prev, next } = event.args;
+
+  await context.db.insert(schema.factoryEvent).values({
+    id:          `OwnershipTransferred-${event.transaction.hash}-${event.log.logIndex}`,
+    eventType:   "OwnershipTransferred",
+    blockNumber: event.block.number,
+    txHash:      event.transaction.hash,
+    timestamp:   Number(event.block.timestamp),
+    prevOwner:   prev,
+    nextOwner:   next,
   });
 });

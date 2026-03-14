@@ -63,8 +63,10 @@ export const token = onchainTable(
     raisedBNB: t.bigint().notNull(),
   }),
   (table) => ({
-    creatorIdx: index().on(table.creator),
-    migratedIdx: index().on(table.migrated),
+    creatorIdx:   index().on(table.creator),
+    migratedIdx:  index().on(table.migrated),
+    volumeBNBIdx: index().on(table.volumeBNB),
+    raisedBNBIdx: index().on(table.raisedBNB),
   })
 );
 
@@ -117,10 +119,10 @@ export const trade = onchainTable(
     timestamp: t.integer().notNull(),
   }),
   (table) => ({
-    tokenIdx:      index().on(table.token),
-    traderIdx:     index().on(table.trader),
-    timestampIdx:  index().on(table.timestamp),
-    tradeTypeIdx:  index().on(table.tradeType),
+    tokenIdx:     index().on(table.token),
+    traderIdx:    index().on(table.trader),
+    timestampIdx: index().on(table.timestamp),
+    tradeTypeIdx: index().on(table.tradeType),
   })
 );
 
@@ -160,39 +162,6 @@ export const migration = onchainTable(
   })
 );
 
-// ─── TWAP Update ─────────────────────────────────────────────────────────────
-// Records every oracle update emitted by the factory's TWAP mechanism.
-// Useful for reconstructing the historical BNB/USD price used by the launchpad.
-
-export const twapUpdate = onchainTable(
-  "twap_update",
-  (t) => ({
-    /** "{txHash}-{logIndex}" – globally unique. */
-    id: t.text().primaryKey(),
-
-    /**
-     * 30-minute time-weighted average BNB price expressed in the USDC
-     * pair's fixed-point representation (contract-specific scale).
-     */
-    priceAvg: t.bigint().notNull(),
-
-    /**
-     * The block number stored inside the TWAPUpdated event args
-     * (the block the TWAP observation was anchored to).
-     */
-    priceBlockNumber: t.bigint().notNull(),
-
-    /** BSC block number where the TWAPUpdated event was emitted. */
-    blockNumber: t.bigint().notNull(),
-
-    /** Unix timestamp (seconds) of the block. */
-    timestamp: t.integer().notNull(),
-  }),
-  (table) => ({
-    blockNumberIdx: index().on(table.blockNumber),
-  })
-);
-
 // ─── Factory Event ────────────────────────────────────────────────────────────
 // Captures all administrative / config-change events emitted by the factory.
 // Each row is one event, with optional columns populated depending on event type.
@@ -205,9 +174,11 @@ export const factoryEvent = onchainTable(
 
     /**
      * Discriminator for the event type:
-     *   "DefaultParamsUpdated" | "FeesWithdrawn" | "RouterUpdated" |
-     *   "FeeRecipientUpdated"  | "TradeFeeUpdated" | "UsdcPairUpdated" |
-     *   "TwapMaxAgeBlocksUpdated"
+     *   "DefaultParamsUpdated" | "CreationFeeUpdated" | "RouterUpdated"  |
+     *   "FeeRecipientUpdated"  | "CharityWalletUpdated"                  |
+     *   "PlatformFeeUpdated"   | "CharityFeeUpdated"                     |
+     *   "ManagerAdded"         | "ManagerRemoved"                        |
+     *   "OwnershipTransferProposed" | "OwnershipTransferred"
      */
     eventType: t.text().notNull(),
 
@@ -221,40 +192,40 @@ export const factoryEvent = onchainTable(
     timestamp: t.integer().notNull(),
 
     // ── DefaultParamsUpdated ──────────────────────────────────────────────────
-    /** New default virtual BNB expressed in USD (18 decimals). */
-    virtualBNBUSD: t.bigint(),
-    /** New default migration target expressed in USD (18 decimals). */
-    migrationTargetUSD: t.bigint(),
+    /** New default virtual BNB (wei). */
+    virtualBNB: t.bigint(),
+    /** New default migration target (wei). */
+    migrationTarget: t.bigint(),
+
+    // ── CreationFeeUpdated ────────────────────────────────────────────────────
+    /** New fixed BNB fee charged per token launch (wei). */
+    creationFee: t.bigint(),
 
     // ── RouterUpdated ─────────────────────────────────────────────────────────
     /** New PancakeSwap router address. */
     router: t.hex(),
 
     // ── FeeRecipientUpdated ───────────────────────────────────────────────────
-    /** New fee recipient address. */
+    /** New platform fee recipient address. */
     feeRecipient: t.hex(),
 
-    // ── TradeFeeUpdated ───────────────────────────────────────────────────────
-    /** New trade fee in basis points (e.g. 100 = 1%). */
+    // ── CharityWalletUpdated ──────────────────────────────────────────────────
+    /** New charity wallet address. */
+    charityWallet: t.hex(),
+
+    // ── PlatformFeeUpdated / CharityFeeUpdated ────────────────────────────────
+    /** New fee in basis points (e.g. 100 = 1%). */
     feeBps: t.bigint(),
 
-    // ── UsdcPairUpdated ───────────────────────────────────────────────────────
-    /** New USDC token address used by the TWAP oracle. */
-    usdcToken: t.hex(),
-    /** New USDC/WBNB pair address used by the TWAP oracle. */
-    usdcPair: t.hex(),
-    /** Whether usdcToken is token0 in the pair. */
-    usdcIsToken0: t.boolean(),
+    // ── ManagerAdded / ManagerRemoved ─────────────────────────────────────────
+    /** Manager address that was added or removed. */
+    manager: t.hex(),
 
-    // ── TwapMaxAgeBlocksUpdated ───────────────────────────────────────────────
-    /** New maximum age (in blocks) before TWAP is considered stale. */
-    twapMaxAgeBlocks: t.bigint(),
-
-    // ── FeesWithdrawn ─────────────────────────────────────────────────────────
-    /** Address that received the withdrawn fees. */
-    withdrawRecipient: t.hex(),
-    /** Amount of BNB withdrawn (wei). */
-    withdrawAmount: t.bigint(),
+    // ── OwnershipTransferProposed / OwnershipTransferred ──────────────────────
+    /** Previous / current owner address. */
+    prevOwner: t.hex(),
+    /** Proposed / new owner address. */
+    nextOwner: t.hex(),
   }),
   (table) => ({
     eventTypeIdx: index().on(table.eventType),
