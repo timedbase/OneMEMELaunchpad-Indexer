@@ -21,7 +21,7 @@ export const token = onchainTable(
     /** Address that called createToken / createTT / createRFL. */
     creator: t.hex().notNull(),
 
-    /** Total supply minted at launch (18-decimal, one of ONE/THOUSAND/MILLION/BILLION). */
+    /** Total supply minted at launch (18-decimal). */
     totalSupply: t.bigint().notNull(),
 
     /** Whether the antibot penalty was enabled at launch. */
@@ -52,7 +52,6 @@ export const token = onchainTable(
 
     /**
      * Total BNB traded through the bonding curve (buys + sells, wei).
-     * Gives a sense of overall activity/liquidity before migration.
      */
     volumeBNB: t.bigint().notNull(),
 
@@ -159,75 +158,5 @@ export const migration = onchainTable(
   }),
   (table) => ({
     pairIdx: index().on(table.pair),
-  })
-);
-
-// ─── Factory Event ────────────────────────────────────────────────────────────
-// Captures all administrative / config-change events emitted by the factory.
-// Each row is one event, with optional columns populated depending on event type.
-
-export const factoryEvent = onchainTable(
-  "factory_event",
-  (t) => ({
-    /** "{EventType}-{txHash}-{logIndex}" – globally unique. */
-    id: t.text().primaryKey(),
-
-    /**
-     * Discriminator for the event type:
-     *   "DefaultParamsUpdated" | "CreationFeeUpdated" | "RouterUpdated"  |
-     *   "FeeRecipientUpdated"  | "CharityWalletUpdated"                  |
-     *   "PlatformFeeUpdated"   | "CharityFeeUpdated"                     |
-     *   "ManagerAdded"         | "ManagerRemoved"                        |
-     *   "OwnershipTransferProposed" | "OwnershipTransferred"
-     */
-    eventType: t.text().notNull(),
-
-    /** BSC block number. */
-    blockNumber: t.bigint().notNull(),
-
-    /** Transaction hash. */
-    txHash: t.hex().notNull(),
-
-    /** Unix timestamp (seconds) of the block. */
-    timestamp: t.integer().notNull(),
-
-    // ── DefaultParamsUpdated ──────────────────────────────────────────────────
-    /** New default virtual BNB (wei). */
-    virtualBNB: t.bigint(),
-    /** New default migration target (wei). */
-    migrationTarget: t.bigint(),
-
-    // ── CreationFeeUpdated ────────────────────────────────────────────────────
-    /** New fixed BNB fee charged per token launch (wei). */
-    creationFee: t.bigint(),
-
-    // ── RouterUpdated ─────────────────────────────────────────────────────────
-    /** New PancakeSwap router address. */
-    router: t.hex(),
-
-    // ── FeeRecipientUpdated ───────────────────────────────────────────────────
-    /** New platform fee recipient address. */
-    feeRecipient: t.hex(),
-
-    // ── CharityWalletUpdated ──────────────────────────────────────────────────
-    /** New charity wallet address. */
-    charityWallet: t.hex(),
-
-    // ── PlatformFeeUpdated / CharityFeeUpdated ────────────────────────────────
-    /** New fee in basis points (e.g. 100 = 1%). */
-    feeBps: t.bigint(),
-
-    // ── ManagerAdded / ManagerRemoved ─────────────────────────────────────────
-    /** Manager address that was added or removed. */
-    manager: t.hex(),
-
-    // ── OwnershipTransferProposed / OwnershipTransferred ──────────────────────
-    /** Previous / current owner address. */
-    prevOwner: t.hex(),
-    /** Proposed / new owner address. */
-    nextOwner: t.hex(),
-  }),
-  (table) => ({
-    eventTypeIdx: index().on(table.eventType),
   })
 );

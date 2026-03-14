@@ -33,25 +33,13 @@ The **OneMEME Launchpad Indexer** listens to all events emitted by the `Launchpa
 | `TokenBought` | `trade` | Bonding-curve buy; includes antibot burn amount |
 | `TokenSold` | `trade` | Bonding-curve sell |
 | `TokenMigrated` | `migration` | Token graduates to PancakeSwap V2 |
-| `DefaultParamsUpdated` | `factory_event` | Default virtual-BNB / migration-target changed |
-| `CreationFeeUpdated` | `factory_event` | Fixed BNB launch fee changed |
-| `RouterUpdated` | `factory_event` | PancakeSwap router address changed |
-| `FeeRecipientUpdated` | `factory_event` | Platform fee recipient address changed |
-| `CharityWalletUpdated` | `factory_event` | Charity wallet address changed |
-| `PlatformFeeUpdated` | `factory_event` | Platform trade fee (bps) changed |
-| `CharityFeeUpdated` | `factory_event` | Charity trade fee (bps) changed |
-| `ManagerAdded` | `factory_event` | Manager role granted |
-| `ManagerRemoved` | `factory_event` | Manager role revoked |
-| `OwnershipTransferProposed` | `factory_event` | New owner nominated (two-step transfer) |
-| `OwnershipTransferred` | `factory_event` | Ownership transfer accepted |
 
 ### Database Schema
 
 ```
-token           — one row per deployed meme token (+ running buy/sell stats)
-trade           — one row per bonding-curve buy or sell transaction
-migration       — one row per migrated token (PancakeSwap pair + liquidity)
-factory_event   — one row per admin / config-change event
+token      — one row per deployed meme token (+ running buy/sell stats)
+trade      — one row per bonding-curve buy or sell transaction
+migration  — one row per migrated token (PancakeSwap pair + liquidity)
 ```
 
 ---
@@ -298,14 +286,13 @@ Requests from other origins receive `403 Forbidden`. In development (`NODE_ENV=d
 | `GET` | `/api/v1/tokens/:address/quote/buy` | Simulate BNB → tokens (price impact + slippage) |
 | `GET` | `/api/v1/tokens/:address/quote/sell` | Simulate tokens → BNB (price impact + slippage) |
 
-#### Trades / Migrations / Factory
+#### Trades & Migrations
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/v1/trades` | All trades (filterable by token, trader, type) |
 | `GET` | `/api/v1/traders/:address/trades` | All trades by a wallet |
 | `GET` | `/api/v1/migrations` | All PancakeSwap migrations |
-| `GET` | `/api/v1/factory/events` | Factory admin / config-change events |
 
 #### Activity Feed _(UI only)_
 
@@ -346,7 +333,7 @@ Requires `PINATA_JWT` in `.env`. Accepts `multipart/form-data`. Fields: `image` 
 | `limit` | int | Items per page (default `20`, max `100`) |
 | `orderBy` | string | Column to sort by (endpoint-specific) |
 | `orderDir` | `asc`\|`desc` | Sort direction (default `desc`) |
-| `from` | int | Unix timestamp lower bound (trades / factory) |
+| `from` | int | Unix timestamp lower bound (trades / migrations) |
 | `to` | int | Unix timestamp upper bound |
 
 ### WebSocket Activity Stream
@@ -395,7 +382,6 @@ OneMEMELaunchpad-Indexer/
 │           ├── tokens/              # /tokens, /tokens/:addr/*, /creators/:addr/tokens
 │           ├── trades/              # /trades, /traders/:addr/trades
 │           ├── migrations/          # /migrations
-│           ├── factory/             # /factory/events
 │           ├── stats/               # /stats
 │           ├── quotes/              # /tokens/:addr/quote/price|buy|sell (live RPC)
 │           ├── activity/            # /activity, /activity/stream (SSE), /activity/ws (WSS)
