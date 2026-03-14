@@ -16,6 +16,7 @@ import { QuotesModule }        from "./modules/quotes/quotes.module";
 import { ActivityModule }      from "./modules/activity/activity.module";
 import { DiscoverModule }      from "./modules/discover/discover.module";
 import { UploadModule }        from "./modules/upload/upload.module";
+import { LeaderboardModule }   from "./modules/leaderboard/leaderboard.module";
 
 import {
   QuoteRateLimitMiddleware,
@@ -35,6 +36,7 @@ import {
     ActivityModule,
     DiscoverModule,
     UploadModule,
+    LeaderboardModule,
   ],
   controllers: [HealthController],
 })

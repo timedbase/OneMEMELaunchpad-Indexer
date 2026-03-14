@@ -321,7 +321,13 @@ Requests from other origins receive `403 Forbidden`. In development (`NODE_ENV=d
 |---|---|---|
 | `POST` | `/api/v1/metadata/upload` | Upload image + metadata JSON to IPFS — returns `metaURI` for `setMetaURI()` |
 
-Requires `PINATA_JWT` in `.env`. Accepts `multipart/form-data` with an optional image file plus fields: `name`, `description`, `website`, `twitter`, `telegram`, `discord`, `github`, `medium`.
+Requires `PINATA_JWT` in `.env`. Accepts `multipart/form-data`. Fields: `image` (required, max 3 MB), `name` (required), `symbol`, `description`, `website`, `x`, `telegram`.
+
+#### Leaderboard
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/leaderboard/traders` | Traders ranked by BNB volume — `?period=alltime\|1d\|7d\|30d` |
 
 #### Discovery _(UI only)_
 
@@ -395,6 +401,7 @@ OneMEMELaunchpad-Indexer/
 │           ├── quotes/              # /tokens/:addr/quote/price|buy|sell (live RPC)
 │           ├── activity/            # /activity, /activity/stream (SSE), /activity/ws (WSS)
 │           ├── discover/            # /discover/trending|new|bonding|migrated
+│           ├── leaderboard/         # /leaderboard/traders (alltime|1d|7d|30d)
 │           └── upload/              # POST /metadata/upload — IPFS via Pinata
 ├── ponder.config.ts                 # Network, contract, and transport configuration
 ├── ponder.schema.ts                 # Database schema (onchainTable definitions)

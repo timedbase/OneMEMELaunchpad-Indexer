@@ -42,15 +42,16 @@ Complete reference of every endpoint with `curl` commands and expected JSON resp
     - [New tokens](#112-new-tokens)
     - [Bonding](#113-bonding)
     - [Migrated](#114-migrated)
-12. [Metadata Upload (IPFS)](#12-metadata-upload-ipfs)
-    - [Full flow](#121-full-flow)
-    - [Upload with image](#122-upload-with-image)
-    - [Upload JSON-only (no image)](#123-upload-json-only-no-image)
-    - [Frontend integration](#124-frontend-integration)
-13. [HTTPS / WSS Setup](#13-https--wss-setup)
-14. [Rate Limit Response](#14-rate-limit-response)
-15. [Origin Restriction (403)](#15-origin-restriction-403)
-16. [Error Shapes](#16-error-shapes)
+12. [Leaderboard](#12-leaderboard)
+    - [Traders by volume](#121-traders-by-volume)
+13. [Metadata Upload (IPFS)](#13-metadata-upload-ipfs)
+    - [Full flow](#131-full-flow)
+    - [Upload](#132-upload)
+    - [Frontend integration](#133-frontend-integration)
+14. [HTTPS / WSS Setup](#14-https--wss-setup)
+15. [Rate Limit Response](#15-rate-limit-response)
+16. [Origin Restriction (403)](#16-origin-restriction-403)
+17. [Error Shapes](#17-error-shapes)
 
 ---
 
@@ -886,13 +887,73 @@ curl "https://localhost:3001/api/v1/discover/migrated?orderBy=liquidityBNB&limit
 
 ---
 
-## 12. Metadata Upload (IPFS)
+## 12. Leaderboard
+
+Traders ranked by total BNB trading volume (buys + sells). No origin restriction.
+
+### 12.1 Traders by volume
+
+```bash
+# All-time leaderboard (default)
+curl "https://localhost:3001/api/v1/leaderboard/traders"
+
+# Last 24 hours
+curl "https://localhost:3001/api/v1/leaderboard/traders?period=1d"
+
+# Last 7 days
+curl "https://localhost:3001/api/v1/leaderboard/traders?period=7d"
+
+# Last 30 days
+curl "https://localhost:3001/api/v1/leaderboard/traders?period=30d"
+```
+
+**Query params:**
+
+| Param | Values | Default |
+|---|---|---|
+| `period` | `alltime` \| `1d` \| `7d` \| `30d` | `alltime` |
+| `page`, `limit` | int | 1, 50 |
+
+**Response `200 OK`**
+
+```json
+{
+  "period": "7d",
+  "data": [
+    {
+      "address":       "0xwhale...",
+      "volumeBNB":     "42000000000000000000",
+      "tradeCount":    38,
+      "buyCount":      22,
+      "sellCount":     16,
+      "tokensTraded":  5,
+      "lastTradeAt":   1741900000
+    },
+    {
+      "address":       "0xtrader2...",
+      "volumeBNB":     "17500000000000000000",
+      "tradeCount":    14,
+      "buyCount":      10,
+      "sellCount":     4,
+      "tokensTraded":  2,
+      "lastTradeAt":   1741895000
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 214, "pages": 5, "hasMore": true }
+}
+```
+
+> `volumeBNB` is the sum of all BNB across buys and sells in the selected period, in wei.
+
+---
+
+## 13. Metadata Upload (IPFS)
 
 Upload token metadata to IPFS via Pinata. Returns an IPFS URI the token creator passes directly to `setMetaURI()` on their token contract.
 
 **Requires** `PINATA_JWT` in `.env`.
 
-### 12.1 Full flow
+### 13.1 Full flow
 
 ```
 Token creator
@@ -906,15 +967,16 @@ Token creator
 
 ---
 
-### 12.2 Upload with image
+### 13.2 Upload
 
 ```bash
 curl -X POST https://localhost:3001/api/v1/metadata/upload \
   -F "image=@./pepe.png;type=image/png" \
   -F "name=PepeBSC" \
+  -F "symbol=PEPE" \
   -F "description=The original Pepe on BSC launchpad." \
   -F "website=https://pepebsc.io" \
-  -F "twitter=https://twitter.com/pepebsc" \
+  -F "x=https://x.com/pepebsc" \
   -F "telegram=https://t.me/pepebsc"
 ```
 
@@ -940,11 +1002,12 @@ curl -X POST https://localhost:3001/api/v1/metadata/upload \
 ```json
 {
   "name":        "PepeBSC",
+  "symbol":      "PEPE",
   "description": "The original Pepe on BSC launchpad.",
   "image":       "ipfs://bafybeid4x7y3xp2y7h3vkjk5b3b7c3e2i6f2r7n5t4q3y8z6d1a2c9m1k",
   "website":     "https://pepebsc.io",
   "socials": {
-    "twitter":  "https://twitter.com/pepebsc",
+    "x":        "https://x.com/pepebsc",
     "telegram": "https://t.me/pepebsc"
   }
 }
@@ -952,53 +1015,29 @@ curl -X POST https://localhost:3001/api/v1/metadata/upload \
 
 ---
 
-### 12.3 Upload JSON-only (no image)
-
-Image is optional. If omitted the `image` field is excluded from the metadata JSON.
-
-```bash
-curl -X POST https://localhost:3001/api/v1/metadata/upload \
-  -F "name=MoonCat" \
-  -F "description=To the moon." \
-  -F "telegram=https://t.me/mooncatbsc"
-```
-
-```json
-{
-  "data": {
-    "metaURI":    "ipfs://bafybeihdwdcefgh...",
-    "ipfsHash":   "bafybeihdwdcefgh...",
-    "gatewayUrl": "https://ipfs.io/ipfs/bafybeihdwdcefgh...",
-    "imageUri":   null,
-    "instructions": { "nextStep": "...", "example": "..." }
-  }
-}
-```
-
----
-
-### 12.4 Frontend integration
+### 13.3 Frontend integration
 
 ```js
 // React / Next.js example
-async function uploadMetadata({ name, description, website, twitter, telegram, imageFile }) {
+async function uploadMetadata({ name, symbol, description, website, x, telegram, imageFile }) {
   const form = new FormData();
+  form.append("image",       imageFile);          // File from <input type="file"> — required
   form.append("name",        name);
+  form.append("symbol",      symbol      ?? "");
   form.append("description", description ?? "");
   form.append("website",     website     ?? "");
-  form.append("twitter",     twitter     ?? "");
+  form.append("x",           x           ?? "");
   form.append("telegram",    telegram    ?? "");
-  if (imageFile) form.append("image", imageFile); // File object from <input type="file">
+  // Do NOT set Content-Type — browser sets it with boundary automatically.
 
   const res = await fetch("https://api.onememe.io/api/v1/metadata/upload", {
     method: "POST",
     body:   form,
-    // Do NOT set Content-Type — browser sets it with boundary automatically.
   });
 
   if (!res.ok) throw new Error(await res.text());
   const { data } = await res.json();
-  return data.metaURI; // "ipfs://Qm..."
+  return data.metaURI; // "ipfs://bafybei..."  ← pass this to setMetaURI()
 }
 
 // After token creation, call setMetaURI on-chain:
@@ -1009,25 +1048,23 @@ async function setTokenMetadata(tokenContract, metaURI) {
 }
 ```
 
-**Supported image formats:** jpeg, png, gif, webp, svg — max **10 MB**.
+**Supported image formats:** jpeg, png, gif, webp, svg — max **3 MB**.
 
 **Form fields:**
 
 | Field | Required | Description |
 |---|---|---|
-| `image` | No | Image file (multipart) |
+| `image` | **Yes** | Token image file (multipart, max 3 MB) |
 | `name` | **Yes** | Token display name |
-| `description` | No | Short description |
+| `symbol` | No | Token ticker symbol (e.g. `PEPE`) |
+| `description` | No | Short token description |
 | `website` | No | Project website URL |
-| `twitter` | No | Twitter/X URL or handle |
+| `x` | No | Twitter / X URL or handle |
 | `telegram` | No | Telegram invite link |
-| `discord` | No | Discord server invite |
-| `github` | No | GitHub repository URL |
-| `medium` | No | Medium article or profile URL |
 
 ---
 
-## 13. HTTPS / WSS Setup
+## 14. HTTPS / WSS Setup
 
 The API detects TLS at startup based on two environment variables:
 
@@ -1058,7 +1095,7 @@ curl -k https://localhost:3001/health
 
 ---
 
-## 14. Rate Limit Response
+## 15. Rate Limit Response
 
 When a rate limit is exceeded the API returns **`429 Too Many Requests`**:
 
@@ -1092,7 +1129,7 @@ Limits are keyed by **client IP only** (not IP+path). Rotating token addresses d
 
 ---
 
-## 15. Origin Restriction (403)
+## 16. Origin Restriction (403)
 
 Endpoints restricted to the launchpad UI return `403 Forbidden` when the `Origin` header is not in `ALLOWED_ORIGINS`:
 
@@ -1134,7 +1171,7 @@ In development (`NODE_ENV=development`), all `http://localhost:*` and `http://12
 
 ---
 
-## 16. Error Shapes
+## 17. Error Shapes
 
 All errors follow the NestJS standard exception shape:
 
