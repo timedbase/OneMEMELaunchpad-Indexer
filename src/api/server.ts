@@ -35,6 +35,7 @@ import {
   limitQuote,
   limitStats,
 } from "./ratelimit";
+import { originGuard } from "./middleware/originGuard";
 
 import tokenRoutes    from "./routes/tokens";
 import tradeRoutes    from "./routes/trades";
@@ -51,7 +52,25 @@ import discoverRoutes from "./routes/discover";
 const app = new Hono();
 
 app.use("*", logger());
-app.use("*", cors({ origin: "*" }));
+
+// CORS — reflect only configured origins; fall back to * in development.
+const corsOrigins = (process.env.ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.use(
+  "*",
+  cors({
+    origin: corsOrigins.length
+      ? (origin) => (corsOrigins.includes(origin) ? origin : corsOrigins[0])
+      : "*",
+    allowMethods: ["GET", "OPTIONS"],
+    allowHeaders: ["Content-Type"],
+    exposeHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After"],
+  })
+);
+
 app.use("*", prettyJSON());
 
 // ─── Health check (no rate limit — used by uptime monitors) ──────────────────
@@ -113,6 +132,18 @@ v1.get("/", (c) =>
     },
   })
 );
+
+// ─── Rate-limited route groups ────────────────────────────────────────────────
+//
+// Order matters in Hono: more-specific middleware patterns must come before
+// broader ones so the correct limit is applied.
+
+// ─── Origin-restricted routes (UI only) ──────────────────────────────────────
+// These endpoints are reserved for the OneMEME Launchpad frontend.
+// Requests from other origins are rejected with 403.
+v1.use("/discover/*",    originGuard);
+v1.use("/activity/*",    originGuard);
+v1.use("/stats",         originGuard);
 
 // ─── Rate-limited route groups ────────────────────────────────────────────────
 //

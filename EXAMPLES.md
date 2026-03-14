@@ -32,7 +32,16 @@ Complete reference of every endpoint with `curl` commands and expected JSON resp
    - [TWAP history](#82-twap-history)
 9. [Factory Events](#9-factory-events)
 10. [Creators](#10-creators)
-11. [Rate Limit Response](#11-rate-limit-response)
+11. [Activity Feed](#11-activity-feed)
+    - [Paginated feed](#111-paginated-feed)
+    - [Real-time SSE stream](#112-real-time-sse-stream)
+12. [Discovery](#12-discovery)
+    - [Trending](#121-trending)
+    - [New tokens](#122-new-tokens)
+    - [Bonding](#123-bonding)
+    - [Migrated](#124-migrated)
+13. [Rate Limit Response](#13-rate-limit-response)
+14. [Origin Restriction (403)](#14-origin-restriction-403)
 
 ---
 
@@ -956,7 +965,267 @@ curl "http://localhost:3001/api/v1/creators/0xabcdef...0001/tokens"
 
 ---
 
-## 11. Rate Limit Response
+## 11. Activity Feed
+
+> **UI-restricted** — requires an allowed `Origin` header (set by browsers automatically). Returns `403` from non-permitted origins.
+
+### 11.1 Paginated feed
+
+**Rate limit: 60 req/min per IP.**
+
+Unified stream of `create`, `buy`, and `sell` events across all tokens, newest first.
+
+```bash
+# All events
+curl "http://localhost:3001/api/v1/activity"
+
+# Only buy/sell events for a specific token
+curl "http://localhost:3001/api/v1/activity?type=buy&token=0xd3ad...1111&limit=25"
+```
+
+**Supported `type` values:** `create` `buy` `sell`
+
+**Response `200 OK`**
+
+```json
+{
+  "data": [
+    {
+      "eventType":   "buy",
+      "token":       "0xd3adbeef00000000000000000000000000001111",
+      "actor":       "0xabcdef0000000000000000000000000000000001",
+      "bnbAmount":   "500000000000000000",
+      "tokenAmount": "12340000000000000000000",
+      "blockNumber": "42001337",
+      "timestamp":   1741820060,
+      "txHash":      "0xabc123..."
+    },
+    {
+      "eventType":   "create",
+      "token":       "0xd3adbeef00000000000000000000000000001111",
+      "actor":       "0xabcdef0000000000000000000000000000000001",
+      "bnbAmount":   null,
+      "tokenAmount": null,
+      "blockNumber": "42001300",
+      "timestamp":   1741820000,
+      "txHash":      null
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 4821,
+    "pages": 242,
+    "hasMore": true
+  }
+}
+```
+
+---
+
+### 11.2 Real-time SSE stream
+
+**No rate limit** — long-lived connection; one connection per client.
+
+Pushes new events as they are indexed. Polls the DB every 2 seconds and emits only events newer than the last poll. A `keepalive` event is sent every 15 seconds to prevent proxy timeouts.
+
+```bash
+# curl (shows raw SSE frames)
+curl -N "http://localhost:3001/api/v1/activity/stream"
+
+# With filters
+curl -N "http://localhost:3001/api/v1/activity/stream?type=buy&token=0xd3ad...1111"
+```
+
+**Browser (EventSource)**
+
+```js
+const es = new EventSource("http://localhost:3001/api/v1/activity/stream");
+
+es.addEventListener("activity", (e) => {
+  const event = JSON.parse(e.data);
+  // { eventType, token, actor, bnbAmount, tokenAmount, blockNumber, timestamp, txHash }
+  console.log(event);
+});
+
+es.addEventListener("keepalive", () => {
+  // heartbeat — connection is healthy
+});
+```
+
+**Raw SSE frames**
+
+```
+event: activity
+data: {"eventType":"buy","token":"0xd3adbeef00000000000000000000000000001111","actor":"0xabcd...","bnbAmount":"500000000000000000","tokenAmount":"12340000000000000000000","blockNumber":"42001338","timestamp":1741820062,"txHash":"0xdef456..."}
+
+event: keepalive
+data:
+```
+
+---
+
+## 12. Discovery
+
+> **UI-restricted** — all four endpoints require an allowed `Origin` header. Returns `403` from non-permitted origins.
+
+**Rate limit: 60 req/min per IP.**
+
+### 12.1 Trending
+
+Tokens with the most trading activity in the last 30 minutes. Ideal for a "hot right now" surface.
+
+```bash
+# Default: 30-minute window
+curl "http://localhost:3001/api/v1/discover/trending"
+
+# Custom window: last 10 minutes
+curl "http://localhost:3001/api/v1/discover/trending?window=600&limit=10"
+```
+
+**`window` param:** lookback in seconds, 60–86400 (default 1800).
+
+**Response `200 OK`**
+
+```json
+{
+  "data": [
+    {
+      "id":               "0xd3adbeef00000000000000000000000000001111",
+      "tokenType":        "Tax",
+      "creator":          "0xabcdef0000000000000000000000000000000001",
+      "totalSupply":      "1000000000000000000000000000",
+      "migrated":         false,
+      "buyCount":         84,
+      "sellCount":        12,
+      "volumeBNB":        "3200000000000000000000",
+      "raisedBNB":        "2800000000000000000000",
+      "recentTrades":     23,
+      "recentBuys":       19,
+      "recentSells":      4,
+      "recentVolumeBNB":  "850000000000000000000"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 7, "pages": 1, "hasMore": false },
+  "window": 1800,
+  "since": 1741818300
+}
+```
+
+---
+
+### 12.2 New tokens
+
+Freshly launched tokens, newest first. Excludes already-migrated tokens.
+
+```bash
+curl "http://localhost:3001/api/v1/discover/new"
+
+# Filter by token type
+curl "http://localhost:3001/api/v1/discover/new?type=Standard&limit=10"
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "data": [
+    {
+      "id":                  "0xd3adbeef00000000000000000000000000001111",
+      "tokenType":           "Standard",
+      "creator":             "0xabcdef0000000000000000000000000000000001",
+      "totalSupply":         "1000000000000000000000000000",
+      "antibotEnabled":      false,
+      "tradingBlock":        "42001000",
+      "createdAtBlock":      "42000999",
+      "createdAtTimestamp":  1741820000,
+      "migrated":            false,
+      "pairAddress":         null,
+      "buyCount":            2,
+      "sellCount":           0,
+      "volumeBNB":           "100000000000000000",
+      "raisedBNB":           "100000000000000000"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 112, "pages": 6, "hasMore": true }
+}
+```
+
+---
+
+### 12.3 Bonding
+
+Active bonding-curve tokens closest to hitting the migration target, sorted by `raisedBNB` descending. Tokens at the top are about to graduate to PancakeSwap.
+
+```bash
+curl "http://localhost:3001/api/v1/discover/bonding"
+
+# Tax tokens only
+curl "http://localhost:3001/api/v1/discover/bonding?type=Tax"
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "data": [
+    {
+      "id":               "0xd3adbeef00000000000000000000000000001111",
+      "tokenType":        "Tax",
+      "migrated":         false,
+      "raisedBNB":        "2980000000000000000000",
+      "volumeBNB":        "3200000000000000000000",
+      "buyCount":         84,
+      "sellCount":        12,
+      "recentTrades":     41,
+      "recentVolumeBNB":  "1200000000000000000000"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 98, "pages": 5, "hasMore": true }
+}
+```
+
+---
+
+### 12.4 Migrated
+
+Tokens that have graduated from the bonding curve to PancakeSwap V2. Includes full migration details joined from the migration table.
+
+```bash
+curl "http://localhost:3001/api/v1/discover/migrated"
+
+# Sort by liquidity added
+curl "http://localhost:3001/api/v1/discover/migrated?orderBy=liquidityBNB&orderDir=desc"
+```
+
+**Supported `orderBy` values:** `migratedAt` (default) `liquidityBNB` `volumeBNB`
+
+**Response `200 OK`**
+
+```json
+{
+  "data": [
+    {
+      "id":                "0xd3adbeef00000000000000000000000000001111",
+      "tokenType":         "Tax",
+      "migrated":          true,
+      "volumeBNB":         "3200000000000000000000",
+      "raisedBNB":         "3000000000000000000000",
+      "pairAddress":       "0xpair...0001",
+      "liquidityBNB":      "2700000000000000000000",
+      "liquidityTokens":   "500000000000000000000000000",
+      "migratedAtBlock":   "42005000",
+      "migratedAt":        1741823000,
+      "migrationTxHash":   "0xmig..."
+    }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 14, "pages": 1, "hasMore": false }
+}
+```
+
+---
+
+## 13. Rate Limit Response
 
 When any endpoint's per-IP limit is exceeded.
 
@@ -990,11 +1259,57 @@ X-RateLimit-Reset:     1741824060
 
 ---
 
+---
+
+## 14. Origin Restriction (403)
+
+The following endpoints are restricted to the OneMEME Launchpad UI and reject requests from unlisted origins:
+
+- `GET /api/v1/discover/*`
+- `GET /api/v1/activity/*`
+- `GET /api/v1/stats`
+
+Browsers send the `Origin` header automatically — no frontend code changes are needed. Non-browser clients (curl, Postman, server-to-server) without an `Origin` header are also blocked unless explicitly permitted via `ALLOWED_ORIGINS=server` in `.env`.
+
+**Response `403 Forbidden` — unlisted origin**
+
+```json
+{
+  "error":   "Forbidden",
+  "message": "Origin not permitted.",
+  "origin":  "https://some-other-site.com"
+}
+```
+
+**Response `403 Forbidden` — no Origin header**
+
+```json
+{
+  "error":   "Forbidden",
+  "message": "This endpoint is restricted to the OneMEME Launchpad UI."
+}
+```
+
+**Configuration (`.env`)**
+
+```env
+# Comma-separated list of permitted origins
+ALLOWED_ORIGINS=https://onememe.io,https://app.onememe.io
+
+# To also allow server-to-server calls with no Origin header:
+ALLOWED_ORIGINS=https://onememe.io,https://app.onememe.io,server
+```
+
+Localhost origins (`http://localhost:*`, `http://127.0.0.1:*`) are always permitted when `NODE_ENV=development`.
+
+---
+
 ## Common error shapes
 
 | Status | `error` field | When |
 |---|---|---|
 | `400` | `"Bad Request"` | Invalid address, missing required param, out-of-range value |
+| `403` | `"Forbidden"` | Origin not in `ALLOWED_ORIGINS` allowlist |
 | `404` | `"Not Found"` | Token / migration not in the index |
 | `429` | `"Too Many Requests"` | Per-IP rate limit exceeded |
 | `503` | `"Service Unavailable"` | Quote simulation attempted but RPC not configured |
