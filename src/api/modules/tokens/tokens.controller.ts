@@ -1,0 +1,67 @@
+import { Controller, Get, Param, Query } from "@nestjs/common";
+import { TokensService } from "./tokens.service";
+
+@Controller("tokens")
+export class TokensController {
+  constructor(private readonly tokens: TokensService) {}
+
+  /** GET /api/v1/tokens */
+  @Get()
+  list(@Query() query: Record<string, string>) {
+    return this.tokens.list(query);
+  }
+
+  /** GET /api/v1/tokens/:address */
+  @Get(":address")
+  findOne(@Param("address") address: string) {
+    return this.tokens.findOne(address);
+  }
+
+  /** GET /api/v1/tokens/:address/trades */
+  @Get(":address/trades")
+  trades(
+    @Param("address") address: string,
+    @Query() query: Record<string, string>,
+  ) {
+    return this.tokens.trades(address, query);
+  }
+
+  /** GET /api/v1/tokens/:address/traders */
+  @Get(":address/traders")
+  traders(
+    @Param("address") address: string,
+    @Query() query: Record<string, string>,
+  ) {
+    return this.tokens.traders(address, query);
+  }
+
+  /** GET /api/v1/tokens/:address/holders */
+  @Get(":address/holders")
+  holders(
+    @Param("address") address: string,
+    @Query() query: Record<string, string>,
+  ) {
+    return this.tokens.holders(address, query);
+  }
+
+  /** GET /api/v1/tokens/:address/migration */
+  @Get(":address/migration")
+  migration(@Param("address") address: string) {
+    return this.tokens.migration(address);
+  }
+}
+
+/** Separate controller so /creators/:address/tokens doesn't conflict. */
+@Controller("creators")
+export class CreatorsController {
+  constructor(private readonly tokens: TokensService) {}
+
+  /** GET /api/v1/creators/:address/tokens */
+  @Get(":address/tokens")
+  byCreator(
+    @Param("address") address: string,
+    @Query() query: Record<string, string>,
+  ) {
+    return this.tokens.byCreator(address, query);
+  }
+}

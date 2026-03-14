@@ -4,6 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Ponder](https://img.shields.io/badge/built%20with-Ponder-blueviolet)](https://ponder.sh)
+[![NestJS](https://img.shields.io/badge/API-NestJS-red)](https://nestjs.com)
 [![Chain: BSC](https://img.shields.io/badge/chain-BSC-F0B90B)](https://bscscan.com)
 
 ---
@@ -13,7 +14,16 @@
 The **OneMEME Launchpad Indexer** listens to all events emitted by the `LaunchpadFactory` contract and persists them to PostgreSQL. It exposes two APIs:
 
 - **GraphQL API** (via Ponder) at `http://localhost:42069` — flexible querying with a built-in playground
-- **REST API** (Hono) at `http://localhost:3001/api/v1` — structured endpoints for tokens, trades, migrations, TWAP history, factory events, and platform stats
+- **REST API** (NestJS) at `https://localhost:3001/api/v1` — structured HTTPS endpoints with WebSocket (WSS) activity streaming
+
+### Key Features
+
+- **HTTPS + WSS** — set `SSL_KEY_PATH` and `SSL_CERT_PATH` to enable TLS automatically; no code changes required
+- **Real-time activity stream** — SSE (`GET /activity/stream`) and WebSocket (`wss://.../activity/ws`) push every new create/buy/sell event
+- **Live quote simulation** — calls `getAmountOut` / `getAmountOutSell` on the live contract, not from cached DB state
+- **Discovery endpoints** — trending, new, bonding-curve, and migrated token feeds
+- **Origin guard** — discovery, activity, and stats endpoints are restricted to configured launchpad UI domains
+- **Per-IP rate limiting** — isolated fixed-window counters per route group; IP-keyed so rotating token addresses cannot bypass limits
 
 ### What Gets Indexed
 
@@ -32,7 +42,7 @@ The **OneMEME Launchpad Indexer** listens to all events emitted by the `Launchpa
 | `UsdcPairUpdated` | `factory_event` | TWAP oracle USDC/WBNB pair reconfigured |
 | `TwapMaxAgeBlocksUpdated` | `factory_event` | TWAP staleness threshold changed |
 
-### Database Schema (tables)
+### Database Schema
 
 ```
 token           — one row per deployed meme token (+ running buy/sell stats)
@@ -49,7 +59,7 @@ factory_event   — one row per admin / config-change event
 - **Node.js** ≥ 18
 - **npm** ≥ 9 (or pnpm / yarn)
 - **Docker + Docker Compose** (for the local PostgreSQL instance)
-- A BSC JSON-RPC endpoint (archive node recommended for historical sync)
+- A BSC JSON-RPC endpoint — both HTTP and WebSocket required
 
 ---
 
@@ -69,18 +79,22 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env` and fill in:
+Edit `.env`:
 
 | Variable | Required | Description |
 |---|---|---|
-| `BSC_WSS_URL` | **Yes** | BSC WebSocket endpoint (`wss://…`) — primary real-time streaming transport |
-| `BSC_RPC_URL` | **Yes** | BSC HTTP endpoint — automatic fallback for the indexer; used by REST API for quotes |
-| `FACTORY_ADDRESS` | **Yes** | Deployed `LaunchpadFactory` contract address on BSC |
+| `BSC_WSS_URL` | **Yes** | BSC WebSocket endpoint (`wss://…`) — primary real-time streaming |
+| `BSC_RPC_URL` | **Yes** | BSC HTTP endpoint — fallback transport + used by API for quotes |
+| `FACTORY_ADDRESS` | **Yes** | Deployed `LaunchpadFactory` contract address |
 | `START_BLOCK` | Recommended | Factory deployment block — skips unnecessary historical scan |
 | `DATABASE_URL` | **Yes** | PostgreSQL connection string |
 | `API_PORT` | No | REST API port (default `3001`) |
+| `ALLOWED_ORIGINS` | Recommended | Comma-separated UI origins for origin-restricted endpoints |
+| `SSL_KEY_PATH` | No | Path to TLS private key — enables HTTPS + WSS when set with `SSL_CERT_PATH` |
+| `SSL_CERT_PATH` | No | Path to TLS certificate — enables HTTPS + WSS when set with `SSL_KEY_PATH` |
+| `IPFS_GATEWAY` | No | Custom IPFS gateway for token metadata resolution (default: `https://ipfs.io/ipfs/`) |
 
-> Both `BSC_WSS_URL` and `BSC_RPC_URL` are required — the indexer throws at startup if either is missing. Ponder streams events over WebSocket and automatically switches to HTTP polling if the WSS connection drops, then resumes over WSS once it recovers.
+> Both `BSC_WSS_URL` and `BSC_RPC_URL` are required. The indexer throws at startup if either is missing.
 
 ### 3. Start PostgreSQL (local dev)
 
@@ -88,7 +102,7 @@ Edit `.env` and fill in:
 docker compose up -d
 ```
 
-This starts a PostgreSQL 16 instance on `localhost:5432` with the credentials from `.env.example`.
+Starts PostgreSQL 16 on `localhost:5432` with credentials from `.env.example`.
 
 ### 4. Run the indexer
 
@@ -100,24 +114,40 @@ npm run dev
 npm run start
 ```
 
-Ponder will:
-1. Run database migrations automatically.
-2. Begin syncing events from `START_BLOCK` to the chain tip.
-3. Expose the **GraphQL playground** at [http://localhost:42069](http://localhost:42069).
+Ponder will automatically run database migrations, begin syncing from `START_BLOCK`, and expose the **GraphQL playground** at [http://localhost:42069](http://localhost:42069).
 
 ### 5. Run the REST API
 
 In a separate terminal (Ponder must be running and synced first):
 
 ```bash
-# Development mode — auto-restarts on file changes
+# Development (ts-node, hot-reload)
 npm run api:dev
 
-# Production mode
+# Production (compile first, then run)
+npm run api:build
 npm run api
 ```
 
-The REST API is available at [http://localhost:3001/api/v1](http://localhost:3001/api/v1).
+API available at `https://localhost:3001/api/v1` (HTTP if TLS is not configured).
+WebSocket stream at `wss://localhost:3001/api/v1/activity/ws`.
+
+---
+
+## HTTPS / WSS Setup
+
+The API runs in plain HTTP/WS mode by default. To enable TLS:
+
+```bash
+# Generate a self-signed cert for local testing
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+
+# Set in .env
+SSL_KEY_PATH=./key.pem
+SSL_CERT_PATH=./cert.pem
+```
+
+In production, point these vars at your certificate files from Let's Encrypt or your TLS provider. Restart the API — no code changes needed. WebSocket connections automatically upgrade to WSS when TLS is active.
 
 ---
 
@@ -192,26 +222,11 @@ http://localhost:42069/graphql
 }
 ```
 
-**TWAP price history (most recent 10):**
-
-```graphql
-{
-  twapUpdates(orderBy: "blockNumber", orderDirection: "desc", limit: 10) {
-    items {
-      priceAvg
-      priceBlockNumber
-      blockNumber
-      timestamp
-    }
-  }
-}
-```
-
 ---
 
 ## REST API
 
-Base URL: `http://localhost:3001/api/v1`
+Base URL: `https://localhost:3001/api/v1`
 
 All list endpoints return a consistent paginated envelope:
 
@@ -234,56 +249,88 @@ X-RateLimit-Remaining:  59
 X-RateLimit-Reset:      1741824060
 ```
 
-When exceeded, the API returns `429 Too Many Requests` with a `Retry-After` header.
+When exceeded the API returns `429 Too Many Requests` with a `Retry-After` header.
 
 | Route group | Limit | Reason |
 |---|---|---|
 | `/tokens/*/quote/*` | **20 req/min** | Each request makes a live RPC call to BSC |
 | `/stats` | **10 req/min** | Executes 6 parallel aggregation queries |
-| Single-item detail | **120 req/min** | Fast primary-key DB lookup |
-| All other list endpoints | **60 req/min** | Paginated DB queries |
+| All other endpoints | **60 req/min** | Paginated DB queries |
 
----
+### Origin Restriction
+
+The following endpoints are restricted to origins listed in `ALLOWED_ORIGINS`:
+
+- `GET /api/v1/stats`
+- `GET /api/v1/activity/*`
+- `GET /api/v1/discover/*`
+
+Requests from other origins receive `403 Forbidden`. In development (`NODE_ENV=development`) all `localhost` origins are automatically permitted.
 
 ### Endpoints
 
 #### Info
 
-| Method | Path | Limit | Description |
+| Method | Path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/health` | none | Health check |
-| `GET` | `/api/v1` | none | Route index |
-| `GET` | `/api/v1/stats` | 10/min | Platform-wide aggregated statistics |
+| `GET` | `/health` | public | Health check |
+| `GET` | `/api/v1/stats` | UI only | Platform-wide aggregated statistics |
 
 #### Tokens
 
-| Method | Path | Limit | Description |
-|---|---|---|---|
-| `GET` | `/api/v1/tokens` | 60/min | List all tokens (filterable, sortable) |
-| `GET` | `/api/v1/tokens/:address` | 120/min | Single token detail |
-| `GET` | `/api/v1/tokens/:address/trades` | 60/min | Bonding-curve trades for a token |
-| `GET` | `/api/v1/tokens/:address/traders` | 60/min | Top traders leaderboard for a token |
-| `GET` | `/api/v1/tokens/:address/migration` | 120/min | PancakeSwap migration record |
-| `GET` | `/api/v1/creators/:address/tokens` | 60/min | Tokens deployed by a creator |
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/tokens` | List all tokens (filterable, sortable) |
+| `GET` | `/api/v1/tokens/:address` | Single token detail + off-chain metadata |
+| `GET` | `/api/v1/tokens/:address/trades` | Bonding-curve trades for a token |
+| `GET` | `/api/v1/tokens/:address/traders` | Top traders leaderboard for a token |
+| `GET` | `/api/v1/tokens/:address/holders` | Estimated token holders (net trade positions) |
+| `GET` | `/api/v1/tokens/:address/migration` | PancakeSwap migration record |
+| `GET` | `/api/v1/creators/:address/tokens` | Tokens deployed by a creator |
 
-#### Live Quote Simulation _(requires BSC RPC)_
+#### Live Quote Simulation _(requires `BSC_RPC_URL`)_
 
-| Method | Path | Limit | Description |
-|---|---|---|---|
-| `GET` | `/api/v1/tokens/:address/quote/price` | **20/min** | Live spot price from contract |
-| `GET` | `/api/v1/tokens/:address/quote/buy` | **20/min** | Simulate BNB → tokens (with price impact + slippage) |
-| `GET` | `/api/v1/tokens/:address/quote/sell` | **20/min** | Simulate tokens → BNB (with price impact + slippage) |
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/tokens/:address/quote/price` | Live spot price from contract |
+| `GET` | `/api/v1/tokens/:address/quote/buy` | Simulate BNB → tokens (price impact + slippage) |
+| `GET` | `/api/v1/tokens/:address/quote/sell` | Simulate tokens → BNB (price impact + slippage) |
 
 #### Trades / Migrations / TWAP / Factory
 
-| Method | Path | Limit | Description |
-|---|---|---|---|
-| `GET` | `/api/v1/trades` | 60/min | All trades (filterable by token, trader, type) |
-| `GET` | `/api/v1/traders/:address/trades` | 60/min | All trades by a wallet |
-| `GET` | `/api/v1/migrations` | 60/min | All PancakeSwap migrations |
-| `GET` | `/api/v1/twap` | 60/min | TWAP oracle history |
-| `GET` | `/api/v1/twap/latest` | 120/min | Most recent TWAP reading |
-| `GET` | `/api/v1/factory/events` | 60/min | Factory admin / config-change events |
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/trades` | All trades (filterable by token, trader, type) |
+| `GET` | `/api/v1/traders/:address/trades` | All trades by a wallet |
+| `GET` | `/api/v1/migrations` | All PancakeSwap migrations |
+| `GET` | `/api/v1/twap` | TWAP oracle history |
+| `GET` | `/api/v1/twap/latest` | Most recent TWAP reading |
+| `GET` | `/api/v1/factory/events` | Factory admin / config-change events |
+
+#### Activity Feed _(UI only)_
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/activity` | Paginated unified create/buy/sell event feed |
+| `GET` | `/api/v1/activity/stream` | SSE real-time push (2 s poll, 15 s keepalive) |
+| `WS`  | `/api/v1/activity/ws` | WebSocket (WSS) real-time push — same data as SSE |
+
+#### Metadata Upload _(IPFS via Pinata)_
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/metadata/upload` | Upload image + metadata JSON to IPFS — returns `metaURI` for `setMetaURI()` |
+
+Requires `PINATA_JWT` in `.env`. Accepts `multipart/form-data` with an optional image file plus fields: `name`, `description`, `website`, `twitter`, `telegram`, `discord`, `github`, `medium`.
+
+#### Discovery _(UI only)_
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/discover/trending` | Tokens most traded in the last 30 min |
+| `GET` | `/api/v1/discover/new` | Freshly launched tokens |
+| `GET` | `/api/v1/discover/bonding` | Bonding-curve tokens closest to migrating |
+| `GET` | `/api/v1/discover/migrated` | Tokens graduated to PancakeSwap |
 
 ### Common query parameters
 
@@ -293,95 +340,27 @@ When exceeded, the API returns `429 Too Many Requests` with a `Retry-After` head
 | `limit` | int | Items per page (default `20`, max `100`) |
 | `orderBy` | string | Column to sort by (endpoint-specific) |
 | `orderDir` | `asc`\|`desc` | Sort direction (default `desc`) |
-| `from` | int | Unix timestamp lower bound (trades/twap/factory) |
+| `from` | int | Unix timestamp lower bound (trades / twap / factory) |
 | `to` | int | Unix timestamp upper bound |
 
-### Examples
+### WebSocket Activity Stream
 
-**Simulate a buy — 1 BNB in, with 1% slippage tolerance:**
+```js
+// Browser
+const ws = new WebSocket("wss://api.onememe.io/api/v1/activity/ws?type=buy");
+ws.onmessage = (e) => {
+  const { event, data } = JSON.parse(e.data);
+  if (event === "activity") console.log(data);
+};
 
-```bash
-# bnbIn is in wei (1 BNB = 1e18 wei), slippage in basis points (100 = 1%)
-curl "http://localhost:3001/api/v1/tokens/0xabc...1111/quote/buy?bnbIn=1000000000000000000&slippage=100"
+// Optional query params:
+//   type   "create" | "buy" | "sell"
+//   token  0x-address to filter by token
 ```
 
+Each message:
 ```json
-{
-  "data": {
-    "token":               "0xabc...1111",
-    "type":                "buy",
-    "migrated":            false,
-    "bnbIn":               "1000000000000000000",
-    "bnbInFormatted":      "1.0",
-    "tokensOut":           "12345678000000000000000",
-    "tokensOutFormatted":  "12345.678",
-    "spotPriceWei":        "81000000000000",
-    "spotPriceBNB":        "0.000081",
-    "effectivePriceWei":   "81040000000000",
-    "effectivePriceBNB":   "0.00008104",
-    "priceImpactBps":      "49",
-    "priceImpactPct":      "0.49%",
-    "slippageBps":         "100",
-    "minimumOutput":       "12222221220000000000000",
-    "minimumOutputFormatted": "12222.22122",
-    "antibotEnabled":      true,
-    "tradingBlock":        "42000100"
-  }
-}
-```
-
-**Simulate a sell — 10 000 tokens back to BNB:**
-
-```bash
-curl "http://localhost:3001/api/v1/tokens/0xabc...1111/quote/sell?tokensIn=10000000000000000000000&slippage=200"
-```
-
-**Live spot price:**
-
-```bash
-curl "http://localhost:3001/api/v1/tokens/0xabc...1111/quote/price"
-```
-
-**Top traders leaderboard for a token:**
-
-```bash
-curl "http://localhost:3001/api/v1/tokens/0xabc...1111/traders?limit=10&orderBy=totalVolumeBNB"
-```
-
-```json
-{
-  "data": [
-    {
-      "trader":         "0xdeadbeef...",
-      "buyCount":       14,
-      "sellCount":      3,
-      "totalTrades":    17,
-      "totalBNBIn":     "5200000000000000000",
-      "totalBNBOut":    "1800000000000000000",
-      "totalVolumeBNB": "7000000000000000000",
-      "netBNB":         "-3400000000000000000"
-    }
-  ],
-  "pagination": { "page": 1, "limit": 10, "total": 204, "pages": 21, "hasMore": true }
-}
-```
-
-**Platform stats:**
-
-```bash
-curl http://localhost:3001/api/v1/stats
-```
-
-**Tokens — Tax type, not yet migrated, sorted by volume:**
-
-```bash
-curl "http://localhost:3001/api/v1/tokens?type=Tax&migrated=false&orderBy=volumeBNB&limit=10"
-```
-
-**Factory events — fee withdrawals only:**
-
-```bash
-curl "http://localhost:3001/api/v1/factory/events?type=FeesWithdrawn"
+{ "event": "activity", "data": { "eventType": "buy", "token": "0x...", "actor": "0x...", "bnbAmount": "500000000000000000", "tokenAmount": "6172839000000000000000", "blockNumber": "42001234", "timestamp": 1741824012, "txHash": "0x..." } }
 ```
 
 ---
@@ -391,30 +370,41 @@ curl "http://localhost:3001/api/v1/factory/events?type=FeesWithdrawn"
 ```
 OneMEMELaunchpad-Indexer/
 ├── abis/
-│   └── LaunchpadFactory.json        # Contract ABI (events + key view functions)
+│   ├── LaunchpadFactory.json        # Contract ABI (events + key view functions)
+│   └── LaunchpadToken.json          # Token contract ABI (metaURI, name, symbol)
 ├── src/
 │   ├── index.ts                     # Ponder event handlers (blockchain → DB)
 │   └── api/
-│       ├── server.ts                # Hono app: middleware, rate limits, route mounting
+│       ├── main.ts                  # NestJS bootstrap (HTTPS + WS adapter)
+│       ├── app.module.ts            # Root module + middleware registration
+│       ├── health.controller.ts     # GET /health
 │       ├── db.ts                    # postgres.js connection pool
-│       ├── helpers.ts               # Pagination, validation, error utilities
-│       ├── ratelimit.ts             # Fixed-window rate limiter (per IP + path)
-│       ├── rpc.ts                   # viem client + contract read helpers (quotes)
-│       └── routes/
-│           ├── tokens.ts            # /tokens, /tokens/:addr/traders, /creators/:addr/tokens
-│           ├── trades.ts            # /trades, /traders/:addr/trades
-│           ├── migrations.ts        # /migrations
-│           ├── twap.ts              # /twap, /twap/latest
-│           ├── factory.ts           # /factory/events
-│           ├── stats.ts             # /stats
-│           └── quotes.ts            # /tokens/:addr/quote/price|buy|sell (live RPC)
-├── ponder.config.ts                 # Network, contract, and DB configuration
+│       ├── helpers.ts               # Pagination, validation (framework-agnostic)
+│       ├── rpc.ts                   # viem client + quote helpers (live RPC)
+│       ├── metadata.ts              # Token metadata fetcher (IPFS, TTL cache)
+│       ├── common/
+│       │   ├── origin.guard.ts      # CanActivate — origin allowlist guard
+│       │   └── rate-limit.middleware.ts  # Fixed-window rate limiter (per IP)
+│       └── modules/
+│           ├── tokens/              # /tokens, /tokens/:addr/*, /creators/:addr/tokens
+│           ├── trades/              # /trades, /traders/:addr/trades
+│           ├── migrations/          # /migrations
+│           ├── twap/                # /twap, /twap/latest
+│           ├── factory/             # /factory/events
+│           ├── stats/               # /stats
+│           ├── quotes/              # /tokens/:addr/quote/price|buy|sell (live RPC)
+│           ├── activity/            # /activity, /activity/stream (SSE), /activity/ws (WSS)
+│           ├── discover/            # /discover/trending|new|bonding|migrated
+│           └── upload/              # POST /metadata/upload — IPFS via Pinata
+├── ponder.config.ts                 # Network, contract, and transport configuration
 ├── ponder.schema.ts                 # Database schema (onchainTable definitions)
 ├── docker-compose.yml               # Local PostgreSQL for development
 ├── package.json
-├── tsconfig.json
+├── tsconfig.json                    # Ponder / indexer TypeScript config
+├── tsconfig.api.json                # NestJS API TypeScript config (CommonJS, decorators)
 ├── .env.example                     # Environment variable template
 ├── .gitignore
+├── EXAMPLES.md                      # Full API reference with curl examples
 ├── LICENSE                          # MIT
 └── README.md
 ```
@@ -422,8 +412,6 @@ OneMEMELaunchpad-Indexer/
 ---
 
 ## Token Types
-
-The factory deploys three token implementations (indexed as `tokenType`):
 
 | Value | Name | Description |
 |---|---|---|
@@ -435,7 +423,7 @@ The factory deploys three token implementations (indexed as `tokenType`):
 
 ## Bonding Curve Mechanics
 
-During the pre-migration phase every token is traded through a **constant-product bonding curve** maintained by the factory:
+During the pre-migration phase every token is traded through a constant-product bonding curve maintained by the factory:
 
 - **Buy** → user sends BNB, receives tokens. During the *antibot window* (first N blocks after `tradingBlock`) a percentage of tokens is burned to the dead address (`tokensToDead`).
 - **Sell** → user sends tokens back, receives BNB.
@@ -443,39 +431,29 @@ During the pre-migration phase every token is traded through a **constant-produc
 
 ---
 
-## Configuration Reference
-
-### `ponder.config.ts`
-
-| Key | Description |
-|---|---|
-| `networks.bsc.chainId` | `56` (BSC mainnet) |
-| `contracts.LaunchpadFactory.startBlock` | Controlled via `START_BLOCK` env var |
-
-### `ponder.schema.ts`
-
-All tables use Ponder's `onchainTable` builder with Drizzle-compatible column types. Indexes are created on the most commonly queried columns.
-
----
-
 ## Deployment
 
-For a production deployment you will need:
+For production you will need:
 
-1. A **managed PostgreSQL** instance (e.g. Supabase, Railway, Neon, AWS RDS).
-2. A **dedicated BSC RPC** with archive access (e.g. QuickNode, Ankr, NodeReal).
-3. A process manager (e.g. PM2, Docker, Railway, Render).
+1. A **managed PostgreSQL** instance (Supabase, Railway, Neon, AWS RDS, etc.)
+2. A **dedicated BSC RPC** with archive access (QuickNode, Ankr, NodeReal, etc.)
+3. **TLS certificates** (Let's Encrypt recommended) — set `SSL_KEY_PATH` + `SSL_CERT_PATH`
+4. A process manager (PM2, Docker, Railway, Render, etc.)
 
 ```bash
-# Set production env vars, then:
-npm run start
+# Build the API
+npm run api:build
+
+# Start the indexer and API (separate processes)
+npm run start       # Ponder indexer
+npm run api         # NestJS REST API
 ```
 
 ---
 
 ## Contributing
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+Pull requests are welcome. For major changes please open an issue first to discuss what you would like to change.
 
 ---
 
@@ -483,6 +461,7 @@ Pull requests are welcome. For major changes, please open an issue first to disc
 
 - [OneMEMELaunchpad-Core](https://github.com/timedbase/OneMEMELaunchpad-Core) — Smart contracts (BSC)
 - [Ponder Documentation](https://ponder.sh/docs) — Indexer framework
+- [NestJS Documentation](https://docs.nestjs.com) — API framework
 - [PancakeSwap V2](https://docs.pancakeswap.finance/) — DEX used for migration
 
 ---
