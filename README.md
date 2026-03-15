@@ -229,11 +229,7 @@ When exceeded the API returns `429 Too Many Requests` with a `Retry-After` heade
 
 ### Origin Restriction
 
-The following endpoints are restricted to origins listed in `ALLOWED_ORIGINS`:
-
-- `GET /api/v1/stats`
-- `GET /api/v1/activity/*`
-- `GET /api/v1/discover/*`
+All endpoints require the `Origin` header to match an entry in `ALLOWED_ORIGINS`. The only public exemption is `GET /health`.
 
 Requests from other origins receive `403 Forbidden`. In development (`NODE_ENV=development`) all `localhost` origins are automatically permitted.
 
@@ -316,6 +312,13 @@ Use this to convert all BNB wei amounts to USD on the frontend. If an exchange i
 
 Supported resolutions: `1`, `5`, `15`, `30`, `60`, `240`, `D`. Point TradingView's `datafeed` URL at `https://api.1coin.meme/api/v1/charts`. Migrated tokens return `{ s: "no_data" }` — chart goes blank.
 
+#### Chat
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/chat/:token/messages` | Last 50 messages for a token, oldest-first |
+| `WS`  | `/api/v1/chat/ws` | WebSocket chat — subscribe to a token room, send and receive messages in real time |
+
 #### Discovery _(UI only)_
 
 | Method | Path | Description |
@@ -389,6 +392,7 @@ OneMEMELaunchpad-Indexer/
 │           ├── leaderboard/         # /leaderboard/traders (alltime|1d|7d|30d)
 │           ├── price/               # /price/bnb — aggregated BNB/USDT (Binance+OKX+Bybit)
 │           ├── charts/              # /charts/* — TradingView UDF (OHLCV from trades)
+│           ├── chat/                # /chat/:token/messages (REST) + /chat/ws (WebSocket)
 │           └── upload/              # POST /metadata/upload — IPFS via Pinata
 ├── ponder.config.ts                 # Network, contract, and transport configuration
 ├── ponder.schema.ts                 # Database schema (onchainTable definitions)

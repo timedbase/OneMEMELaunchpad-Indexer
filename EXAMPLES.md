@@ -5,7 +5,7 @@ Complete reference of every endpoint with `curl` commands and expected JSON resp
 > **Base URL:** `https://api.1coin.meme` (HTTP if TLS is not configured — see [HTTPS Setup](#https--wss-setup))
 > **All BNB / token amounts** are returned as strings (wei, 18 decimals) to preserve uint256 precision.
 > **Pagination** is available on all list endpoints via `?page=` and `?limit=` (max 100).
-> **Origin-restricted endpoints** (`/stats`, `/activity/*`, `/discover/*`) require the request `Origin` header to match `ALLOWED_ORIGINS`. In development, `localhost` origins are always permitted.
+> **All endpoints** require the request `Origin` header to match `ALLOWED_ORIGINS` (except `GET /health`). In development, `localhost` origins are always permitted.
 
 ---
 
@@ -50,7 +50,9 @@ Complete reference of every endpoint with `curl` commands and expected JSON resp
     - [Symbols](#132-symbols)
     - [History (OHLCV)](#133-history-ohlcv)
     - [Search](#134-search)
-14. [HTTPS / WSS Setup](#14-https--wss-setup)
+14. [Token Chat](#14-token-chat)
+    - [Fetch message history (REST)](#141-fetch-message-history-rest)
+    - [Real-time chat (WebSocket)](#142-real-time-chat-websocket)
 15. [Rate Limit Response](#15-rate-limit-response)
 16. [Origin Restriction (403)](#16-origin-restriction-403)
 17. [Error Shapes](#17-error-shapes)
@@ -1172,34 +1174,89 @@ curl "https://api.1coin.meme/api/v1/charts/search?query=0xabc&limit=5"
 
 ---
 
-## 14. HTTPS / WSS Setup
+## 14. Token Chat
 
-The API detects TLS at startup based on two environment variables:
+Per-token chat with persistent history. Messages are stored in PostgreSQL (capped at 200 per token). Real-time delivery via WebSocket.
 
-```dotenv
-SSL_KEY_PATH=./certs/privkey.pem
-SSL_CERT_PATH=./certs/fullchain.pem
-```
+### 14.1 Fetch message history (REST)
 
-When both are set the server starts in HTTPS mode and WebSocket connections automatically use WSS. No code changes are required — the `WsAdapter` inherits the TLS context from the Express HTTPS server.
-
-**Generate a self-signed cert for local testing:**
+Load the last 50 messages for a token on page load.
 
 ```bash
-openssl req -x509 -newkey rsa:4096 \
-  -keyout certs/privkey.pem \
-  -out certs/fullchain.pem \
-  -days 365 -nodes \
-  -subj "/CN=localhost"
+curl "https://api.1coin.meme/api/v1/chat/0xabc...1111/messages" \
+  -H "Origin: https://1coin.meme"
 ```
 
-**Test HTTPS locally** (ignore self-signed warning):
+**Response `200 OK`**
 
-```bash
-curl -k https://api.1coin.meme/health
+```json
+{
+  "data": [
+    { "id": "1", "token": "0xabc...1111", "sender": "0xbuyer...", "text": "wen moon?",    "timestamp": 1741820000 },
+    { "id": "2", "token": "0xabc...1111", "sender": "0xwhale...", "text": "ser this is it", "timestamp": 1741820003 }
+  ]
+}
 ```
 
-**Production** — use Let's Encrypt or your provider's certificate files; point the env vars at them and restart.
+Messages are returned oldest-first (chronological order, ready to render top-to-bottom).
+
+---
+
+### 14.2 Real-time chat (WebSocket)
+
+```
+wss://api.1coin.meme/api/v1/chat/ws
+```
+
+**Protocol:**
+
+```
+Client → server:
+  { "type": "subscribe", "token": "0xabc...1111" }        — join token room, server replies with history
+  { "type": "message", "sender": "0xwallet...", "text": "gm" }  — send a message
+
+Server → client:
+  { "type": "history",   "messages": [...] }               — sent immediately after subscribe
+  { "type": "message",   "id": "3", "token": "0x...", "sender": "0x...", "text": "gm", "timestamp": 1741820010 }
+  { "type": "error",     "message": "Slow down — wait 2s before sending again" }
+  { "type": "keepalive" }                                  — every 15 s
+```
+
+**Browser integration:**
+
+```js
+const ws = new WebSocket("wss://api.1coin.meme/api/v1/chat/ws");
+
+ws.onopen = () => {
+  // Subscribe to a token room — server replies with history immediately
+  ws.send(JSON.stringify({ type: "subscribe", token: "0xabc...1111" }));
+};
+
+ws.onmessage = (e) => {
+  const frame = JSON.parse(e.data);
+
+  if (frame.type === "history") {
+    renderMessages(frame.messages);          // initial load
+  }
+  if (frame.type === "message") {
+    appendMessage(frame);                    // real-time new message
+  }
+  if (frame.type === "error") {
+    console.warn("Chat error:", frame.message);
+  }
+};
+
+// Post a message
+function sendMessage(walletAddress, text) {
+  ws.send(JSON.stringify({ type: "message", sender: walletAddress, text }));
+}
+```
+
+**Rules:**
+- Rate limit: **1 message per 3 seconds** per IP — server sends `{ type: "error" }` if exceeded
+- Max message length: **500 characters** — longer text is silently truncated on save
+- Must subscribe before sending — server rejects messages without an active subscription
+- History is capped at **200 messages per token** — oldest are pruned on insert
 
 ---
 
@@ -1241,7 +1298,7 @@ Limits are keyed by **client IP only** (not IP+path). Rotating token addresses d
 
 Endpoints restricted to the launchpad UI return `403 Forbidden` when the `Origin` header is not in `ALLOWED_ORIGINS`:
 
-**Restricted endpoints:** `GET /stats`, `GET /activity/*`, `GET /discover/*`
+**All endpoints are origin-restricted.** The only public exemption is `GET /health`.
 
 ```bash
 # No Origin header
