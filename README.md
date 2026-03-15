@@ -14,11 +14,11 @@
 The **OneMEME Launchpad Indexer** listens to all events emitted by the `LaunchpadFactory` contract and persists them to PostgreSQL. It exposes two APIs:
 
 - **GraphQL API** (via Ponder) at `http://localhost:42069` — flexible querying with a built-in playground
-- **REST API** (NestJS) at `https://localhost:3001/api/v1` — structured HTTPS endpoints with WebSocket (WSS) activity streaming
+- **REST API** (NestJS) at `https://api.1coin.meme/api/v1` — structured HTTPS endpoints with WebSocket (WSS) activity streaming
 
 ### Key Features
 
-- **HTTPS + WSS** — set `SSL_KEY_PATH` and `SSL_CERT_PATH` to enable TLS automatically; no code changes required
+- **HTTPS + WSS** — handled by Cloudflare in front of the server; see [CLOUDFLARE.md](CLOUDFLARE.md)
 - **Real-time activity stream** — SSE (`GET /activity/stream`) and WebSocket (`wss://.../activity/ws`) push every new create/buy/sell event
 - **Live quote simulation** — calls `getAmountOut` / `getAmountOutSell` on the live contract, not from cached DB state
 - **Discovery endpoints** — trending, new, bonding-curve, and migrated token feeds
@@ -80,8 +80,6 @@ Edit `.env`:
 | `DATABASE_URL` | **Yes** | PostgreSQL connection string |
 | `API_PORT` | No | REST API port (default `3001`) |
 | `ALLOWED_ORIGINS` | Recommended | Comma-separated UI origins for origin-restricted endpoints |
-| `SSL_KEY_PATH` | No | Path to TLS private key — enables HTTPS + WSS when set with `SSL_CERT_PATH` |
-| `SSL_CERT_PATH` | No | Path to TLS certificate — enables HTTPS + WSS when set with `SSL_KEY_PATH` |
 | `IPFS_GATEWAY` | No | Custom IPFS gateway for token metadata resolution (default: `https://ipfs.io/ipfs/`) |
 
 > Both `BSC_WSS_URL` and `BSC_RPC_URL` are required. The indexer throws at startup if either is missing.
@@ -119,25 +117,7 @@ npm run api:build
 npm run api
 ```
 
-API available at `https://localhost:3001/api/v1` (HTTP if TLS is not configured).
-WebSocket stream at `wss://localhost:3001/api/v1/activity/ws`.
-
----
-
-## HTTPS / WSS Setup
-
-The API runs in plain HTTP/WS mode by default. To enable TLS:
-
-```bash
-# Generate a self-signed cert for local testing
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
-
-# Set in .env
-SSL_KEY_PATH=./key.pem
-SSL_CERT_PATH=./cert.pem
-```
-
-In production, point these vars at your certificate files from Let's Encrypt or your TLS provider. Restart the API — no code changes needed. WebSocket connections automatically upgrade to WSS when TLS is active.
+API available at `https://api.1coin.meme/api/v1`. TLS is handled by Cloudflare — see [CLOUDFLARE.md](CLOUDFLARE.md).
 
 ---
 
@@ -216,7 +196,7 @@ http://localhost:42069/graphql
 
 ## REST API
 
-Base URL: `https://localhost:3001/api/v1`
+Base URL: `https://api.1coin.meme/api/v1`
 
 All list endpoints return a consistent paginated envelope:
 
@@ -334,7 +314,7 @@ Use this to convert all BNB wei amounts to USD on the frontend. If an exchange i
 | `GET` | `/api/v1/charts/search` | Token address search — `?query=<prefix>&limit=10` |
 | `GET` | `/api/v1/charts/time` | Server unix timestamp |
 
-Supported resolutions: `1`, `5`, `15`, `30`, `60`, `240`, `D`. Point TradingView's `datafeed` URL at `https://yourapi.com/api/v1/charts`. Migrated tokens return `{ s: "no_data" }` — chart goes blank.
+Supported resolutions: `1`, `5`, `15`, `30`, `60`, `240`, `D`. Point TradingView's `datafeed` URL at `https://api.1coin.meme/api/v1/charts`. Migrated tokens return `{ s: "no_data" }` — chart goes blank.
 
 #### Discovery _(UI only)_
 
@@ -360,7 +340,7 @@ Supported resolutions: `1`, `5`, `15`, `30`, `60`, `240`, `D`. Point TradingView
 
 ```js
 // Browser
-const ws = new WebSocket("wss://api.onememe.io/api/v1/activity/ws?type=buy");
+const ws = new WebSocket("wss://api.1coin.meme/api/v1/activity/ws?type=buy");
 ws.onmessage = (e) => {
   const { event, data } = JSON.parse(e.data);
   if (event === "activity") console.log(data);
@@ -451,7 +431,7 @@ For production you will need:
 
 1. A **managed PostgreSQL** instance (Supabase, Railway, Neon, AWS RDS, etc.)
 2. A **dedicated BSC RPC** with archive access (QuickNode, Ankr, NodeReal, etc.)
-3. **TLS certificates** (Let's Encrypt recommended) — set `SSL_KEY_PATH` + `SSL_CERT_PATH`
+3. **TLS / HTTPS** — handled by Cloudflare reverse proxy; see [CLOUDFLARE.md](CLOUDFLARE.md)
 4. A process manager (PM2, Docker, Railway, Render, etc.)
 
 ```bash

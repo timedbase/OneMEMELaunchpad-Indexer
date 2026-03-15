@@ -2,7 +2,7 @@
 
 Complete reference of every endpoint with `curl` commands and expected JSON responses.
 
-> **Base URL:** `https://localhost:3001` (HTTP if TLS is not configured — see [HTTPS Setup](#https--wss-setup))
+> **Base URL:** `https://api.1coin.meme` (HTTP if TLS is not configured — see [HTTPS Setup](#https--wss-setup))
 > **All BNB / token amounts** are returned as strings (wei, 18 decimals) to preserve uint256 precision.
 > **Pagination** is available on all list endpoints via `?page=` and `?limit=` (max 100).
 > **Origin-restricted endpoints** (`/stats`, `/activity/*`, `/discover/*`) require the request `Origin` header to match `ALLOWED_ORIGINS`. In development, `localhost` origins are always permitted.
@@ -62,7 +62,7 @@ Complete reference of every endpoint with `curl` commands and expected JSON resp
 Verify the API server is running. No rate limit, no origin restriction.
 
 ```bash
-curl https://localhost:3001/health
+curl https://api.1coin.meme/health
 ```
 
 **Response `200 OK`**
@@ -82,8 +82,8 @@ curl https://localhost:3001/health
 Aggregated platform-wide statistics. Restricted to `ALLOWED_ORIGINS` (UI only). Rate limit: **10 req/min**.
 
 ```bash
-curl https://localhost:3001/api/v1/stats \
-  -H "Origin: https://app.onememe.io"
+curl https://api.1coin.meme/api/v1/stats \
+  -H "Origin: https://1coin.meme"
 ```
 
 **Response `200 OK`**
@@ -132,10 +132,10 @@ curl https://localhost:3001/api/v1/stats \
 
 ```bash
 # Newest first (default)
-curl "https://localhost:3001/api/v1/tokens?limit=5"
+curl "https://api.1coin.meme/api/v1/tokens?limit=5"
 
 # Tax tokens not yet migrated, sorted by volume
-curl "https://localhost:3001/api/v1/tokens?type=Tax&migrated=false&orderBy=volumeBNB&limit=10"
+curl "https://api.1coin.meme/api/v1/tokens?type=Tax&migrated=false&orderBy=volumeBNB&limit=10"
 ```
 
 **Query params:**
@@ -181,7 +181,7 @@ curl "https://localhost:3001/api/v1/tokens?type=Tax&migrated=false&orderBy=volum
 Off-chain metadata (name, image, description, website, socials) is resolved from the token's `metaURI` and merged into the response.
 
 ```bash
-curl "https://localhost:3001/api/v1/tokens/0xabc...1111"
+curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111"
 ```
 
 **Response `200 OK`**
@@ -230,7 +230,7 @@ curl "https://localhost:3001/api/v1/tokens/0xabc...1111"
 ### 3.3 Token trades
 
 ```bash
-curl "https://localhost:3001/api/v1/tokens/0xabc...1111/trades?type=buy&limit=10"
+curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111/trades?type=buy&limit=10"
 ```
 
 **Query params:** `type` (`buy`|`sell`), `orderBy` (`timestamp`|`bnbAmount`|`tokenAmount`|`blockNumber`), `orderDir`, `from`, `to`, `page`, `limit`
@@ -263,7 +263,7 @@ curl "https://localhost:3001/api/v1/tokens/0xabc...1111/trades?type=buy&limit=10
 ### 3.4 Top traders leaderboard
 
 ```bash
-curl "https://localhost:3001/api/v1/tokens/0xabc...1111/traders?limit=10&orderBy=totalVolumeBNB"
+curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111/traders?limit=10&orderBy=totalVolumeBNB"
 ```
 
 **Query params:** `orderBy` (`totalVolumeBNB`|`totalTrades`|`buyCount`|`sellCount`|`netBNB`), `orderDir`, `page`, `limit`
@@ -295,7 +295,7 @@ curl "https://localhost:3001/api/v1/tokens/0xabc...1111/traders?limit=10&orderBy
 Derives estimated holder positions from bonding-curve trade history (buys − sells per wallet). Only wallets with a positive net token balance are returned.
 
 ```bash
-curl "https://localhost:3001/api/v1/tokens/0xabc...1111/holders?limit=20"
+curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111/holders?limit=20"
 ```
 
 **Query params:**
@@ -344,7 +344,7 @@ curl "https://localhost:3001/api/v1/tokens/0xabc...1111/holders?limit=20"
 ### 3.6 Migration record
 
 ```bash
-curl "https://localhost:3001/api/v1/tokens/0xabc...1111/migration"
+curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111/migration"
 ```
 
 **Response `200 OK`** (after migration) / **`404`** (not yet migrated)
@@ -373,7 +373,7 @@ All quote endpoints call the live `LaunchpadFactory` contract via `BSC_RPC_URL`.
 ### 4.1 Spot price
 
 ```bash
-curl "https://localhost:3001/api/v1/tokens/0xabc...1111/quote/price"
+curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111/quote/price"
 ```
 
 **Response `200 OK`**
@@ -400,7 +400,7 @@ Simulate purchasing tokens with BNB. Input amounts are in **wei**.
 
 ```bash
 # 1 BNB in, 1% slippage
-curl "https://localhost:3001/api/v1/tokens/0xabc...1111/quote/buy?bnbIn=1000000000000000000&slippage=100"
+curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111/quote/buy?bnbIn=1000000000000000000&slippage=100"
 ```
 
 **Query params:**
@@ -443,7 +443,7 @@ curl "https://localhost:3001/api/v1/tokens/0xabc...1111/quote/buy?bnbIn=10000000
 
 ```bash
 # 10 000 tokens in, 2% slippage
-curl "https://localhost:3001/api/v1/tokens/0xabc...1111/quote/sell?tokensIn=10000000000000000000000&slippage=200"
+curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111/quote/sell?tokensIn=10000000000000000000000&slippage=200"
 ```
 
 **Response `200 OK`**
@@ -483,13 +483,13 @@ curl "https://localhost:3001/api/v1/tokens/0xabc...1111/quote/sell?tokensIn=1000
 
 ```bash
 # All trades, newest first
-curl "https://localhost:3001/api/v1/trades?limit=20"
+curl "https://api.1coin.meme/api/v1/trades?limit=20"
 
 # Buys only for a specific token
-curl "https://localhost:3001/api/v1/trades?token=0xabc...1111&type=buy"
+curl "https://api.1coin.meme/api/v1/trades?token=0xabc...1111&type=buy"
 
 # Trades in a time window
-curl "https://localhost:3001/api/v1/trades?from=1741800000&to=1741824000"
+curl "https://api.1coin.meme/api/v1/trades?from=1741800000&to=1741824000"
 ```
 
 **Query params:** `token`, `trader`, `type` (`buy`|`sell`), `from`, `to`, `orderBy` (`timestamp`|`bnbAmount`|`tokenAmount`|`blockNumber`), `orderDir`, `page`, `limit`
@@ -522,7 +522,7 @@ curl "https://localhost:3001/api/v1/trades?from=1741800000&to=1741824000"
 ### 5.2 Trades by wallet
 
 ```bash
-curl "https://localhost:3001/api/v1/traders/0xwhale.../trades?type=buy&limit=10"
+curl "https://api.1coin.meme/api/v1/traders/0xwhale.../trades?type=buy&limit=10"
 ```
 
 **Query params:** `type`, `from`, `to`, `page`, `limit`
@@ -532,7 +532,7 @@ curl "https://localhost:3001/api/v1/traders/0xwhale.../trades?type=buy&limit=10"
 ## 6. Migrations
 
 ```bash
-curl "https://localhost:3001/api/v1/migrations?orderBy=liquidityBNB&limit=10"
+curl "https://api.1coin.meme/api/v1/migrations?orderBy=liquidityBNB&limit=10"
 ```
 
 **Query params:** `orderBy` (`timestamp`|`liquidityBNB`|`liquidityTokens`|`blockNumber`), `orderDir`, `page`, `limit`
@@ -564,7 +564,7 @@ curl "https://localhost:3001/api/v1/migrations?orderBy=liquidityBNB&limit=10"
 Tokens deployed by a specific creator wallet.
 
 ```bash
-curl "https://localhost:3001/api/v1/creators/0xcreator.../tokens?limit=10"
+curl "https://api.1coin.meme/api/v1/creators/0xcreator.../tokens?limit=10"
 ```
 
 **Response** — same paginated token shape as [3.1 List tokens](#31-list-tokens).
@@ -578,16 +578,16 @@ Unified stream of create/buy/sell events across all tokens. Restricted to `ALLOW
 ### 8.1 Paginated feed
 
 ```bash
-curl "https://localhost:3001/api/v1/activity" \
-  -H "Origin: https://app.onememe.io"
+curl "https://api.1coin.meme/api/v1/activity" \
+  -H "Origin: https://1coin.meme"
 
 # Filter by event type
-curl "https://localhost:3001/api/v1/activity?type=buy&limit=10" \
-  -H "Origin: https://app.onememe.io"
+curl "https://api.1coin.meme/api/v1/activity?type=buy&limit=10" \
+  -H "Origin: https://1coin.meme"
 
 # Filter by token
-curl "https://localhost:3001/api/v1/activity?token=0xabc...1111" \
-  -H "Origin: https://app.onememe.io"
+curl "https://api.1coin.meme/api/v1/activity?token=0xabc...1111" \
+  -H "Origin: https://1coin.meme"
 ```
 
 **Query params:** `type` (`create`|`buy`|`sell`), `token` (address), `page`, `limit`
@@ -630,18 +630,18 @@ Pushes new events as they are indexed (2 s DB poll, 15 s keepalive). Long-lived 
 
 ```bash
 # curl (streams to terminal)
-curl -N "https://localhost:3001/api/v1/activity/stream" \
-  -H "Origin: https://app.onememe.io"
+curl -N "https://api.1coin.meme/api/v1/activity/stream" \
+  -H "Origin: https://1coin.meme"
 
 # Filter buys for a specific token
-curl -N "https://localhost:3001/api/v1/activity/stream?type=buy&token=0xabc...1111" \
-  -H "Origin: https://app.onememe.io"
+curl -N "https://api.1coin.meme/api/v1/activity/stream?type=buy&token=0xabc...1111" \
+  -H "Origin: https://1coin.meme"
 ```
 
 **Browser (EventSource):**
 
 ```js
-const es = new EventSource("https://api.onememe.io/api/v1/activity/stream?type=buy");
+const es = new EventSource("https://api.1coin.meme/api/v1/activity/stream?type=buy");
 es.addEventListener("activity",  (e) => console.log(JSON.parse(e.data)));
 es.addEventListener("keepalive", ()  => {});
 es.onerror = () => console.warn("SSE disconnected, browser will reconnect");
@@ -664,8 +664,8 @@ data:
 Same data as SSE but over a persistent WebSocket connection. Automatically WSS when the server has TLS configured.
 
 ```
-ws://localhost:3001/api/v1/activity/ws       (HTTP mode)
-wss://api.onememe.io/api/v1/activity/ws      (HTTPS/TLS mode)
+
+wss://api.1coin.meme/api/v1/activity/ws
 ```
 
 **Optional query params on connect:**
@@ -678,7 +678,7 @@ wss://api.onememe.io/api/v1/activity/ws      (HTTPS/TLS mode)
 **Browser:**
 
 ```js
-const ws = new WebSocket("wss://api.onememe.io/api/v1/activity/ws?type=buy");
+const ws = new WebSocket("wss://api.1coin.meme/api/v1/activity/ws?type=buy");
 
 ws.onopen    = ()  => console.log("Connected");
 ws.onmessage = (e) => {
@@ -710,12 +710,12 @@ All discovery endpoints are restricted to `ALLOWED_ORIGINS` and return paginated
 Tokens ranked by trade count in the last 30 minutes (configurable).
 
 ```bash
-curl "https://localhost:3001/api/v1/discover/trending" \
-  -H "Origin: https://app.onememe.io"
+curl "https://api.1coin.meme/api/v1/discover/trending" \
+  -H "Origin: https://1coin.meme"
 
 # Custom window — last 5 minutes
-curl "https://localhost:3001/api/v1/discover/trending?window=300" \
-  -H "Origin: https://app.onememe.io"
+curl "https://api.1coin.meme/api/v1/discover/trending?window=300" \
+  -H "Origin: https://1coin.meme"
 ```
 
 **Query params:** `window` (seconds, default `1800`, max `86400`), `page`, `limit`
@@ -752,12 +752,12 @@ curl "https://localhost:3001/api/v1/discover/trending?window=300" \
 Freshly launched, non-migrated tokens newest first.
 
 ```bash
-curl "https://localhost:3001/api/v1/discover/new" \
-  -H "Origin: https://app.onememe.io"
+curl "https://api.1coin.meme/api/v1/discover/new" \
+  -H "Origin: https://1coin.meme"
 
 # Filter to Tax tokens only
-curl "https://localhost:3001/api/v1/discover/new?type=Tax" \
-  -H "Origin: https://app.onememe.io"
+curl "https://api.1coin.meme/api/v1/discover/new?type=Tax" \
+  -H "Origin: https://1coin.meme"
 ```
 
 **Query params:** `type` (`Standard`|`Tax`|`Reflection`), `page`, `limit`
@@ -769,8 +769,8 @@ curl "https://localhost:3001/api/v1/discover/new?type=Tax" \
 Active bonding-curve tokens sorted by `raisedBNB` descending — closest to migrating first.
 
 ```bash
-curl "https://localhost:3001/api/v1/discover/bonding" \
-  -H "Origin: https://app.onememe.io"
+curl "https://api.1coin.meme/api/v1/discover/bonding" \
+  -H "Origin: https://1coin.meme"
 ```
 
 **Query params:** `type`, `page`, `limit`
@@ -793,8 +793,8 @@ _(24 h window)_
 Tokens graduated to PancakeSwap V2, joined with migration data.
 
 ```bash
-curl "https://localhost:3001/api/v1/discover/migrated?orderBy=liquidityBNB&limit=10" \
-  -H "Origin: https://app.onememe.io"
+curl "https://api.1coin.meme/api/v1/discover/migrated?orderBy=liquidityBNB&limit=10" \
+  -H "Origin: https://1coin.meme"
 ```
 
 **Query params:** `type`, `orderBy` (`migratedAt`|`liquidityBNB`|`volumeBNB`), `orderDir`, `page`, `limit`
@@ -822,16 +822,16 @@ Traders ranked by total BNB trading volume (buys + sells). No origin restriction
 
 ```bash
 # All-time leaderboard (default)
-curl "https://localhost:3001/api/v1/leaderboard/traders"
+curl "https://api.1coin.meme/api/v1/leaderboard/traders"
 
 # Last 24 hours
-curl "https://localhost:3001/api/v1/leaderboard/traders?period=1d"
+curl "https://api.1coin.meme/api/v1/leaderboard/traders?period=1d"
 
 # Last 7 days
-curl "https://localhost:3001/api/v1/leaderboard/traders?period=7d"
+curl "https://api.1coin.meme/api/v1/leaderboard/traders?period=7d"
 
 # Last 30 days
-curl "https://localhost:3001/api/v1/leaderboard/traders?period=30d"
+curl "https://api.1coin.meme/api/v1/leaderboard/traders?period=30d"
 ```
 
 **Query params:**
@@ -897,7 +897,7 @@ Token creator
 ### 11.2 Upload
 
 ```bash
-curl -X POST https://localhost:3001/api/v1/metadata/upload \
+curl -X POST https://api.1coin.meme/api/v1/metadata/upload \
   -F "image=@./pepe.png;type=image/png" \
   -F "name=PepeBSC" \
   -F "symbol=PEPE" \
@@ -957,7 +957,7 @@ async function uploadMetadata({ name, symbol, description, website, x, telegram,
   form.append("telegram",    telegram    ?? "");
   // Do NOT set Content-Type — browser sets it with boundary automatically.
 
-  const res = await fetch("https://api.onememe.io/api/v1/metadata/upload", {
+  const res = await fetch("https://api.1coin.meme/api/v1/metadata/upload", {
     method: "POST",
     body:   form,
   });
@@ -996,7 +996,7 @@ async function setTokenMetadata(tokenContract, metaURI) {
 Aggregated BNB/USDT spot price averaged across Binance, OKX, and Bybit. Refreshed every 10 seconds in the background. Use this to convert all BNB wei amounts displayed to users into USD.
 
 ```bash
-curl "https://localhost:3001/api/v1/price/bnb"
+curl "https://api.1coin.meme/api/v1/price/bnb"
 ```
 
 **Response `200 OK`**
@@ -1044,11 +1044,11 @@ console.log("$" + bnbWeiToUsd("500000000000000000", bnbUsdt));
 
 OHLCV candle data for bonding-curve tokens, compatible with the TradingView Charting Library.
 
-Point your datafeed at: `https://yourapi.com/api/v1/charts`
+Point your datafeed at: `https://api.1coin.meme/api/v1/charts`
 
 ```js
 new TradingView.widget({
-  datafeed: new Datafeeds.UDFCompatibleDatafeed("https://yourapi.com/api/v1/charts"),
+  datafeed: new Datafeeds.UDFCompatibleDatafeed("https://api.1coin.meme/api/v1/charts"),
   symbol:   "0xYourTokenAddress1111",
   interval: "15",
 });
@@ -1061,7 +1061,7 @@ Migrated tokens return `{ s: "no_data" }` — chart goes blank automatically.
 ### 13.1 Config
 
 ```bash
-curl "https://localhost:3001/api/v1/charts/config"
+curl "https://api.1coin.meme/api/v1/charts/config"
 ```
 
 **Response `200 OK`**
@@ -1081,7 +1081,7 @@ curl "https://localhost:3001/api/v1/charts/config"
 ### 13.2 Symbols
 
 ```bash
-curl "https://localhost:3001/api/v1/charts/symbols?symbol=0xabc...1111"
+curl "https://api.1coin.meme/api/v1/charts/symbols?symbol=0xabc...1111"
 ```
 
 **Response `200 OK`**
@@ -1111,10 +1111,10 @@ curl "https://localhost:3001/api/v1/charts/symbols?symbol=0xabc...1111"
 
 ```bash
 # 15-minute candles for the last 6 hours
-curl "https://localhost:3001/api/v1/charts/history?symbol=0xabc...1111&resolution=15&countback=24&to=1741824000"
+curl "https://api.1coin.meme/api/v1/charts/history?symbol=0xabc...1111&resolution=15&countback=24&to=1741824000"
 
 # Specific range
-curl "https://localhost:3001/api/v1/charts/history?symbol=0xabc...1111&resolution=60&from=1741800000&to=1741824000"
+curl "https://api.1coin.meme/api/v1/charts/history?symbol=0xabc...1111&resolution=60&from=1741800000&to=1741824000"
 ```
 
 **Query params:**
@@ -1152,7 +1152,7 @@ curl "https://localhost:3001/api/v1/charts/history?symbol=0xabc...1111&resolutio
 ### 13.4 Search
 
 ```bash
-curl "https://localhost:3001/api/v1/charts/search?query=0xabc&limit=5"
+curl "https://api.1coin.meme/api/v1/charts/search?query=0xabc&limit=5"
 ```
 
 **Response `200 OK`**
@@ -1196,7 +1196,7 @@ openssl req -x509 -newkey rsa:4096 \
 **Test HTTPS locally** (ignore self-signed warning):
 
 ```bash
-curl -k https://localhost:3001/health
+curl -k https://api.1coin.meme/health
 ```
 
 **Production** — use Let's Encrypt or your provider's certificate files; point the env vars at them and restart.
@@ -1245,7 +1245,7 @@ Endpoints restricted to the launchpad UI return `403 Forbidden` when the `Origin
 
 ```bash
 # No Origin header
-curl https://localhost:3001/api/v1/stats
+curl https://api.1coin.meme/api/v1/stats
 ```
 
 ```json
@@ -1258,7 +1258,7 @@ curl https://localhost:3001/api/v1/stats
 
 ```bash
 # Disallowed origin
-curl https://localhost:3001/api/v1/stats -H "Origin: https://other.io"
+curl https://api.1coin.meme/api/v1/stats -H "Origin: https://other.io"
 ```
 
 ```json
@@ -1272,7 +1272,7 @@ curl https://localhost:3001/api/v1/stats -H "Origin: https://other.io"
 **To permit an origin**, add it to `.env`:
 
 ```dotenv
-ALLOWED_ORIGINS=https://app.onememe.io,https://onememe.io
+ALLOWED_ORIGINS=https://1coin.meme,https://www.1coin.meme
 ```
 
 In development (`NODE_ENV=development`), all `http://localhost:*` and `http://127.0.0.1:*` origins are automatically permitted.
