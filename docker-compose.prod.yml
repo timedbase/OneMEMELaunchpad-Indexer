@@ -1,0 +1,50 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OneMEME Launchpad — Production Stack
+#
+# Single container running Ponder + NestJS under PM2.
+# Database is hosted on Neon (external) — no local postgres here.
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d          # start
+#   docker compose -f docker-compose.prod.yml logs -f        # tail logs
+#   docker compose -f docker-compose.prod.yml pull && \
+#     docker compose -f docker-compose.prod.yml up -d        # update
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: onememe-launchpad:latest
+    container_name: onememe-launchpad
+    restart: unless-stopped
+
+    ports:
+      - "3001:3001"       # NestJS API — proxied by Cloudflare
+
+    env_file:
+      - .env              # BSC_WSS_URL, BSC_RPC_URL, DATABASE_URL, etc.
+
+    volumes:
+      - ponder_data:/app/.ponder    # Ponder checkpoint + cache (persistent)
+
+    # Healthcheck hits the NestJS /health endpoint
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s             # give Ponder time to boot before checking
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  ponder_data:
+    driver: local
