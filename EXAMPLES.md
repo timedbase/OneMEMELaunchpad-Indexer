@@ -144,7 +144,7 @@ curl "https://api.1coin.meme/api/v1/tokens?type=Tax&migrated=false&orderBy=volum
 
 | Param | Values | Default |
 |---|---|---|
-| `type` | `Standard` \| `Tax` \| `Reflection` | all |
+| `type` | `Standard` \| `Tax` \| `Reflection` | all — invalid value returns `400` |
 | `migrated` | `true` \| `false` | all |
 | `orderBy` | `createdAtBlock` \| `volumeBNB` \| `buyCount` \| `sellCount` \| `raisedBNB` \| `totalSupply` | `createdAtBlock` |
 | `orderDir` | `asc` \| `desc` | `desc` |
@@ -169,7 +169,8 @@ curl "https://api.1coin.meme/api/v1/tokens?type=Tax&migrated=false&orderBy=volum
       "buyCount":         142,
       "sellCount":        41,
       "volumeBNB":        "820000000000000000000",
-      "raisedBNB":        "610000000000000000000"
+      "raisedBNB":        "610000000000000000000",
+      "migrationTarget":  "800000000000000000000"
     }
   ],
   "pagination": { "page": 1, "limit": 5, "total": 1042, "pages": 209, "hasMore": true }
@@ -205,6 +206,7 @@ curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111"
     "sellCount":        41,
     "volumeBNB":        "820000000000000000000",
     "raisedBNB":        "610000000000000000000",
+    "migrationTarget":  "800000000000000000000",
     "metaURI":  "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
     "metadata": {
       "name":        "PepeBSC",
@@ -410,7 +412,7 @@ curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111/quote/buy?bnbIn=10000000
 | Param | Required | Description |
 |---|---|---|
 | `bnbIn` | Yes | BNB input in wei (e.g. `1000000000000000000` = 1 BNB) |
-| `slippage` | No | Tolerance in basis points (default `100` = 1%, max `5000`) |
+| `slippage` | No | Tolerance in basis points (default `100` = 1%, range `0`–`5000`) — negative values return `400` |
 
 **Response `200 OK`**
 
@@ -1271,6 +1273,7 @@ function sendMessage(text) {
 - Max message length: **500 characters** — longer text is silently truncated on save
 - Must subscribe before sending — server rejects messages without an active subscription
 - History is capped at **200 messages per token** — oldest are pruned on insert
+- Max **5 concurrent WebSocket connections per IP** — new connections beyond this are closed with code `1008`
 
 ---
 
