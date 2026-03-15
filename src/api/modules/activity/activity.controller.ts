@@ -15,18 +15,15 @@ import {
   Query,
   Res,
   Sse,
-  UseGuards,
 } from "@nestjs/common";
 import type { Response } from "express";
 import { Observable } from "rxjs";
 import { ActivityService, VALID_TYPES } from "./activity.service";
-import { OriginGuard } from "../../common/origin.guard";
 
 const POLL_MS      = 2_000;
 const KEEPALIVE_MS = 15_000;
 
 @Controller("activity")
-@UseGuards(OriginGuard)
 export class ActivityController {
   constructor(private readonly activity: ActivityService) {}
 

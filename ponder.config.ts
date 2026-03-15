@@ -2,6 +2,7 @@ import { createConfig } from "ponder";
 import { fallback, http, webSocket } from "viem";
 
 import LaunchpadFactoryAbi from "./abis/LaunchpadFactory.json";
+import ERC20Abi            from "./abis/ERC20.json";
 
 /**
  * Ponder configuration for the OneMEME Launchpad Indexer.
@@ -43,8 +44,22 @@ export default createConfig({
   contracts: {
     LaunchpadFactory: {
       network:    "bsc",
-      abi:        LaunchpadFactoryAbi as Parameters<typeof createConfig>[0]["contracts"][string]["abi"],
+      abi:        LaunchpadFactoryAbi as any,
       address:    process.env.FACTORY_ADDRESS as `0x${string}`,
+      startBlock: process.env.START_BLOCK ? parseInt(process.env.START_BLOCK) : 0,
+    },
+
+    // Tracks Transfer events on every token deployed by the factory.
+    // Ponder reads the `token` field from each TokenCreated log to discover
+    // new contract addresses automatically — no manual address list needed.
+    MemeToken: {
+      network: "bsc",
+      abi:     ERC20Abi as any,
+      factory: {
+        address:   process.env.FACTORY_ADDRESS as `0x${string}`,
+        event:     LaunchpadFactoryAbi.find((e: any) => e.name === "TokenCreated") as any,
+        parameter: "token",
+      },
       startBlock: process.env.START_BLOCK ? parseInt(process.env.START_BLOCK) : 0,
     },
   },

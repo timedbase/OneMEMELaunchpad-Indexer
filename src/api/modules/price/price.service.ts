@@ -31,7 +31,8 @@ export class PriceService implements OnModuleInit, OnModuleDestroy {
       const price = parseFloat(data.price);
       if (!isFinite(price) || price <= 0) throw new Error("invalid price");
       return { exchange: "Binance", price, ok: true };
-    } catch {
+    } catch (err) {
+      this.logger.warn(`Binance fetch failed: ${(err as Error).message}`);
       return { exchange: "Binance", price: 0, ok: false };
     }
   }
@@ -44,7 +45,8 @@ export class PriceService implements OnModuleInit, OnModuleDestroy {
       const price = parseFloat(data.data[0].last);
       if (!isFinite(price) || price <= 0) throw new Error("invalid price");
       return { exchange: "OKX", price, ok: true };
-    } catch {
+    } catch (err) {
+      this.logger.warn(`OKX fetch failed: ${(err as Error).message}`);
       return { exchange: "OKX", price: 0, ok: false };
     }
   }
@@ -57,7 +59,8 @@ export class PriceService implements OnModuleInit, OnModuleDestroy {
       const price = parseFloat(data.result.list[0].lastPrice);
       if (!isFinite(price) || price <= 0) throw new Error("invalid price");
       return { exchange: "Bybit", price, ok: true };
-    } catch {
+    } catch (err) {
+      this.logger.warn(`Bybit fetch failed: ${(err as Error).message}`);
       return { exchange: "Bybit", price: 0, ok: false };
     }
   }

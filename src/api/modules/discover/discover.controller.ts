@@ -1,9 +1,7 @@
-import { Controller, Get, Query, UseGuards } from "@nestjs/common";
+import { Controller, Get, Query } from "@nestjs/common";
 import { DiscoverService } from "./discover.service";
-import { OriginGuard }     from "../../common/origin.guard";
 
 @Controller("discover")
-@UseGuards(OriginGuard)
 export class DiscoverController {
   constructor(private readonly discover: DiscoverService) {}
 

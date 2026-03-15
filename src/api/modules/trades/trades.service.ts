@@ -23,8 +23,12 @@ export class TradesService {
     const tokenSql  = tokenFilter  ? sql`AND "token"     = ${tokenFilter.toLowerCase()}`  : sql``;
     const traderSql = traderFilter ? sql`AND "trader"    = ${traderFilter.toLowerCase()}` : sql``;
     const typeSql   = typeFilter   ? sql`AND "tradeType" = ${typeFilter}`                  : sql``;
-    const fromSql   = from         ? sql`AND "timestamp" >= ${parseInt(from)}`             : sql``;
-    const toSql     = to           ? sql`AND "timestamp" <= ${parseInt(to)}`               : sql``;
+    const fromInt   = from ? parseInt(from, 10) : null;
+    const toInt     = to   ? parseInt(to,   10) : null;
+    if (fromInt !== null && isNaN(fromInt)) throw new BadRequestException("from must be a unix timestamp");
+    if (toInt   !== null && isNaN(toInt))   throw new BadRequestException("to must be a unix timestamp");
+    const fromSql   = fromInt !== null ? sql`AND "timestamp" >= ${fromInt}` : sql``;
+    const toSql     = toInt   !== null ? sql`AND "timestamp" <= ${toInt}`   : sql``;
 
     const numericCols = new Set(["bnbAmount", "tokenAmount", "blockNumber"]);
     const orderExpr   = numericCols.has(orderBy)
@@ -47,9 +51,13 @@ export class TradesService {
     const from       = query["from"];
     const to         = query["to"];
 
-    const typeSql = typeFilter ? sql`AND "tradeType" = ${typeFilter}`      : sql``;
-    const fromSql = from       ? sql`AND "timestamp" >= ${parseInt(from)}` : sql``;
-    const toSql   = to         ? sql`AND "timestamp" <= ${parseInt(to)}`   : sql``;
+    const fromInt2 = from ? parseInt(from, 10) : null;
+    const toInt2   = to   ? parseInt(to,   10) : null;
+    if (fromInt2 !== null && isNaN(fromInt2)) throw new BadRequestException("from must be a unix timestamp");
+    if (toInt2   !== null && isNaN(toInt2))   throw new BadRequestException("to must be a unix timestamp");
+    const typeSql = typeFilter       ? sql`AND "tradeType" = ${typeFilter}`  : sql``;
+    const fromSql = fromInt2 !== null ? sql`AND "timestamp" >= ${fromInt2}`  : sql``;
+    const toSql   = toInt2   !== null ? sql`AND "timestamp" <= ${toInt2}`    : sql``;
 
     const addr = address.toLowerCase();
 

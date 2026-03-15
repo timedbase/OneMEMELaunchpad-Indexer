@@ -5,10 +5,12 @@
  * and persists them to PostgreSQL via Ponder's type-safe ORM.
  *
  * Events handled:
- *   TokenCreated  — new meme token deployed
- *   TokenBought   — bonding-curve buy
- *   TokenSold     — bonding-curve sell
- *   TokenMigrated — token graduates to PancakeSwap V2
+ *   LaunchpadFactory:TokenCreated  — new meme token deployed
+ *   LaunchpadFactory:TokenBought   — bonding-curve buy
+ *   LaunchpadFactory:TokenSold     — bonding-curve sell
+ *   LaunchpadFactory:TokenMigrated — token graduates to PancakeSwap V2
+ *   MemeToken:Transfer             — ERC-20 transfer on any deployed token
+ *                                    (used to maintain exact onchain holder balances)
  */
 
 import { ponder } from "ponder:registry";
@@ -158,4 +160,39 @@ ponder.on("LaunchpadFactory:TokenMigrated", async ({ event, context }) => {
   await context.db
     .update(schema.token, { id: token })
     .set({ migrated: true, pairAddress: pair });
+});
+
+// ─── Holder Balances ──────────────────────────────────────────────────────────
+
+/**
+ * Fired on every ERC-20 Transfer on any token deployed by the factory.
+ *
+ * Maintains exact onchain balances in the `holder` table:
+ *   - Deducts `value` from the sender's balance (skip the zero address — mints)
+ *   - Credits `value`  to the receiver's balance (skip the zero address — burns)
+ *
+ * Rows are upserted so the first transfer for a wallet creates the row
+ * and subsequent transfers update it in place.
+ */
+ponder.on("MemeToken:Transfer", async ({ event, context }) => {
+  const { from, to, value } = event.args;
+  const token = event.log.address;
+
+  const ZERO = "0x0000000000000000000000000000000000000000";
+
+  // Deduct from sender (skip zero address = mint)
+  if (from !== ZERO) {
+    await context.db
+      .insert(schema.holder)
+      .values({ token, address: from, balance: 0n - value })
+      .onConflictDoUpdate((row) => ({ balance: row.balance - value }));
+  }
+
+  // Credit receiver (skip zero address = burn)
+  if (to !== ZERO) {
+    await context.db
+      .insert(schema.holder)
+      .values({ token, address: to, balance: value })
+      .onConflictDoUpdate((row) => ({ balance: row.balance + value }));
+  }
 });

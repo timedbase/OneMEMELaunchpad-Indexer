@@ -60,9 +60,13 @@ export class TokensService {
     const orderBy  = parseOrderBy(query, ALLOWED_ORDER, "timestamp");
     const orderDir = parseOrderDir(query);
 
-    const typeFilter = type ? sql`AND "tradeType" = ${type}`            : sql``;
-    const fromFilter = from ? sql`AND "timestamp" >= ${parseInt(from)}` : sql``;
-    const toFilter   = to   ? sql`AND "timestamp" <= ${parseInt(to)}`   : sql``;
+    const fromInt = from ? parseInt(from, 10) : null;
+    const toInt   = to   ? parseInt(to,   10) : null;
+    if (fromInt !== null && isNaN(fromInt)) throw new BadRequestException("from must be a unix timestamp");
+    if (toInt   !== null && isNaN(toInt))   throw new BadRequestException("to must be a unix timestamp");
+    const typeFilter = type              ? sql`AND "tradeType" = ${type}`    : sql``;
+    const fromFilter = fromInt !== null  ? sql`AND "timestamp" >= ${fromInt}` : sql``;
+    const toFilter   = toInt   !== null  ? sql`AND "timestamp" <= ${toInt}`   : sql``;
 
     const numericCols = new Set(["bnbAmount", "tokenAmount", "blockNumber"]);
     const orderExpr   = numericCols.has(orderBy)
@@ -127,59 +131,31 @@ export class TokensService {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
 
     const { page, limit, offset } = parsePagination(query);
-    const ALLOWED_ORDER = ["estimatedBalance", "buyCount", "sellCount", "totalTrades"] as const;
-    const orderBy  = parseOrderBy(query, ALLOWED_ORDER, "estimatedBalance");
     const orderDir = parseOrderDir(query);
     const addr     = address.toLowerCase();
 
-    // Derive holder list from bonding-curve trade history.
-    // estimatedBalance = sum(tokenAmount for buys) - sum(tokenAmount for sells).
-    // Only wallets with a positive net position are returned.
-    // Note: on-chain token transfers (P2P) are not indexed, so this is an
-    // approximation — it reflects bonding-curve activity only.
+    // Query the holder table which is maintained by indexing every Transfer
+    // event on the token contract — exact onchain balances, not estimates.
     const [rows, [{ count }]] = await Promise.all([
       sql`
         SELECT
-          "trader"                                                                         AS "address",
-          COUNT(*) FILTER (WHERE "tradeType" = 'buy')::int                               AS "buyCount",
-          COUNT(*) FILTER (WHERE "tradeType" = 'sell')::int                              AS "sellCount",
-          COUNT(*)::int                                                                   AS "totalTrades",
-          (
-            COALESCE(SUM("tokenAmount"::numeric) FILTER (WHERE "tradeType" = 'buy'),  0) -
-            COALESCE(SUM("tokenAmount"::numeric) FILTER (WHERE "tradeType" = 'sell'), 0)
-          )::text                                                                         AS "estimatedBalance",
-          COALESCE(SUM("bnbAmount"::numeric) FILTER (WHERE "tradeType" = 'buy'),  0)::text AS "totalBNBIn",
-          COALESCE(SUM("bnbAmount"::numeric) FILTER (WHERE "tradeType" = 'sell'), 0)::text AS "totalBNBOut",
-          MAX("timestamp")                                                                AS "lastTradeAt"
-        FROM trade
+          "address",
+          "balance"::text AS "balance"
+        FROM holder
         WHERE "token" = ${addr}
-        GROUP BY "trader"
-        HAVING (
-          COALESCE(SUM("tokenAmount"::numeric) FILTER (WHERE "tradeType" = 'buy'),  0) -
-          COALESCE(SUM("tokenAmount"::numeric) FILTER (WHERE "tradeType" = 'sell'), 0)
-        ) > 0
-        ORDER BY ${sql('"' + orderBy + '"')}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}
+          AND "balance"::numeric > 0
+        ORDER BY "balance"::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}
         LIMIT ${limit} OFFSET ${offset}
       `,
       sql`
         SELECT COUNT(*)::int AS count
-        FROM (
-          SELECT "trader"
-          FROM trade
-          WHERE "token" = ${addr}
-          GROUP BY "trader"
-          HAVING (
-            COALESCE(SUM("tokenAmount"::numeric) FILTER (WHERE "tradeType" = 'buy'),  0) -
-            COALESCE(SUM("tokenAmount"::numeric) FILTER (WHERE "tradeType" = 'sell'), 0)
-          ) > 0
-        ) AS holders
+        FROM holder
+        WHERE "token" = ${addr}
+          AND "balance"::numeric > 0
       `,
     ]);
 
-    return {
-      ...paginated(rows, count, page, limit),
-      note: "Derived from bonding-curve trade history. Does not account for P2P token transfers.",
-    };
+    return paginated(rows, count, page, limit);
   }
 
   async byCreator(address: string, query: Record<string, string | undefined>) {

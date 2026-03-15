@@ -90,14 +90,22 @@ export class ChartsService {
   async history(query: Record<string, string | undefined>) {
     const symbol     = query["symbol"];
     const resolution = query["resolution"] ?? "60";
-    const toTs       = query["to"]         ? parseInt(query["to"])        : Math.floor(Date.now() / 1000);
-    const countback  = query["countback"]  ? parseInt(query["countback"]) : null;
-    const fromTs     = query["from"]       ? parseInt(query["from"])      : null;
+    const toRaw       = query["to"]        ? parseInt(query["to"],        10) : null;
+    const countbackRaw = query["countback"] ? parseInt(query["countback"], 10) : null;
+    const fromRaw      = query["from"]      ? parseInt(query["from"],      10) : null;
 
     if (!symbol) throw new BadRequestException("symbol is required");
 
     const resSecs = RESOLUTION_MAP[resolution];
     if (!resSecs) throw new BadRequestException(`Unsupported resolution: ${resolution}`);
+
+    if (toRaw       !== null && isNaN(toRaw))       throw new BadRequestException("to must be a unix timestamp");
+    if (countbackRaw !== null && isNaN(countbackRaw)) throw new BadRequestException("countback must be an integer");
+    if (fromRaw      !== null && isNaN(fromRaw))     throw new BadRequestException("from must be a unix timestamp");
+
+    const toTs      = toRaw       ?? Math.floor(Date.now() / 1000);
+    const countback = countbackRaw ?? null;
+    const fromTs    = fromRaw      ?? null;
 
     const addr = symbol.toLowerCase();
 
@@ -158,12 +166,13 @@ export class ChartsService {
    */
   async search(query: Record<string, string | undefined>) {
     const q     = (query["query"] ?? "").toLowerCase();
-    const limit = Math.min(parseInt(query["limit"] ?? "10"), 30);
+    const limitRaw = parseInt(query["limit"] ?? "10", 10);
+    const limit    = isNaN(limitRaw) ? 10 : Math.min(limitRaw, 30);
 
     const rows = await sql`
       SELECT id, "tokenType"
       FROM token
-      WHERE id LIKE ${q + "%"}
+      WHERE id LIKE ${q} || '%'
       ORDER BY "createdAtTimestamp" DESC
       LIMIT ${limit}
     `;

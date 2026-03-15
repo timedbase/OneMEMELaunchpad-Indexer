@@ -1,4 +1,4 @@
-import { onchainTable, index } from "ponder";
+import { onchainTable, index, primaryKey } from "ponder";
 
 // ─── Token ────────────────────────────────────────────────────────────────────
 // One row per deployed meme token. Created on TokenCreated, updated on each
@@ -62,10 +62,11 @@ export const token = onchainTable(
     raisedBNB: t.bigint().notNull(),
   }),
   (table) => ({
-    creatorIdx:   index().on(table.creator),
-    migratedIdx:  index().on(table.migrated),
-    volumeBNBIdx: index().on(table.volumeBNB),
-    raisedBNBIdx: index().on(table.raisedBNB),
+    creatorIdx:        index().on(table.creator),
+    migratedIdx:       index().on(table.migrated),
+    volumeBNBIdx:      index().on(table.volumeBNB),
+    raisedBNBIdx:      index().on(table.raisedBNB),
+    createdAtBlockIdx: index().on(table.createdAtBlock),
   })
 );
 
@@ -122,6 +123,30 @@ export const trade = onchainTable(
     traderIdx:    index().on(table.trader),
     timestampIdx: index().on(table.timestamp),
     tradeTypeIdx: index().on(table.tradeType),
+  })
+);
+
+// ─── Holder ───────────────────────────────────────────────────────────────────
+// One row per (token, wallet) pair. Updated on every Transfer event.
+// Balance drops to zero when a wallet transfers out its entire position;
+// the row is retained (balance = 0n) rather than deleted for simplicity.
+
+export const holder = onchainTable(
+  "holder",
+  (t) => ({
+    /** Token contract address. */
+    token: t.hex().notNull(),
+
+    /** Wallet address. */
+    address: t.hex().notNull(),
+
+    /** Current onchain balance (wei). Updated on every Transfer event. */
+    balance: t.bigint().notNull(),
+  }),
+  (table) => ({
+    pk:         primaryKey({ columns: [table.token, table.address] }),
+    tokenIdx:   index().on(table.token),
+    balanceIdx: index().on(table.balance),
   })
 );
 

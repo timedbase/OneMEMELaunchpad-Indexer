@@ -23,4 +23,7 @@ export const sql = postgres(process.env.DATABASE_URL, {
   connect_timeout: 10,       // fail fast if DB is unreachable
   // Return numeric/decimal columns as strings to preserve uint256 precision.
   // postgres.js does this by default for `numeric` columns.
+  connection: {
+    statement_timeout: "30000",  // kill queries that run longer than 30 s
+  },
 });

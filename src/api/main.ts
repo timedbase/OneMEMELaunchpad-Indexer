@@ -58,6 +58,7 @@ async function bootstrap() {
   Route index : http://localhost:${port}/api/v1
   Health      : http://localhost:${port}/health
   Activity WS : ws://localhost:${port}/api/v1/activity/ws
+  Chat WS     : ws://localhost:${port}/api/v1/chat/ws
 
   Rate limits (per IP / per minute):
     /quote/*  → 20   (live BSC RPC)

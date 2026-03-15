@@ -7,10 +7,9 @@ export class StatsService {
     const [
       tokenStats,
       tradeStats,
-      [{ uniqueTraders }],
-      [latestTwap],
-      [topToken],
-      [migrationStats],
+      traderStats,
+      topTokenRows,
+      migrationStats,
     ] = await Promise.all([
       sql`
         SELECT
@@ -31,29 +30,33 @@ export class StatsService {
         FROM trade
       `,
       sql`SELECT COUNT(DISTINCT "trader")::int AS "uniqueTraders" FROM trade`,
-      sql`SELECT "priceAvg", "priceBlockNumber", "blockNumber", "timestamp" FROM twap_update ORDER BY "blockNumber"::numeric DESC LIMIT 1`,
       sql`SELECT "id", "tokenType", "creator", "volumeBNB", "buyCount", "sellCount", "migrated" FROM token ORDER BY "volumeBNB"::numeric DESC LIMIT 1`,
       sql`SELECT COALESCE(SUM("liquidityBNB"::numeric), 0)::text AS "totalLiquidityBNB" FROM migration`,
     ]);
 
+    const tokens     = tokenStats[0];
+    const trades     = tradeStats[0];
+    const traders    = traderStats[0];
+    const topToken   = topTokenRows[0]   ?? null;
+    const migration  = migrationStats[0] ?? null;
+
     return {
       data: {
-        totalTokens:    tokenStats[0].totalTokens,
-        migratedTokens: tokenStats[0].migratedTokens,
-        activeTokens:   tokenStats[0].activeTokens,
+        totalTokens:    tokens?.totalTokens    ?? 0,
+        migratedTokens: tokens?.migratedTokens ?? 0,
+        activeTokens:   tokens?.activeTokens   ?? 0,
         tokensByType: {
-          Standard:   tokenStats[0].standardTokens,
-          Tax:        tokenStats[0].taxTokens,
-          Reflection: tokenStats[0].reflectionTokens,
+          Standard:   tokens?.standardTokens   ?? 0,
+          Tax:        tokens?.taxTokens         ?? 0,
+          Reflection: tokens?.reflectionTokens  ?? 0,
         },
-        totalTrades:       tradeStats[0].totalTrades,
-        totalBuys:         tradeStats[0].totalBuys,
-        totalSells:        tradeStats[0].totalSells,
-        uniqueTraders,
-        totalVolumeBNB:    tokenStats[0].totalVolumeBNB,
-        totalLiquidityBNB: migrationStats?.totalLiquidityBNB ?? "0",
-        latestTwap:        latestTwap  ?? null,
-        topTokenByVolume:  topToken    ?? null,
+        totalTrades:       trades?.totalTrades       ?? 0,
+        totalBuys:         trades?.totalBuys          ?? 0,
+        totalSells:        trades?.totalSells         ?? 0,
+        uniqueTraders:     traders?.uniqueTraders     ?? 0,
+        totalVolumeBNB:    tokens?.totalVolumeBNB     ?? "0",
+        totalLiquidityBNB: migration?.totalLiquidityBNB ?? "0",
+        topTokenByVolume:  topToken,
       },
     };
   }
