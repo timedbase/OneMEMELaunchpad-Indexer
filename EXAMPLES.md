@@ -768,7 +768,7 @@ curl "https://api.1coin.meme/api/v1/discover/new?type=Tax" \
 
 ### 9.3 Bonding
 
-Active bonding-curve tokens sorted by `raisedBNB` descending — closest to migrating first.
+Active bonding-curve tokens sorted by `raisedBNB` descending — closest to migrating first. Each token includes `migrationTarget` (BNB wei) so the frontend can render bonding progress without an extra on-chain read.
 
 ```bash
 curl "https://api.1coin.meme/api/v1/discover/bonding" \
@@ -1222,33 +1222,47 @@ Server → client:
   { "type": "keepalive" }                                  — every 15 s
 ```
 
-**Browser integration:**
+**Browser integration (with auto-reconnect):**
 
 ```js
-const ws = new WebSocket("wss://api.1coin.meme/api/v1/chat/ws");
+let ws;
+let reconnectDelay = 1_000; // ms — doubles on each failure, caps at 30s
+const TOKEN = "0xabc...1111";
+const WALLET = "0xyourwallet...";
 
-ws.onopen = () => {
-  // Subscribe to a token room — server replies with history immediately
-  ws.send(JSON.stringify({ type: "subscribe", token: "0xabc...1111" }));
-};
+function connectChat(tokenAddress) {
+  ws = new WebSocket("wss://api.1coin.meme/api/v1/chat/ws");
 
-ws.onmessage = (e) => {
-  const frame = JSON.parse(e.data);
+  ws.onopen = () => {
+    reconnectDelay = 1_000; // reset on successful connect
+    ws.send(JSON.stringify({ type: "subscribe", token: tokenAddress }));
+  };
 
-  if (frame.type === "history") {
-    renderMessages(frame.messages);          // initial load
-  }
-  if (frame.type === "message") {
-    appendMessage(frame);                    // real-time new message
-  }
-  if (frame.type === "error") {
-    console.warn("Chat error:", frame.message);
-  }
-};
+  ws.onmessage = (e) => {
+    const frame = JSON.parse(e.data);
+    if (frame.type === "history")   renderMessages(frame.messages); // initial load
+    if (frame.type === "message")   appendMessage(frame);           // new real-time message
+    if (frame.type === "keepalive") {}                              // heartbeat, ignore
+    if (frame.type === "error")     console.warn("Chat:", frame.message);
+  };
+
+  ws.onclose = () => {
+    // Auto-reconnect with exponential backoff
+    setTimeout(() => connectChat(tokenAddress), reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
+  };
+
+  ws.onerror = () => ws.close(); // triggers onclose → reconnect
+}
+
+// Start
+connectChat(TOKEN);
 
 // Post a message
-function sendMessage(walletAddress, text) {
-  ws.send(JSON.stringify({ type: "message", sender: walletAddress, text }));
+function sendMessage(text) {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "message", sender: WALLET, text }));
+  }
 }
 ```
 

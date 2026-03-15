@@ -14,6 +14,7 @@ export interface ActivityQueryOptions {
 
 @Injectable()
 export class ActivityService {
+  private latestBlockCache: { value: bigint; at: number } | null = null;
 
   async query(opts: ActivityQueryOptions) {
     const { typeFilter, token, sinceBlock, limit, offset } = opts;
@@ -105,13 +106,19 @@ export class ActivityService {
   }
 
   async latestBlock(): Promise<bigint> {
+    const now = Date.now();
+    if (this.latestBlockCache && now - this.latestBlockCache.at < 1_000) {
+      return this.latestBlockCache.value;
+    }
     const [row] = await sql`
       SELECT GREATEST(
         (SELECT MAX("createdAtBlock"::numeric) FROM token),
         (SELECT MAX("blockNumber"::numeric)    FROM trade)
       )::text AS block
     `;
-    return BigInt(row?.block ?? "0");
+    const value = BigInt(row?.block ?? "0");
+    this.latestBlockCache = { value, at: now };
+    return value;
   }
 
   async list(queryParams: Record<string, string | undefined>) {

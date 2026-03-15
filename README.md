@@ -37,7 +37,7 @@ The **OneMEME Launchpad Indexer** listens to all events emitted by the `Launchpa
 ### Database Schema
 
 ```
-token      — one row per deployed meme token (+ running buy/sell stats)
+token      — one row per deployed meme token (+ running buy/sell stats, migrationTarget)
 trade      — one row per bonding-curve buy or sell transaction
 migration  — one row per migrated token (PancakeSwap pair + liquidity)
 ```

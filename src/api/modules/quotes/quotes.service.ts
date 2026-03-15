@@ -86,8 +86,10 @@ export class QuotesService {
       throw new BadRequestException("bnbIn and slippage must be valid integers");
     }
 
-    if (bnbIn <= 0n)           throw new BadRequestException("bnbIn must be greater than 0");
-    if (slippageBps > 5_000n)  throw new BadRequestException("slippage cannot exceed 5000 bps (50%)");
+    if (bnbIn <= 0n) throw new BadRequestException("bnbIn must be greater than 0");
+    if (slippageBps < 0n || slippageBps > 5_000n) {
+      throw new BadRequestException("slippage must be between 0 and 5000 basis points");
+    }
 
     const row = await this.requireActiveBondingCurve(address);
 
@@ -141,8 +143,10 @@ export class QuotesService {
       throw new BadRequestException("tokensIn and slippage must be valid integers");
     }
 
-    if (tokensIn <= 0n)        throw new BadRequestException("tokensIn must be greater than 0");
-    if (slippageBps > 5_000n)  throw new BadRequestException("slippage cannot exceed 5000 bps (50%)");
+    if (tokensIn <= 0n) throw new BadRequestException("tokensIn must be greater than 0");
+    if (slippageBps < 0n || slippageBps > 5_000n) {
+      throw new BadRequestException("slippage must be between 0 and 5000 basis points");
+    }
 
     const row = await this.requireActiveBondingCurve(address);
 

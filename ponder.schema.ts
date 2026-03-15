@@ -60,6 +60,14 @@ export const token = onchainTable(
      * raisedBNB field emitted in the most recent buy or sell event).
      */
     raisedBNB: t.bigint().notNull(),
+
+    /**
+     * BNB target that must be raised before the token can migrate to
+     * PancakeSwap. Read from the factory's tokens() view at creation time.
+     * Used by the frontend to show bonding-curve progress without an extra
+     * on-chain read per token card.
+     */
+    migrationTarget: t.bigint().notNull(),
   }),
   (table) => ({
     creatorIdx:        index().on(table.creator),
@@ -119,10 +127,11 @@ export const trade = onchainTable(
     timestamp: t.integer().notNull(),
   }),
   (table) => ({
-    tokenIdx:     index().on(table.token),
-    traderIdx:    index().on(table.trader),
-    timestampIdx: index().on(table.timestamp),
-    tradeTypeIdx: index().on(table.tradeType),
+    tokenIdx:          index().on(table.token),
+    traderIdx:         index().on(table.trader),
+    timestampIdx:      index().on(table.timestamp),
+    tradeTypeIdx:      index().on(table.tradeType),
+    timestampTokenIdx: index().on(table.timestamp, table.token),
   })
 );
 

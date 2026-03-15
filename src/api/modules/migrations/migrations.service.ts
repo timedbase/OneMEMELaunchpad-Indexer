@@ -13,8 +13,8 @@ export class MigrationsService {
 
     const numericCols = new Set(["liquidityBNB", "liquidityTokens", "blockNumber"]);
     const orderExpr   = numericCols.has(orderBy)
-      ? sql`ORDER BY ${sql('"' + orderBy + '"')}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
-      : sql`ORDER BY ${sql('"' + orderBy + '"')} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
+      ? sql`ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
+      : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
 
     const [rows, [{ count }]] = await Promise.all([
       sql`SELECT * FROM migration ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,

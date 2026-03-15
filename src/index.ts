@@ -15,6 +15,7 @@
 
 import { ponder } from "ponder:registry";
 import * as schema from "ponder:schema";
+import LaunchpadFactoryAbi from "../abis/LaunchpadFactory.json";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,21 @@ ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
   const { token, tokenType, creator, totalSupply, antibotEnabled, tradingBlock } =
     event.args;
 
+  // Read migrationTarget from the factory at creation time so the API can
+  // return bonding-curve progress without an extra on-chain call per token.
+  let migrationTarget = 0n;
+  try {
+    const tokenStruct = await context.client.readContract({
+      abi:          LaunchpadFactoryAbi as any,
+      address:      event.log.address,
+      functionName: "tokens",
+      args:         [token],
+    }) as any;
+    migrationTarget = BigInt(tokenStruct.migrationTarget ?? tokenStruct[11] ?? 0);
+  } catch {
+    // Non-fatal — migrationTarget stays 0n; operator can update via re-index.
+  }
+
   await context.db.insert(schema.token).values({
     id:                 token,
     tokenType:          tokenTypeLabel(tokenType),
@@ -58,6 +74,7 @@ ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
     sellCount:          0,
     volumeBNB:          0n,
     raisedBNB:          0n,
+    migrationTarget,
   });
 });
 

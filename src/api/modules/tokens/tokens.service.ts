@@ -23,10 +23,15 @@ export class TokensService {
 
     const typeFilter = type ? sql`AND "tokenType" = ${type}` : sql``;
 
+    const ALLOWED_TYPES = new Set(["Standard", "Tax", "Reflection"]);
+    if (type && !ALLOWED_TYPES.has(type)) {
+      throw new BadRequestException(`Invalid type "${type}". Must be Standard, Tax, or Reflection.`);
+    }
+
     const numericCols = new Set(["volumeBNB", "raisedBNB", "createdAtBlock", "tradingBlock", "totalSupply"]);
     const orderExpr   = numericCols.has(orderBy)
-      ? sql`ORDER BY ${sql('"' + orderBy + '"')}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
-      : sql`ORDER BY ${sql('"' + orderBy + '"')} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
+      ? sql`ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
+      : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
 
     const [rows, [{ count }]] = await Promise.all([
       sql`SELECT * FROM token WHERE TRUE ${typeFilter} ${migratedFilter} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,
@@ -70,8 +75,8 @@ export class TokensService {
 
     const numericCols = new Set(["bnbAmount", "tokenAmount", "blockNumber"]);
     const orderExpr   = numericCols.has(orderBy)
-      ? sql`ORDER BY ${sql('"' + orderBy + '"')}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
-      : sql`ORDER BY ${sql('"' + orderBy + '"')} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
+      ? sql`ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
+      : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
 
     const addr = address.toLowerCase();
 
@@ -118,7 +123,7 @@ export class TokensService {
         FROM trade
         WHERE "token" = ${addr}
         GROUP BY "trader"
-        ORDER BY ${sql('"' + orderBy + '"')}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}
+        ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}
         LIMIT ${limit} OFFSET ${offset}
       `,
       sql`SELECT COUNT(DISTINCT "trader")::int AS count FROM trade WHERE "token" = ${addr}`,

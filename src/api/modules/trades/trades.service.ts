@@ -32,8 +32,8 @@ export class TradesService {
 
     const numericCols = new Set(["bnbAmount", "tokenAmount", "blockNumber"]);
     const orderExpr   = numericCols.has(orderBy)
-      ? sql`ORDER BY ${sql('"' + orderBy + '"')}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
-      : sql`ORDER BY ${sql('"' + orderBy + '"')} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
+      ? sql`ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
+      : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
 
     const [rows, [{ count }]] = await Promise.all([
       sql`SELECT * FROM trade WHERE TRUE ${tokenSql} ${traderSql} ${typeSql} ${fromSql} ${toSql} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,

@@ -54,7 +54,13 @@ export interface TokenMetadata {
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 /** Public IPFS HTTP gateway used to resolve ipfs:// URIs. */
-const IPFS_GATEWAY = process.env.IPFS_GATEWAY ?? "https://ipfs.io/ipfs/";
+const rawGateway = process.env.IPFS_GATEWAY ?? "https://ipfs.io/ipfs/";
+try {
+  new URL(rawGateway);
+} catch {
+  throw new Error(`Invalid IPFS_GATEWAY env var: "${rawGateway}" is not a valid URL`);
+}
+const IPFS_GATEWAY = rawGateway.endsWith("/") ? rawGateway : rawGateway + "/";
 
 /** How long to cache metadata per URI (default: 5 minutes). */
 const METADATA_TTL = 5 * 60_000;

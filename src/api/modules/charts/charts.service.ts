@@ -43,21 +43,22 @@ export class ChartsService {
     if (!symbolParam) throw new BadRequestException("symbol is required");
 
     const addr = symbolParam.toLowerCase();
-    const [rows] = await sql`
+    const rows = await sql`
       SELECT "tokenType", "totalSupply", "createdAtTimestamp"
       FROM token
       WHERE id = ${addr}
       LIMIT 1
     `;
+    const row = rows[0];
 
-    if (!rows) {
+    if (!row) {
       return { s: "error", errmsg: "Symbol not found" };
     }
 
     return {
       name:                   addr,
       ticker:                 addr,
-      description:            `OneMEME Token (${rows.tokenType})`,
+      description:            `OneMEME Token (${row.tokenType})`,
       type:                   "crypto",
       session:                "24x7",
       timezone:               "Etc/UTC",

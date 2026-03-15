@@ -20,20 +20,24 @@ export class ChatService implements OnModuleInit {
   /** Create the chat_message table if it doesn't exist.
    *  This table is off-chain user content — not part of Ponder's schema. */
   async onModuleInit() {
-    await sql`
-      CREATE TABLE IF NOT EXISTS chat_message (
-        id        BIGSERIAL    PRIMARY KEY,
-        token     TEXT         NOT NULL,
-        sender    TEXT         NOT NULL,
-        text      TEXT         NOT NULL,
-        timestamp BIGINT       NOT NULL
-      )
-    `;
-    await sql`
-      CREATE INDEX IF NOT EXISTS chat_message_token_ts
-        ON chat_message (token, timestamp DESC)
-    `;
-    this.logger.log("Chat table ready");
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS chat_message (
+          id        BIGSERIAL    PRIMARY KEY,
+          token     TEXT         NOT NULL,
+          sender    TEXT         NOT NULL,
+          text      TEXT         NOT NULL,
+          timestamp BIGINT       NOT NULL
+        )
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS chat_message_token_ts
+          ON chat_message (token, timestamp DESC)
+      `;
+      this.logger.log("Chat table ready");
+    } catch (err: unknown) {
+      this.logger.error(`Failed to initialize chat table: ${(err as Error).message}`);
+    }
   }
 
   /** Fetch the most recent messages for a token (oldest-first for display). */
@@ -64,17 +68,21 @@ export class ChatService implements OnModuleInit {
       RETURNING id::text, token, sender, text, timestamp::int
     `;
 
-    // Prune oldest messages beyond the cap (fire-and-forget)
-    sql`
-      DELETE FROM chat_message
-      WHERE token = ${token.toLowerCase()}
-        AND id NOT IN (
-          SELECT id FROM chat_message
-          WHERE token = ${token.toLowerCase()}
-          ORDER BY timestamp DESC
-          LIMIT ${MAX_MESSAGES_PER_TOKEN}
-        )
-    `.catch((err: Error) => this.logger.warn(`Chat prune failed: ${err.message}`));
+    // Prune oldest messages beyond the cap
+    try {
+      await sql`
+        DELETE FROM chat_message
+        WHERE token = ${token.toLowerCase()}
+          AND id NOT IN (
+            SELECT id FROM chat_message
+            WHERE token = ${token.toLowerCase()}
+            ORDER BY timestamp DESC
+            LIMIT ${MAX_MESSAGES_PER_TOKEN}
+          )
+      `;
+    } catch (err: unknown) {
+      this.logger.warn(`Chat prune failed: ${(err as Error).message}`);
+    }
 
     return row as ChatMessage;
   }

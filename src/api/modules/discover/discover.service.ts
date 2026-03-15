@@ -105,9 +105,9 @@ export class DiscoverService {
       sql`
         SELECT
           t.*,
-          m."pair"            AS "pairAddress",
-          m."liquidityBNB"    AS "liquidityBNB",
-          m."liquidityTokens" AS "liquidityTokens",
+          m."pair"                   AS "pairAddress",
+          m."liquidityBNB"::text    AS "liquidityBNB",
+          m."liquidityTokens"::text AS "liquidityTokens",
           m."blockNumber"     AS "migratedAtBlock",
           m."timestamp"       AS "migratedAt",
           m."txHash"          AS "migrationTxHash"

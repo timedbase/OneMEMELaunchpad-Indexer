@@ -33,8 +33,9 @@ import type { Server, WebSocket } from "ws";
 import { ChatService } from "./chat.service";
 import { isAddress } from "../../helpers";
 
-const KEEPALIVE_MS  = 15_000;
-const RATE_LIMIT_MS = 3_000;  // minimum gap between messages per IP
+const KEEPALIVE_MS     = 15_000;
+const RATE_LIMIT_MS    = 3_000;  // minimum gap between messages per IP
+const MAX_CONNS_PER_IP = 5;
 
 interface ConnState {
   token:     string | null;
@@ -70,6 +71,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleConnection(client: WebSocket, req: IncomingMessage): Promise<void> {
     const ip = clientIp(req);
+
+    const ipConns = [...this.connections.values()].filter(s => s.ip === ip).length;
+    if (ipConns >= MAX_CONNS_PER_IP) {
+      (client as any).close(1008, "Too many connections");
+      return;
+    }
 
     const keepalive = setInterval(() => {
       send(client, { type: "keepalive" });

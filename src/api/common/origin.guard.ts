@@ -77,7 +77,8 @@ export class OriginGuard implements CanActivate {
       } catch { /* malformed origin — fall through to allowlist check */ }
     }
 
-    // No Origin header — allow only if "server" is in the allowlist.
+    // No Origin header (e.g. curl, internal services) — allow only if the literal
+    // string "server" is added to ALLOWED_ORIGINS in your .env.
     if (!origin) {
       if (allowlist.has("server")) return true;
       throw new ForbiddenException("This endpoint is restricted to the OneMEME Launchpad UI.");

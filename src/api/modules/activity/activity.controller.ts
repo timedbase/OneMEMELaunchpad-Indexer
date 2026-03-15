@@ -73,10 +73,25 @@ export class ActivityController {
         if (keepaliveTimer) clearInterval(keepaliveTimer);
       };
 
-      // Seed with current max block so we only push NEW events.
-      this.activity.latestBlock().then((block) => {
+      // Seed with current max block so we only push NEW events after the snapshot.
+      this.activity.latestBlock().then(async (block) => {
         if (destroyed) return;
         lastBlock = block;
+
+        // Emit an initial snapshot so the feed isn't empty on first connect.
+        try {
+          const snapshot = await this.activity.query({
+            typeFilter,
+            token:  tokenFilter,
+            limit:  20,
+            offset: 0,
+          });
+          if (!destroyed) {
+            for (const row of [...snapshot].reverse()) {
+              subscriber.next({ type: "activity", data: JSON.stringify(row) } as MessageEvent);
+            }
+          }
+        } catch { /* non-fatal — stream stays open */ }
 
         // Keepalive: prevents proxy / browser from closing idle connection.
         keepaliveTimer = setInterval(() => {
