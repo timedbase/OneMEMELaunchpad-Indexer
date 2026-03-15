@@ -316,6 +316,26 @@ Requires `PINATA_JWT` in `.env`. Accepts `multipart/form-data`. Fields: `image` 
 |---|---|---|
 | `GET` | `/api/v1/leaderboard/traders` | Traders ranked by BNB volume — `?period=alltime\|1d\|7d\|30d` |
 
+#### BNB Price
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/price/bnb` | Aggregated BNB/USDT price averaged across Binance, OKX and Bybit — refreshed every 10 s |
+
+Use this to convert all BNB wei amounts to USD on the frontend. If an exchange is unreachable its price is excluded from the average. If all fail, the last cached value is returned with `stale: true`.
+
+#### Charts _(TradingView UDF)_
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/charts/config` | TradingView datafeed configuration |
+| `GET` | `/api/v1/charts/symbols` | Token symbol info and pricescale — `?symbol=<address>` |
+| `GET` | `/api/v1/charts/history` | OHLCV candles from bonding-curve trades — `?symbol&resolution&from&to&countback` |
+| `GET` | `/api/v1/charts/search` | Token address search — `?query=<prefix>&limit=10` |
+| `GET` | `/api/v1/charts/time` | Server unix timestamp |
+
+Supported resolutions: `1`, `5`, `15`, `30`, `60`, `240`, `D`. Point TradingView's `datafeed` URL at `https://yourapi.com/api/v1/charts`. Migrated tokens return `{ s: "no_data" }` — chart goes blank.
+
 #### Discovery _(UI only)_
 
 | Method | Path | Description |
@@ -387,6 +407,8 @@ OneMEMELaunchpad-Indexer/
 │           ├── activity/            # /activity, /activity/stream (SSE), /activity/ws (WSS)
 │           ├── discover/            # /discover/trending|new|bonding|migrated
 │           ├── leaderboard/         # /leaderboard/traders (alltime|1d|7d|30d)
+│           ├── price/               # /price/bnb — aggregated BNB/USDT (Binance+OKX+Bybit)
+│           ├── charts/              # /charts/* — TradingView UDF (OHLCV from trades)
 │           └── upload/              # POST /metadata/upload — IPFS via Pinata
 ├── ponder.config.ts                 # Network, contract, and transport configuration
 ├── ponder.schema.ts                 # Database schema (onchainTable definitions)

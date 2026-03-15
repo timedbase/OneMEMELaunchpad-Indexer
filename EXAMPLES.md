@@ -44,10 +44,16 @@ Complete reference of every endpoint with `curl` commands and expected JSON resp
     - [Full flow](#111-full-flow)
     - [Upload](#112-upload)
     - [Frontend integration](#113-frontend-integration)
-12. [HTTPS / WSS Setup](#12-https--wss-setup)
-13. [Rate Limit Response](#13-rate-limit-response)
-14. [Origin Restriction (403)](#14-origin-restriction-403)
-15. [Error Shapes](#15-error-shapes)
+12. [BNB Price](#12-bnb-price)
+13. [Charts (TradingView UDF)](#13-charts-tradingview-udf)
+    - [Config](#131-config)
+    - [Symbols](#132-symbols)
+    - [History (OHLCV)](#133-history-ohlcv)
+    - [Search](#134-search)
+14. [HTTPS / WSS Setup](#14-https--wss-setup)
+15. [Rate Limit Response](#15-rate-limit-response)
+16. [Origin Restriction (403)](#16-origin-restriction-403)
+17. [Error Shapes](#17-error-shapes)
 
 ---
 
@@ -985,7 +991,188 @@ async function setTokenMetadata(tokenContract, metaURI) {
 
 ---
 
-## 12. HTTPS / WSS Setup
+## 12. BNB Price
+
+Aggregated BNB/USDT spot price averaged across Binance, OKX, and Bybit. Refreshed every 10 seconds in the background. Use this to convert all BNB wei amounts displayed to users into USD.
+
+```bash
+curl "https://localhost:3001/api/v1/price/bnb"
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "bnbUsdt": 612.3267,
+  "sources": [
+    { "exchange": "Binance", "price": 612.41, "ok": true },
+    { "exchange": "OKX",     "price": 612.28, "ok": true },
+    { "exchange": "Bybit",   "price": 612.31, "ok": true }
+  ],
+  "updatedAt": 1741824010,
+  "stale": false
+}
+```
+
+**Fields:**
+
+| Field | Description |
+|---|---|
+| `bnbUsdt` | Averaged price across all live sources |
+| `sources` | Per-exchange breakdown; `price` is `null` and `ok` is `false` if that exchange failed |
+| `updatedAt` | Unix timestamp of the last refresh |
+| `stale` | `true` if all 3 exchanges failed on the last refresh — cached value is returned |
+
+**Frontend usage — convert BNB wei to USD:**
+
+```js
+const { bnbUsdt } = await fetch("/api/v1/price/bnb").then(r => r.json());
+
+// bnbAmount is a wei string returned by any trade/token endpoint
+function bnbWeiToUsd(weiStr, bnbUsdt) {
+  const bnb = Number(BigInt(weiStr)) / 1e18;
+  return (bnb * bnbUsdt).toFixed(2);
+}
+
+// e.g. "500000000000000000" → "$306.16"
+console.log("$" + bnbWeiToUsd("500000000000000000", bnbUsdt));
+```
+
+---
+
+## 13. Charts (TradingView UDF)
+
+OHLCV candle data for bonding-curve tokens, compatible with the TradingView Charting Library.
+
+Point your datafeed at: `https://yourapi.com/api/v1/charts`
+
+```js
+new TradingView.widget({
+  datafeed: new Datafeeds.UDFCompatibleDatafeed("https://yourapi.com/api/v1/charts"),
+  symbol:   "0xYourTokenAddress1111",
+  interval: "15",
+});
+```
+
+Migrated tokens return `{ s: "no_data" }` — chart goes blank automatically.
+
+---
+
+### 13.1 Config
+
+```bash
+curl "https://localhost:3001/api/v1/charts/config"
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "supported_resolutions": ["1", "5", "15", "30", "60", "240", "D"],
+  "supports_group_request": false,
+  "supports_marks": false,
+  "supports_search": true,
+  "supports_timescale_marks": false
+}
+```
+
+---
+
+### 13.2 Symbols
+
+```bash
+curl "https://localhost:3001/api/v1/charts/symbols?symbol=0xabc...1111"
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "name":                   "0xabc...1111",
+  "ticker":                 "0xabc...1111",
+  "description":            "OneMEME Token (Tax)",
+  "type":                   "crypto",
+  "session":                "24x7",
+  "timezone":               "Etc/UTC",
+  "exchange":               "OneMEME",
+  "pricescale":             1000000000,
+  "minmov":                 1,
+  "has_intraday":           true,
+  "has_daily":              true,
+  "supported_resolutions":  ["1", "5", "15", "30", "60", "240", "D"],
+  "volume_precision":       4,
+  "data_status":            "streaming"
+}
+```
+
+---
+
+### 13.3 History (OHLCV)
+
+```bash
+# 15-minute candles for the last 6 hours
+curl "https://localhost:3001/api/v1/charts/history?symbol=0xabc...1111&resolution=15&countback=24&to=1741824000"
+
+# Specific range
+curl "https://localhost:3001/api/v1/charts/history?symbol=0xabc...1111&resolution=60&from=1741800000&to=1741824000"
+```
+
+**Query params:**
+
+| Param | Description |
+|---|---|
+| `symbol` | Token address (required) |
+| `resolution` | `1` `5` `15` `30` `60` `240` `D` |
+| `from` | Unix timestamp start |
+| `to` | Unix timestamp end |
+| `countback` | Number of bars back from `to` (used by TradingView instead of `from`) |
+
+**Response `200 OK`** — data present
+
+```json
+{
+  "s": "ok",
+  "t": [1741800000, 1741800900, 1741801800],
+  "o": ["0.000000012345", "0.000000013100", "0.000000012800"],
+  "h": ["0.000000014200", "0.000000013500", "0.000000013200"],
+  "l": ["0.000000011900", "0.000000012600", "0.000000012100"],
+  "c": ["0.000000013100", "0.000000012800", "0.000000013000"],
+  "v": ["4500000000000000000", "3200000000000000000", "5100000000000000000"]
+}
+```
+
+**Response** — no trades in range / migrated token
+
+```json
+{ "s": "no_data" }
+```
+
+---
+
+### 13.4 Search
+
+```bash
+curl "https://localhost:3001/api/v1/charts/search?query=0xabc&limit=5"
+```
+
+**Response `200 OK`**
+
+```json
+[
+  {
+    "symbol":      "0xabc...1111",
+    "full_name":   "0xabc...1111",
+    "description": "OneMEME Token (Standard)",
+    "exchange":    "OneMEME",
+    "ticker":      "0xabc...1111",
+    "type":        "crypto"
+  }
+]
+```
+
+---
+
+## 14. HTTPS / WSS Setup
 
 The API detects TLS at startup based on two environment variables:
 
@@ -1016,7 +1203,7 @@ curl -k https://localhost:3001/health
 
 ---
 
-## 13. Rate Limit Response
+## 15. Rate Limit Response
 
 When a rate limit is exceeded the API returns **`429 Too Many Requests`**:
 
@@ -1050,7 +1237,7 @@ Limits are keyed by **client IP only** (not IP+path). Rotating token addresses d
 
 ---
 
-## 14. Origin Restriction (403)
+## 16. Origin Restriction (403)
 
 Endpoints restricted to the launchpad UI return `403 Forbidden` when the `Origin` header is not in `ALLOWED_ORIGINS`:
 
@@ -1092,7 +1279,7 @@ In development (`NODE_ENV=development`), all `http://localhost:*` and `http://12
 
 ---
 
-## 15. Error Shapes
+## 17. Error Shapes
 
 All errors follow the NestJS standard exception shape:
 
