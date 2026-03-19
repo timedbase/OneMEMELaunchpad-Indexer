@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { sql } from "../../db";
-import { isAddress, paginated, parsePagination, parseOrderBy, parseOrderDir } from "../../helpers";
+import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir } from "../../helpers";
 import { getMetaURI } from "../../rpc";
 import { fetchMetadata } from "../../metadata";
 
@@ -44,10 +44,11 @@ export class TokensService {
   async findOne(address: string) {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
 
-    const [row] = await sql`SELECT * FROM token WHERE id = ${address.toLowerCase()}`;
+    const addr = normalizeAddress(address);
+    const [row] = await sql`SELECT * FROM token WHERE id = ${addr}`;
     if (!row) throw new NotFoundException(`Token ${address} not found`);
 
-    const metaURI  = await getMetaURI(address.toLowerCase() as `0x${string}`);
+    const metaURI  = await getMetaURI(addr as `0x${string}`);
     const metadata = metaURI ? await fetchMetadata(metaURI) : null;
 
     return { data: { ...row, metaURI: metaURI || null, metadata: metadata ?? null } };
@@ -78,7 +79,7 @@ export class TokensService {
       ? sql`ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
       : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
 
-    const addr = address.toLowerCase();
+    const addr = normalizeAddress(address);
 
     const [rows, [{ count }]] = await Promise.all([
       sql`SELECT * FROM trade WHERE "token" = ${addr} ${typeFilter} ${fromFilter} ${toFilter} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,
@@ -91,7 +92,7 @@ export class TokensService {
   async migration(address: string) {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
 
-    const [row] = await sql`SELECT * FROM migration WHERE id = ${address.toLowerCase()}`;
+    const [row] = await sql`SELECT * FROM migration WHERE id = ${normalizeAddress(address)}`;
     if (!row) throw new NotFoundException(`Token ${address} has not migrated yet`);
 
     return { data: row };
@@ -104,7 +105,7 @@ export class TokensService {
     const ALLOWED_ORDER = ["totalVolumeBNB", "totalTrades", "buyCount", "sellCount", "netBNB"] as const;
     const orderBy  = parseOrderBy(query, ALLOWED_ORDER, "totalVolumeBNB");
     const orderDir = parseOrderDir(query);
-    const addr     = address.toLowerCase();
+    const addr     = normalizeAddress(address);
 
     const [rows, [{ count }]] = await Promise.all([
       sql`
@@ -137,7 +138,7 @@ export class TokensService {
 
     const { page, limit, offset } = parsePagination(query);
     const orderDir = parseOrderDir(query);
-    const addr     = address.toLowerCase();
+    const addr     = normalizeAddress(address);
 
     // Query the holder table which is maintained by indexing every Transfer
     // event on the token contract — exact onchain balances, not estimates.
@@ -167,7 +168,7 @@ export class TokensService {
     if (!isAddress(address)) throw new BadRequestException("Invalid creator address");
 
     const { page, limit, offset } = parsePagination(query);
-    const addr = address.toLowerCase();
+    const addr = normalizeAddress(address);
 
     const [rows, [{ count }]] = await Promise.all([
       sql`SELECT * FROM token WHERE "creator" = ${addr} ORDER BY "createdAtBlock"::numeric DESC LIMIT ${limit} OFFSET ${offset}`,

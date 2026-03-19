@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
 import { sql } from "../../db";
-import { isAddress, paginated, parsePagination, parseOrderBy, parseOrderDir } from "../../helpers";
+import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir } from "../../helpers";
 
 @Injectable()
 export class TradesService {
@@ -20,8 +20,8 @@ export class TradesService {
     const orderBy  = parseOrderBy(query, ALLOWED_ORDER, "timestamp");
     const orderDir = parseOrderDir(query);
 
-    const tokenSql  = tokenFilter  ? sql`AND "token"     = ${tokenFilter.toLowerCase()}`  : sql``;
-    const traderSql = traderFilter ? sql`AND "trader"    = ${traderFilter.toLowerCase()}` : sql``;
+    const tokenSql  = tokenFilter  ? sql`AND "token"     = ${normalizeAddress(tokenFilter)}`  : sql``;
+    const traderSql = traderFilter ? sql`AND "trader"    = ${normalizeAddress(traderFilter)}` : sql``;
     const typeSql   = typeFilter   ? sql`AND "tradeType" = ${typeFilter}`                  : sql``;
     const fromInt   = from ? parseInt(from, 10) : null;
     const toInt     = to   ? parseInt(to,   10) : null;
@@ -59,7 +59,7 @@ export class TradesService {
     const fromSql = fromInt2 !== null ? sql`AND "timestamp" >= ${fromInt2}`  : sql``;
     const toSql   = toInt2   !== null ? sql`AND "timestamp" <= ${toInt2}`    : sql``;
 
-    const addr = address.toLowerCase();
+    const addr = normalizeAddress(address);
 
     const [rows, [{ count }]] = await Promise.all([
       sql`SELECT * FROM trade WHERE "trader" = ${addr} ${typeSql} ${fromSql} ${toSql} ORDER BY "timestamp" DESC LIMIT ${limit} OFFSET ${offset}`,

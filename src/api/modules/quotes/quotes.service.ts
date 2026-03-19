@@ -6,7 +6,7 @@ import {
 } from "@nestjs/common";
 import { sql } from "../../db";
 import { applySlippage, getSpotPrice, priceImpactBps, quoteBuy, quoteSell } from "../../rpc";
-import { isAddress } from "../../helpers";
+import { isAddress, normalizeAddress } from "../../helpers";
 
 function formatWei(wei: bigint): string {
   const s       = wei.toString().padStart(19, "0");
@@ -22,7 +22,7 @@ export class QuotesService {
     const [row] = await sql`
       SELECT "id", "migrated", "tokenType", "tradingBlock", "antibotEnabled"
       FROM token
-      WHERE id = ${address.toLowerCase()}
+      WHERE id = ${normalizeAddress(address)}
     `;
     if (!row) throw new NotFoundException(`Token ${address} not found in index`);
     return row;
@@ -36,7 +36,7 @@ export class QuotesService {
     if (row.migrated) {
       return {
         data: {
-          token:    address.toLowerCase(),
+          token:    normalizeAddress(address),
           migrated: true,
           message:  "Token has migrated to PancakeSwap. Fetch price from the DEX pair instead.",
           pair:     null,
@@ -46,7 +46,7 @@ export class QuotesService {
 
     let spotPriceWei: bigint;
     try {
-      spotPriceWei = await getSpotPrice(address.toLowerCase() as `0x${string}`);
+      spotPriceWei = await getSpotPrice(normalizeAddress(address) as `0x${string}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("not configured")) {
@@ -59,7 +59,7 @@ export class QuotesService {
 
     return {
       data: {
-        token:           address.toLowerCase(),
+        token:           normalizeAddress(address),
         migrated:        false,
         spotPriceWei:    spotPriceWei.toString(),
         spotPriceBNB:    formatWei(spotPriceWei),
@@ -87,17 +87,17 @@ export class QuotesService {
     }
 
     if (bnbIn <= 0n) throw new BadRequestException("bnbIn must be greater than 0");
-    if (slippageBps < 0n || slippageBps > 5_000n) {
-      throw new BadRequestException("slippage must be between 0 and 5000 basis points");
+    if (slippageBps < 0n || slippageBps > 500n) {
+      throw new BadRequestException("slippage must be between 0 and 500 basis points (5%)");
     }
 
     const row = await this.requireActiveBondingCurve(address);
 
     if (row.migrated) {
-      return { data: { token: address.toLowerCase(), migrated: true, message: "Token has migrated to PancakeSwap. Use the DEX router for swaps." } };
+      return { data: { token: normalizeAddress(address), migrated: true, message: "Token has migrated to PancakeSwap. Use the DEX router for swaps." } };
     }
 
-    const token = address.toLowerCase() as `0x${string}`;
+    const token = normalizeAddress(address) as `0x${string}`;
 
     let tokensOut: bigint, spot: bigint;
     try {
@@ -144,17 +144,17 @@ export class QuotesService {
     }
 
     if (tokensIn <= 0n) throw new BadRequestException("tokensIn must be greater than 0");
-    if (slippageBps < 0n || slippageBps > 5_000n) {
-      throw new BadRequestException("slippage must be between 0 and 5000 basis points");
+    if (slippageBps < 0n || slippageBps > 500n) {
+      throw new BadRequestException("slippage must be between 0 and 500 basis points (5%)");
     }
 
     const row = await this.requireActiveBondingCurve(address);
 
     if (row.migrated) {
-      return { data: { token: address.toLowerCase(), migrated: true, message: "Token has migrated to PancakeSwap. Use the DEX router for swaps." } };
+      return { data: { token: normalizeAddress(address), migrated: true, message: "Token has migrated to PancakeSwap. Use the DEX router for swaps." } };
     }
 
-    const token = address.toLowerCase() as `0x${string}`;
+    const token = normalizeAddress(address) as `0x${string}`;
 
     let bnbOut: bigint, spot: bigint;
     try {

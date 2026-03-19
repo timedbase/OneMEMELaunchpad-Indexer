@@ -8,6 +8,7 @@ import { APP_GUARD }    from "@nestjs/core";
 import { OriginGuard }  from "./common/origin.guard";
 
 import { HealthController }    from "./health.controller";
+import { IndexModule }         from "./modules/index/index.module";
 import { TokensModule }        from "./modules/tokens/tokens.module";
 import { TradesModule }        from "./modules/trades/trades.module";
 import { MigrationsModule }    from "./modules/migrations/migrations.module";
@@ -29,6 +30,7 @@ import {
 
 @Module({
   imports: [
+    IndexModule,
     TokensModule,
     TradesModule,
     MigrationsModule,

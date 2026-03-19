@@ -15,6 +15,7 @@
 
 import { ponder } from "ponder:registry";
 import * as schema from "ponder:schema";
+import type { PublicClient } from "viem";
 import LaunchpadFactoryAbi from "../abis/LaunchpadFactory.json";
 
 // ─── Implementation address cache ─────────────────────────────────────────────
@@ -28,13 +29,14 @@ const implCache = new Map<string, ImplAddresses>();
  * Reads standardImpl / taxImpl / reflectionImpl from the factory contract.
  * Results are cached in-process — only 3 RPC calls total per indexer run.
  */
-async function getFactoryImpls(factoryAddress: string, client: any): Promise<ImplAddresses | null> {
+async function getFactoryImpls(factoryAddress: string, client: PublicClient): Promise<ImplAddresses | null> {
   if (implCache.has(factoryAddress)) return implCache.get(factoryAddress)!;
   try {
+    const addr = factoryAddress as `0x${string}`;
     const [standard, tax, reflection] = await Promise.all([
-      client.readContract({ abi: LaunchpadFactoryAbi, address: factoryAddress, functionName: "standardImpl" }),
-      client.readContract({ abi: LaunchpadFactoryAbi, address: factoryAddress, functionName: "taxImpl" }),
-      client.readContract({ abi: LaunchpadFactoryAbi, address: factoryAddress, functionName: "reflectionImpl" }),
+      client.readContract({ abi: LaunchpadFactoryAbi, address: addr, functionName: "standardImpl" }),
+      client.readContract({ abi: LaunchpadFactoryAbi, address: addr, functionName: "taxImpl" }),
+      client.readContract({ abi: LaunchpadFactoryAbi, address: addr, functionName: "reflectionImpl" }),
     ]) as [string, string, string];
     const result: ImplAddresses = {
       standard:   standard.toLowerCase(),
@@ -71,10 +73,10 @@ function implFromBytecode(bytecode: string): string | null {
 async function resolveTokenType(
   tokenAddress: string,
   factoryAddress: string,
-  client: any,
+  client: PublicClient,
 ): Promise<string | null> {
   const [bytecode, impls] = await Promise.all([
-    client.getBytecode({ address: tokenAddress }).catch(() => null),
+    client.getBytecode({ address: tokenAddress as `0x${string}` }).catch(() => null),
     getFactoryImpls(factoryAddress, client),
   ]);
   if (!bytecode || !impls) return null;
@@ -244,7 +246,10 @@ ponder.on("MemeToken:Transfer", async ({ event, context }) => {
   if (from !== ZERO) {
     await context.db
       .insert(schema.holder)
-      .values({ token, address: from, balance: 0n - value })
+      // On first-ever transfer out from this address, initialise balance as negative.
+      // The onConflictDoUpdate will correct it once the matching credit arrives.
+      // This upsert pattern ensures row creation and update are a single atomic op.
+      .values({ token, address: from, balance: -value })
       .onConflictDoUpdate((row) => ({ balance: row.balance - value }));
   }
 

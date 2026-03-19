@@ -13,14 +13,18 @@ import "reflect-metadata";
 import { config } from "dotenv";
 config();
 
-import { NestFactory } from "@nestjs/core";
-import { WsAdapter }   from "@nestjs/platform-ws";
-import { AppModule }   from "./app.module";
+import compression      from "compression";
+import { NestFactory }  from "@nestjs/core";
+import { WsAdapter }    from "@nestjs/platform-ws";
+import { AppModule }    from "./app.module";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ["log", "warn", "error"],
   });
+
+  // ── Compression ────────────────────────────────────────────────────────────
+  app.use(compression());
 
   // ── WebSocket adapter ──────────────────────────────────────────────────────
   app.useWebSocketAdapter(new WsAdapter(app));
@@ -80,4 +84,4 @@ async function bootstrap() {
 `);
 }
 
-bootstrap().catch(console.error);
+bootstrap().catch(err => { console.error(err); process.exit(1); });

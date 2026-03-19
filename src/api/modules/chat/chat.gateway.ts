@@ -33,9 +33,11 @@ import type { Server, WebSocket } from "ws";
 import { ChatService } from "./chat.service";
 import { isAddress } from "../../helpers";
 
-const KEEPALIVE_MS     = 15_000;
-const RATE_LIMIT_MS    = 3_000;  // minimum gap between messages per IP
-const MAX_CONNS_PER_IP = 5;
+const KEEPALIVE_MS          = 15_000;
+const RATE_LIMIT_MS         = 3_000;   // minimum gap between messages per IP (global)
+const MAX_CONNS_PER_IP      = 5;
+const MSG_WINDOW_MS         = 60_000;  // rolling window for per-token per-IP rate limit
+const MAX_MSGS_PER_WINDOW   = 5;       // max messages per IP per token per minute
 
 interface ConnState {
   token:     string | null;
@@ -66,6 +68,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // Per-IP rate limiting: tracks the timestamp of the last accepted message.
   private readonly lastMsg = new Map<string, number>();
+
+  // Per-IP per-token rate limiting: tracks message timestamps within the rolling window.
+  // Key: `${ip}:${token}`, value: array of accepted message timestamps (ms).
+  private readonly tokenMsgTimestamps = new Map<string, number[]>();
 
   constructor(private readonly chat: ChatService) {}
 
@@ -142,7 +148,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    // Rate limit: 1 message per 3 seconds per IP
+    // Rate limit: 1 message per 3 seconds per IP (global cooldown)
     const now  = Date.now();
     const last = this.lastMsg.get(ip) ?? 0;
     const wait = Math.ceil((last + RATE_LIMIT_MS - now) / 1_000);
@@ -151,6 +157,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
     this.lastMsg.set(ip, now);
+
+    // Rate limit: max 5 messages per minute per IP per token
+    const tokenKey   = `${ip}:${state.token}`;
+    const timestamps = (this.tokenMsgTimestamps.get(tokenKey) ?? [])
+      .filter(ts => now - ts < MSG_WINDOW_MS); // purge expired entries
+    if (timestamps.length >= MAX_MSGS_PER_WINDOW) {
+      send(client, {
+        type:    "error",
+        message: `Rate limit exceeded — max ${MAX_MSGS_PER_WINDOW} messages per minute per token`,
+      });
+      return;
+    }
+    timestamps.push(now);
+    this.tokenMsgTimestamps.set(tokenKey, timestamps);
 
     // Validate sender address
     const sender = typeof frame["sender"] === "string" ? frame["sender"] : null;

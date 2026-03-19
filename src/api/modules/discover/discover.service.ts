@@ -34,7 +34,7 @@ export class DiscoverService {
       `,
     ]);
 
-    return { ...paginated(rows, count, page, limit), window, since };
+    return { ...paginated(rows, count, page, limit), window };
   }
 
   async newTokens(query: Record<string, string | undefined>) {

@@ -54,7 +54,7 @@ export interface TokenMetadata {
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 /** Public IPFS HTTP gateway used to resolve ipfs:// URIs. */
-const rawGateway = process.env.IPFS_GATEWAY ?? "https://ipfs.io/ipfs/";
+const rawGateway = process.env.IPFS_GATEWAY ?? "https://gateway.pinata.cloud/ipfs/";
 try {
   new URL(rawGateway);
 } catch {
@@ -169,7 +169,8 @@ export async function fetchMetadata(uri: string): Promise<TokenMetadata | null> 
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     raw = await res.json() as Record<string, unknown>;
-  } catch {
+  } catch (err) {
+    console.warn(`[metadata] fetch failed for ${httpUri}:`, err instanceof Error ? err.message : err);
     // Cache null briefly so a bad URI doesn't hammer the gateway on every request.
     cache.set(uri, { data: null, expiresAt: Date.now() + 30_000 });
     return null;

@@ -39,7 +39,7 @@ export interface UploadMetadataDto {
 export interface UploadResult {
   metaURI:    string;   // "ipfs://<hash>"  — pass to setMetaURI()
   ipfsHash:   string;   // raw CIDv1 hash
-  gatewayUrl: string;   // https://ipfs.io/ipfs/<hash>
+  gatewayUrl: string;   // https://gateway.pinata.cloud/ipfs/<hash>
   imageUri:   string;   // "ipfs://<imageHash>"
 }
 
@@ -57,7 +57,7 @@ export class UploadService {
   }
 
   private gateway(): string {
-    return (process.env.IPFS_GATEWAY ?? "https://ipfs.io/ipfs/").replace(/\/$/, "");
+    return (process.env.IPFS_GATEWAY ?? "https://gateway.pinata.cloud/ipfs/").replace(/\/$/, "");
   }
 
   /** Upload a raw file buffer to Pinata and return its IPFS CID. */
@@ -67,7 +67,7 @@ export class UploadService {
     filename: string,
     name:     string,
   ): Promise<string> {
-    const blob = new Blob([buffer], { type: mimetype });
+    const blob = new Blob([new Uint8Array(buffer)], { type: mimetype });
     const form = new FormData();
     form.append("file", blob, filename);
     form.append(
@@ -83,6 +83,7 @@ export class UploadService {
       method:  "POST",
       headers: { Authorization: `Bearer ${this.jwt()}` },
       body:    form,
+      signal:  AbortSignal.timeout(30_000),
     });
 
     if (!res.ok) {
@@ -105,6 +106,7 @@ export class UploadService {
         "Content-Type":  "application/json",
         "Authorization": `Bearer ${this.jwt()}`,
       },
+      signal: AbortSignal.timeout(30_000),
       body: JSON.stringify({
         pinataContent:  content,
         pinataMetadata: { name: `onememe-meta-${name}` },

@@ -25,17 +25,18 @@ export const DEFAULT_LIMIT = 20;
 
 /**
  * Parses and validates `page` and `limit` from a query-param map.
- * Clamps limit to [1, MAX_LIMIT] and page to [1, ∞).
+ * Clamps limit to [1, MAX_LIMIT] and page to [1, 10_000].
  */
 export function parsePagination(
   query: Record<string, string | undefined>
 ): { page: number; limit: number; offset: number } {
-  const page  = Math.max(1, parseInt(query["page"]  ?? "1",  10) || 1);
-  const limit = Math.min(
+  const page     = Math.max(1, parseInt(query["page"]  ?? "1",  10) || 1);
+  const safePage = Math.min(page, 10_000);
+  const limit    = Math.min(
     MAX_LIMIT,
     Math.max(1, parseInt(query["limit"] ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT)
   );
-  return { page, limit, offset: (page - 1) * limit };
+  return { page: safePage, limit, offset: (safePage - 1) * limit };
 }
 
 export function paginationMeta(total: number, page: number, limit: number): PaginationMeta {
@@ -76,4 +77,9 @@ export function parseOrderBy(
 /** Returns true if `s` is a 42-character Ethereum address (0x-prefixed hex). */
 export function isAddress(s: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(s);
+}
+
+/** Normalises an Ethereum address to lowercase for consistent DB lookups. */
+export function normalizeAddress(addr: string): string {
+  return addr.toLowerCase();
 }

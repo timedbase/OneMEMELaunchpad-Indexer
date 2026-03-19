@@ -131,6 +131,8 @@ Once the indexer is running, the built-in GraphQL API is available at:
 http://localhost:42069/graphql
 ```
 
+> **Note:** Port `42069` is Ponder's internally fixed port — it is not configurable via environment variables. If you need to expose the GraphQL API externally, proxy it through nginx or Cloudflare.
+
 ### Example queries
 
 **All tokens, most-recently created first:**
@@ -220,8 +222,11 @@ Every response includes standard rate-limit headers:
 ```
 X-RateLimit-Limit:      60
 X-RateLimit-Remaining:  59
-X-RateLimit-Reset:      1741824060
+X-RateLimit-Reset:      1741824060   ← Unix timestamp (seconds) when the window resets
+Retry-After:            42           ← seconds until retry (only present on 429 responses)
 ```
+
+`X-RateLimit-Reset` is a **Unix timestamp in seconds** indicating when the current rate-limit window expires. `Retry-After` is only sent with `429 Too Many Requests` responses.
 
 When exceeded the API returns `429 Too Many Requests` with a `Retry-After` header.
 
@@ -244,6 +249,7 @@ Requests from other origins receive `403 Forbidden`. In development (`NODE_ENV=d
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/health` | public | Health check |
+| `GET` | `/api/v1` | public | Route index — list of all available route groups |
 | `GET` | `/api/v1/stats` | UI only | Platform-wide aggregated statistics |
 
 #### Tokens
@@ -439,21 +445,171 @@ During the pre-migration phase every token is traded through a constant-product 
 
 ## Deployment
 
-For production you will need:
+### Prerequisites
 
-1. A **managed PostgreSQL** instance (Supabase, Railway, Neon, AWS RDS, etc.)
-2. A **dedicated BSC RPC** with archive access (QuickNode, Ankr, NodeReal, etc.)
-3. **TLS / HTTPS** — handled by Cloudflare reverse proxy; see [CLOUDFLARE.md](CLOUDFLARE.md)
-4. A process manager (PM2, Docker, Railway, Render, etc.)
+| Requirement | Minimum version |
+|---|---|
+| Node.js | 20+ |
+| npm | 9+ |
+| Docker + Docker Compose | Latest stable |
+| git | Any |
+| BSC RPC (HTTP + WSS) | Archive-capable node (QuickNode, Ankr, NodeReal) |
+
+---
+
+### Environment Setup
+
+```bash
+git clone https://github.com/timedbase/OneMEMELaunchpad-Indexer.git
+cd OneMEMELaunchpad-Indexer
+npm install
+cp .env.example .env
+```
+
+Edit `.env` and fill in all required values. See the **Environment Variables Reference** table below.
+
+---
+
+### Local Development
+
+```bash
+# 1. Start PostgreSQL
+docker compose up -d
+
+# 2. Run the Ponder indexer (watches for file changes)
+npm run dev
+
+# 3. In a second terminal, run the REST API
+npm run api:dev
+```
+
+- Ponder GraphQL playground: http://localhost:42069 (port is fixed, not configurable)
+- REST API: http://localhost:3001/api/v1
+- Health check: http://localhost:3001/health
+
+---
+
+### Production Deployment on VPS (DigitalOcean / OVHcloud / Netcup)
+
+#### 1. Server setup — Ubuntu 24.04
+
+```bash
+# Install Docker
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker
+
+# Install Docker Compose plugin
+sudo apt-get install -y docker-compose-plugin
+
+# Verify
+docker --version
+docker compose version
+```
+
+#### 2. Clone and configure
+
+```bash
+git clone https://github.com/timedbase/OneMEMELaunchpad-Indexer.git
+cd OneMEMELaunchpad-Indexer
+cp .env.example .env
+nano .env   # fill in all required variables
+```
+
+#### 3. Build and start
 
 ```bash
 # Build the API
 npm run api:build
 
-# Start the indexer and API (separate processes)
-npm run start       # Ponder indexer
-npm run api         # NestJS REST API
+# Start both processes with PM2 (inside the repo directory)
+npm install -g pm2
+
+pm2 start "npm run start"    --name "ponder-indexer"
+pm2 start "npm run api"      --name "onememe-api"
+pm2 save
+pm2 startup   # follow the printed command to auto-start on reboot
 ```
+
+#### 4. Check logs
+
+```bash
+pm2 logs ponder-indexer   # Ponder indexer logs
+pm2 logs onememe-api      # REST API logs
+pm2 status                # process overview
+```
+
+---
+
+### Database — Neon PostgreSQL
+
+1. Create a free project at [neon.tech](https://neon.tech)
+2. Copy the connection string from the **Dashboard → Connection Details** panel
+3. Set `DATABASE_URL` in `.env`:
+
+```
+DATABASE_URL=postgresql://user:password@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
+```
+
+> **Neon free tier:** 0.5 GB storage, 1 compute unit. Sufficient for development and small deployments. For high-throughput production use, upgrade to the Launch plan or use a dedicated Postgres instance.
+
+---
+
+### Cloudflare Setup
+
+1. **DNS** — add an `A` record pointing your domain to the VPS IP address
+2. **SSL/TLS** — set mode to **Full** (not Flexible) in the Cloudflare dashboard
+3. **WebSocket proxying** — enabled by default in Cloudflare; no extra configuration needed
+4. **Cache bypass for API** — add a Cache Rule:
+   - URL pattern: `*.yourdomain.com/api/*`
+   - Cache status: **Bypass**
+
+This ensures API responses are never cached by Cloudflare and WebSocket connections (`wss://`) are proxied correctly.
+
+See [CLOUDFLARE.md](CLOUDFLARE.md) for the full nginx + Cloudflare setup guide.
+
+---
+
+### Environment Variables Reference
+
+| Variable | Required | Description |
+|---|---|---|
+| `BSC_WSS_URL` | **Yes** | Primary BSC WebSocket endpoint (`wss://…`) |
+| `BSC_WSS_URL_2` | No | Secondary WSS fallback for high availability |
+| `BSC_RPC_URL` | **Yes** | Primary BSC HTTP endpoint — fallback transport + quote RPC |
+| `BSC_RPC_URL_2` | No | Secondary HTTP fallback for high availability |
+| `FACTORY_ADDRESS` | **Yes** | Deployed `LaunchpadFactory` contract address |
+| `BONDING_CURVE_ADDRESS` | **Yes** | Deployed `BondingCurve` contract address |
+| `START_BLOCK` | Recommended | Factory deployment block — avoids full historical scan |
+| `DATABASE_URL` | **Yes** | PostgreSQL connection string |
+| `API_PORT` | No | REST API port (default `3001`) |
+| `ALLOWED_ORIGINS` | Recommended | Comma-separated UI origins for protected endpoints |
+| `PINATA_JWT` | For uploads | Pinata API JWT — required for `POST /metadata/upload` |
+| `IPFS_GATEWAY` | No | Custom IPFS gateway URL (default: `https://ipfs.io/ipfs/`) |
+| `BETTERSTACK_TOKEN` | No | Better Stack log shipping token |
+| `PONDER_TELEMETRY_DISABLED` | No | Set to `1` to disable Ponder anonymous telemetry |
+
+---
+
+### Health Check
+
+Once deployed, verify everything is working:
+
+```bash
+# REST API health
+curl https://api.yourdomain.com/health
+# Expected: {"status":"ok","service":"onememe-launchpad-api","timestamp":...}
+
+# Route index
+curl https://api.yourdomain.com/api/v1
+# Expected: {"service":"onememe-launchpad-api","version":"v1","routes":[...]}
+```
+
+---
+
+### Monitoring — Better Stack
+
+For production log aggregation and uptime monitoring, see [BETTERSTACK.md](BETTERSTACK.md). Better Stack provides real-time log streaming, alerting, and a status page.
 
 ---
 

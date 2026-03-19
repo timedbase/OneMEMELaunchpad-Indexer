@@ -1,9 +1,14 @@
-import { createConfig } from "ponder";
+import { createConfig, factory } from "ponder";
 import { fallback, http, webSocket } from "viem";
+import type { Abi, AbiEvent } from "viem";
 
-import LaunchpadFactoryAbi from "./abis/LaunchpadFactory.json";
-import BondingCurveAbi     from "./abis/BondingCurve.json";
-import ERC20Abi            from "./abis/ERC20.json";
+import LaunchpadFactoryAbiRaw from "./abis/LaunchpadFactory.json";
+import BondingCurveAbiRaw     from "./abis/BondingCurve.json";
+import ERC20AbiRaw            from "./abis/ERC20.json";
+
+const LaunchpadFactoryAbi = LaunchpadFactoryAbiRaw as Abi;
+const BondingCurveAbi     = BondingCurveAbiRaw     as Abi;
+const ERC20Abi            = ERC20AbiRaw            as Abi;
 
 /**
  * Ponder configuration for the OneMEME Launchpad Indexer.
@@ -56,6 +61,14 @@ const transports = [
   ...(BSC_RPC_URL_2 ? [http(BSC_RPC_URL_2)] : []),
 ];
 
+// Locate the TokenCreated event in the factory ABI for the factory() helper.
+// Cast to AbiEvent after the runtime check — the JSON shape is compatible.
+const tokenCreatedRaw = LaunchpadFactoryAbiRaw.find(
+  (e) => "type" in e && e.type === "event" && "name" in e && e.name === "TokenCreated",
+);
+if (!tokenCreatedRaw) throw new Error("TokenCreated event not found in LaunchpadFactory ABI");
+const tokenCreatedEvent = tokenCreatedRaw as unknown as AbiEvent;
+
 export default createConfig({
   networks: {
     bsc: {
@@ -68,7 +81,7 @@ export default createConfig({
     // Emits TokenCreated when a new meme token is deployed.
     LaunchpadFactory: {
       network:    "bsc",
-      abi:        LaunchpadFactoryAbi as any,
+      abi:        LaunchpadFactoryAbi,
       address:    FACTORY_ADDRESS as `0x${string}`,
       startBlock,
     },
@@ -76,7 +89,7 @@ export default createConfig({
     // Emits TokenBought, TokenSold, TokenMigrated for all bonding-curve activity.
     BondingCurve: {
       network:    "bsc",
-      abi:        BondingCurveAbi as any,
+      abi:        BondingCurveAbi,
       address:    BONDING_CURVE_ADDRESS as `0x${string}`,
       startBlock,
     },
@@ -85,13 +98,13 @@ export default createConfig({
     // Ponder reads the `token` field from each TokenCreated log to discover
     // new contract addresses automatically — no manual address list needed.
     MemeToken: {
-      network: "bsc",
-      abi:     ERC20Abi as any,
-      factory: {
+      network:    "bsc",
+      abi:        ERC20Abi,
+      address:    factory({
         address:   FACTORY_ADDRESS as `0x${string}`,
-        event:     LaunchpadFactoryAbi.find((e: any) => e.name === "TokenCreated") as any,
+        event:     tokenCreatedEvent,
         parameter: "token",
-      },
+      }),
       startBlock,
     },
   },

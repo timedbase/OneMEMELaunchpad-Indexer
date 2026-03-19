@@ -65,6 +65,7 @@ export function createRateLimitMiddleware(max: number, windowMs = 60_000) {
 
       res.setHeader("X-RateLimit-Limit",     String(max));
       res.setHeader("X-RateLimit-Remaining", String(remaining));
+      // X-RateLimit-Reset is a Unix timestamp in seconds when the window resets.
       res.setHeader("X-RateLimit-Reset",     String(resetSec));
 
       if (entry.count > max) {
