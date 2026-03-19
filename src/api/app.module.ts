@@ -4,8 +4,6 @@ import {
   NestModule,
   RequestMethod,
 } from "@nestjs/common";
-import { APP_GUARD }    from "@nestjs/core";
-import { OriginGuard }  from "./common/origin.guard";
 
 import { HealthController }    from "./health.controller";
 import { IndexModule }         from "./modules/index/index.module";
@@ -21,6 +19,7 @@ import { LeaderboardModule }   from "./modules/leaderboard/leaderboard.module";
 import { ChartsModule }        from "./modules/charts/charts.module";
 import { PriceModule }         from "./modules/price/price.module";
 import { ChatModule }          from "./modules/chat/chat.module";
+import { VestingModule }       from "./modules/vesting/vesting.module";
 
 import {
   QuoteRateLimitMiddleware,
@@ -43,11 +42,9 @@ import {
     ChartsModule,
     PriceModule,
     ChatModule,
+    VestingModule,
   ],
   controllers: [HealthController],
-  providers: [
-    { provide: APP_GUARD, useClass: OriginGuard },
-  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

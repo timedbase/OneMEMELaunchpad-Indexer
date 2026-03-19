@@ -14,42 +14,6 @@
   },
   {
     "type": "function",
-    "name": "getAmountOut",
-    "stateMutability": "view",
-    "inputs": [
-      { "name": "token",    "type": "address" },
-      { "name": "amountIn", "type": "uint256" }
-    ],
-    "outputs": [{ "name": "", "type": "uint256" }, { "name": "", "type": "uint256" }]
-  },
-  {
-    "type": "function",
-    "name": "getAmountOutSell",
-    "stateMutability": "view",
-    "inputs": [
-      { "name": "token",    "type": "address" },
-      { "name": "amountIn", "type": "uint256" }
-    ],
-    "outputs": [{ "name": "", "type": "uint256" }, { "name": "", "type": "uint256" }]
-  },
-  {
-    "type": "function",
-    "name": "getSpotPrice",
-    "stateMutability": "view",
-    "inputs": [
-      { "name": "token", "type": "address" }
-    ],
-    "outputs": [{ "name": "", "type": "uint256" }]
-  },
-  {
-    "type": "function",
-    "name": "totalTokensLaunched",
-    "stateMutability": "view",
-    "inputs": [],
-    "outputs": [{ "name": "", "type": "uint256" }]
-  },
-  {
-    "type": "function",
     "name": "standardImpl",
     "stateMutability": "view",
     "inputs": [],
@@ -68,5 +32,26 @@
     "stateMutability": "view",
     "inputs": [],
     "outputs": [{ "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "name": "predictTokenAddress",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "creator_",  "type": "address" },
+      { "name": "userSalt_", "type": "bytes32" },
+      { "name": "impl_",     "type": "address" }
+    ],
+    "outputs": [{ "name": "predicted", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "name": "getAntibotBlocksRange",
+    "stateMutability": "pure",
+    "inputs": [],
+    "outputs": [
+      { "name": "min", "type": "uint256" },
+      { "name": "max", "type": "uint256" }
+    ]
   }
 ]

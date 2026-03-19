@@ -28,15 +28,15 @@ nano .env
 Required variables in `.env`:
 
 ```dotenv
-# BSC RPC — primary + optional secondary for high availability
+# BSC RPC
 BSC_WSS_URL=wss://...
-BSC_WSS_URL_2=wss://...          # optional — different provider for redundancy
 BSC_RPC_URL=https://...
-BSC_RPC_URL_2=https://...        # optional — different provider for redundancy
+CHAIN_ID=56
 
 # Contracts
 FACTORY_ADDRESS=0x...
 BONDING_CURVE_ADDRESS=0x...
+VESTING_WALLET_ADDRESS=0x...
 START_BLOCK=...
 
 # Database (Neon direct connection string)
@@ -44,13 +44,12 @@ DATABASE_URL=postgresql://...neon.tech/neondb?sslmode=require
 
 # API
 API_PORT=3001
-ALLOWED_ORIGINS=https://1coin.meme,https://www.1coin.meme,https://onememe.folkshq.xyz
 NODE_ENV=production
 
 # IPFS (for metadata upload)
 PINATA_JWT=...
 
-# Monitoring (optional)
+# Monitoring (optional — ships NestJS logs to BetterStack when set)
 BETTERSTACK_TOKEN=
 ```
 
@@ -149,14 +148,16 @@ docker compose -f docker-compose.prod.yml up -d --build
 VPS
 └── Docker container (onememe-launchpad)
     ├── PM2
-    │   ├── ponder  → BSC via WSS1/WSS2/HTTP1/HTTP2
-    │   │             → writes to Neon DB (LaunchpadFactory + BondingCurve events)
+    │   ├── ponder  → BSC via BSC_WSS_URL (primary) / BSC_RPC_URL (fallback)
+    │   │             → writes to Neon DB (LaunchpadFactory, BondingCurve, VestingWallet events)
     │   └── api     → reads Neon DB → serves :3001
+    │                 → ships logs to BetterStack (when BETTERSTACK_TOKEN is set)
     └── Volume: ponder_data → /app/.ponder  (checkpoints, cache)
 
-Cloudflare → VPS:3001 (TLS, WAF, rate limit at edge)
-Neon       → external PostgreSQL
-BSC        → QuickNode (primary) + Ankr (secondary) — dual WSS + HTTP
+Cloudflare  → VPS:3001 (TLS, WAF, rate limit at edge)
+Neon        → external PostgreSQL
+BetterStack → log aggregation + uptime monitoring
+BSC         → single WSS (primary) + HTTP (fallback)
 ```
 
 ---

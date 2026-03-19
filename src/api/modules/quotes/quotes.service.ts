@@ -50,7 +50,7 @@ export class QuotesService {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("not configured")) {
-        throw new ServiceUnavailableException("Quote simulation requires BSC_RPC_URL and FACTORY_ADDRESS.");
+        throw new ServiceUnavailableException("Quote simulation requires BSC_RPC_URL and BONDING_CURVE_ADDRESS.");
       }
       throw err;
     }
@@ -104,7 +104,7 @@ export class QuotesService {
       [tokensOut, spot] = await Promise.all([quoteBuy(token, bnbIn), getSpotPrice(token)]);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("not configured")) throw new ServiceUnavailableException("Quote simulation requires BSC_RPC_URL and FACTORY_ADDRESS.");
+      if (msg.includes("not configured")) throw new ServiceUnavailableException("Quote simulation requires BSC_RPC_URL and BONDING_CURVE_ADDRESS.");
       throw err;
     }
 
@@ -161,7 +161,7 @@ export class QuotesService {
       [bnbOut, spot] = await Promise.all([quoteSell(token, tokensIn), getSpotPrice(token)]);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("not configured")) throw new ServiceUnavailableException("Quote simulation requires BSC_RPC_URL and FACTORY_ADDRESS.");
+      if (msg.includes("not configured")) throw new ServiceUnavailableException("Quote simulation requires BSC_RPC_URL and BONDING_CURVE_ADDRESS.");
       throw err;
     }
 

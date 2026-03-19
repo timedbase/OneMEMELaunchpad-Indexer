@@ -123,8 +123,6 @@ START_BLOCK=...
 
 # API
 API_PORT=3001
-ALLOWED_ORIGINS=https://api.1coin.meme,https://1coin.meme,https://www.1coin.meme
-
 # Pinata (IPFS uploads)
 PINATA_JWT=...
 
@@ -220,16 +218,20 @@ Action: Block
 
 ### 8.1 Connect logs
 
+Log shipping is built into the NestJS API. To activate:
+
 1. Go to [betterstack.com](https://betterstack.com) → **Logs → New source**
-2. Select **Docker** → copy the source token
+2. Select **Node.js** → copy the source token
 3. Add to your `.env`:
    ```env
    BETTERSTACK_TOKEN=your_token
    ```
-4. Rebuild:
+4. Rebuild so the container picks up the new env var:
    ```bash
    docker compose -f docker-compose.prod.yml up -d --build
    ```
+
+Once running, all NestJS logs (startup, warnings, errors) ship to Better Stack Live Tail automatically.
 
 ### 8.2 Uptime monitor
 

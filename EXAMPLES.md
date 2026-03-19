@@ -5,7 +5,7 @@ Complete reference of every endpoint with `curl` commands and expected JSON resp
 > **Base URL:** `https://api.1coin.meme` (HTTP if TLS is not configured — see [HTTPS Setup](#https--wss-setup))
 > **All BNB / token amounts** are returned as strings (wei, 18 decimals) to preserve uint256 precision.
 > **Pagination** is available on all list endpoints via `?page=` and `?limit=` (max 100).
-> **All endpoints** require the request `Origin` header to match `ALLOWED_ORIGINS` (except `GET /health`). In development, `localhost` origins are always permitted.
+> **Origin enforcement** is handled by Cloudflare WAF — requests from unlisted origins are blocked at the edge before reaching the API.
 
 ---
 
@@ -53,9 +53,12 @@ Complete reference of every endpoint with `curl` commands and expected JSON resp
 14. [Token Chat](#14-token-chat)
     - [Fetch message history (REST)](#141-fetch-message-history-rest)
     - [Real-time chat (WebSocket)](#142-real-time-chat-websocket)
-15. [Rate Limit Response](#15-rate-limit-response)
-16. [Origin Restriction (403)](#16-origin-restriction-403)
-17. [Error Shapes](#17-error-shapes)
+15. [Vesting](#15-vesting)
+    - [Token vesting schedule](#151-token-vesting-schedule)
+    - [Creator vesting schedules](#152-creator-vesting-schedules)
+16. [Rate Limit Response](#16-rate-limit-response)
+17. [Origin Restriction (403)](#17-origin-restriction-403)
+18. [Error Shapes](#18-error-shapes)
 
 ---
 
@@ -81,7 +84,7 @@ curl https://api.1coin.meme/health
 
 ## 2. Platform Stats
 
-Aggregated platform-wide statistics. Restricted to `ALLOWED_ORIGINS` (UI only). Rate limit: **10 req/min**.
+Aggregated platform-wide statistics. Rate limit: **10 req/min**.
 
 ```bash
 curl https://api.1coin.meme/api/v1/stats \
@@ -170,7 +173,8 @@ curl "https://api.1coin.meme/api/v1/tokens?type=Tax&migrated=false&orderBy=volum
       "sellCount":          41,
       "volumeBNB":          "820000000000000000000",
       "raisedBNB":          "610000000000000000000",
-      "migrationTarget":    "800000000000000000000"
+      "migrationTarget":    "800000000000000000000",
+      "creatorTokens":      "50000000000000000000000000"
     }
   ],
   "pagination": { "page": 1, "limit": 5, "total": 1042, "pages": 209, "hasMore": true }
@@ -208,6 +212,7 @@ curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111"
     "volumeBNB":          "820000000000000000000",
     "raisedBNB":          "610000000000000000000",
     "migrationTarget":    "800000000000000000000",
+    "creatorTokens":      "50000000000000000000000000",
     "metaURI":  "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
     "metadata": {
       "name":        "PepeBSC",
@@ -578,7 +583,7 @@ curl "https://api.1coin.meme/api/v1/creators/0xcreator.../tokens?limit=10"
 
 ## 8. Activity Feed
 
-Unified stream of create/buy/sell events across all tokens. Restricted to `ALLOWED_ORIGINS`.
+Unified stream of create/buy/sell events across all tokens. Origin-restricted via Cloudflare WAF.
 
 ### 8.1 Paginated feed
 
@@ -1281,7 +1286,108 @@ function sendMessage(text) {
 
 ---
 
-## 15. Rate Limit Response
+## 15. Vesting
+
+Creator token allocations — 5% of supply locked for 365 days, linear, no cliff. Indexed from the `VestingWallet` contract.
+
+### 15.1 Token vesting schedule
+
+```bash
+curl https://api.1coin.meme/api/v1/vesting/0xTokenAddress1111 \
+  -H "Origin: https://1coin.meme"
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "data": [
+    {
+      "token":       "0xtokenaddress...1111",
+      "beneficiary": "0xcreatorwallet...abcd",
+      "amount":      "50000000000000000000000000",
+      "start":       1741824000,
+      "claimed":     "5000000000000000000000000",
+      "voided":      false,
+      "burned":      "0",
+      "claimable":   "2739726027397260273972",
+      "vestingEnds": 1773360000,
+      "progressPct": 18
+    }
+  ]
+}
+```
+
+| Field | Description |
+|---|---|
+| `amount` | Total tokens locked at vesting start (wei) |
+| `claimed` | Total tokens already claimed (wei) |
+| `claimable` | Currently unlocked but unclaimed — computed server-side (wei) |
+| `voided` | `true` if the schedule was cancelled by the owner |
+| `burned` | Tokens burned to dead address on void (wei) |
+| `vestingEnds` | Unix timestamp when all remaining tokens unlock |
+| `progressPct` | 0–100% of the 365-day vesting period elapsed |
+
+**`404`** — no vesting schedule for this token (creator opted out of allocation).
+
+---
+
+### 15.2 Creator vesting schedules
+
+All vesting schedules across every token a creator has launched.
+
+```bash
+curl "https://api.1coin.meme/api/v1/creators/0xCreatorAddress/vesting?page=1&limit=20" \
+  -H "Origin: https://1coin.meme"
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "data": [
+    {
+      "token":       "0xtokenaddress...1111",
+      "beneficiary": "0xcreatorwallet...abcd",
+      "amount":      "50000000000000000000000000",
+      "start":       1741824000,
+      "claimed":     "0",
+      "voided":      false,
+      "burned":      "0",
+      "claimable":   "2739726027397260273972",
+      "vestingEnds": 1773360000,
+      "progressPct": 18,
+      "tokenType":   "Standard",
+      "totalSupply": "1000000000000000000000000000",
+      "migrated":    false
+    }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 3, "pages": 1, "hasMore": false }
+}
+```
+
+**Frontend usage — show creator allocation progress:**
+
+```js
+const res  = await fetch(`https://api.1coin.meme/api/v1/vesting/${tokenAddress}`);
+const { data } = await res.json();
+const schedule = data[0];
+
+if (schedule) {
+  const totalPct    = 5;   // always 5% of supply
+  const claimedPct  = (BigInt(schedule.claimed)   * 100n / BigInt(schedule.amount));
+  const claimablePct= (BigInt(schedule.claimable) * 100n / BigInt(schedule.amount));
+
+  console.log(`Creator vesting: ${schedule.progressPct}% unlocked`);
+  console.log(`Claimed: ${claimedPct}% of allocation`);
+  console.log(`Available to claim: ${claimablePct}% of allocation`);
+  console.log(`Fully vested: ${new Date(schedule.vestingEnds * 1000).toLocaleDateString()}`);
+}
+```
+
+---
+
+## 16. Rate Limit Response
 
 When a rate limit is exceeded the API returns **`429 Too Many Requests`**:
 
@@ -1315,60 +1421,35 @@ Limits are keyed by **client IP only** (not IP+path). Rotating token addresses d
 
 ---
 
-## 16. Origin Restriction (403)
+## 17. Origin Restriction (403)
 
-Endpoints restricted to the launchpad UI return `403 Forbidden` when the `Origin` header is not in `ALLOWED_ORIGINS`:
+Origin enforcement is handled by **Cloudflare WAF** (see [CLOUDFLARE.md](CLOUDFLARE.md) Step 5.1). Requests whose `Origin` header is not in the configured allowlist are blocked at the edge with a `403` before they reach the API.
 
-**All endpoints are origin-restricted.** The only public exemption is `GET /health`.
+`GET /health` is exempt so BetterStack uptime monitoring works without an Origin header.
 
-```bash
-# No Origin header
-curl https://api.1coin.meme/api/v1/stats
+**To update allowed origins**, edit the Cloudflare WAF rule — no code or env changes needed:
+
+```
+WAF → Custom Rules → "Enforce allowed origins"
+→ update the origin values in the expression
 ```
 
-```json
-{
-  "message":    "This endpoint is restricted to the OneMEME Launchpad UI.",
-  "error":      "Forbidden",
-  "statusCode": 403
-}
-```
-
-```bash
-# Disallowed origin
-curl https://api.1coin.meme/api/v1/stats -H "Origin: https://other.io"
-```
-
-```json
-{
-  "message":    "Origin not permitted: https://other.io",
-  "error":      "Forbidden",
-  "statusCode": 403
-}
-```
-
-**To permit an origin**, add it to `.env`:
-
-```dotenv
-ALLOWED_ORIGINS=https://1coin.meme,https://www.1coin.meme
-```
-
-In development (`NODE_ENV=development`), all `http://localhost:*` and `http://127.0.0.1:*` origins are automatically permitted.
+In local development the app allows all origins — Cloudflare is not in the path.
 
 ---
 
-## 17. Error Shapes
+## 18. Error Shapes
 
 All errors follow the NestJS standard exception shape:
 
 | Status | `error` | Common cause |
 |---|---|---|
 | `400` | `Bad Request` | Invalid address, missing required param, out-of-range value |
-| `403` | `Forbidden` | Origin not in `ALLOWED_ORIGINS` |
+| `403` | `Forbidden` | Origin blocked by Cloudflare WAF |
 | `404` | `Not Found` | Token / migration record does not exist |
 | `429` | `Too Many Requests` | Rate limit exceeded |
 | `500` | `Internal Server Error` | Unexpected DB or runtime error |
-| `503` | `Service Unavailable` | `BSC_RPC_URL` or `FACTORY_ADDRESS` not configured (quote endpoints) |
+| `503` | `Service Unavailable` | `BSC_RPC_URL` or `BONDING_CURVE_ADDRESS` not configured (quote endpoints) |
 
 ```json
 {

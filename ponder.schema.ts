@@ -2,7 +2,7 @@ import { onchainTable, index, primaryKey } from "ponder";
 
 // ─── Token ────────────────────────────────────────────────────────────────────
 // One row per deployed meme token. Created on TokenCreated, updated on each
-// trade and migration.
+// trade, migration, and vesting event.
 
 export const token = onchainTable(
   "token",
@@ -69,11 +69,18 @@ export const token = onchainTable(
 
     /**
      * BNB target that must be raised before the token can migrate to
-     * PancakeSwap. Read from the factory's tokens() view at creation time.
-     * Used by the frontend to show bonding-curve progress without an extra
-     * on-chain read per token card.
+     * PancakeSwap. Used by the frontend to show bonding-curve progress
+     * without an extra on-chain read per token card.
      */
     migrationTarget: t.bigint().notNull(),
+
+    /**
+     * Creator token allocation locked in the VestingWallet (wei).
+     * Exactly 5% of totalSupply when enableCreatorAlloc = true at launch.
+     * Zero when the creator opted out of the allocation.
+     * Populated when VestingAdded fires for this token.
+     */
+    creatorTokens: t.bigint().notNull(),
   }),
   (table) => ({
     creatorIdx:        index().on(table.creator),
@@ -198,5 +205,44 @@ export const migration = onchainTable(
   }),
   (table) => ({
     pairIdx: index().on(table.pair),
+  })
+);
+
+// ─── Vesting ──────────────────────────────────────────────────────────────────
+// One row per (token, beneficiary) vesting schedule.
+// Created on VestingAdded, updated on Claimed and VestingVoided.
+// One schedule per token in practice (creator = beneficiary, 5% of supply).
+
+export const vesting = onchainTable(
+  "vesting",
+  (t) => ({
+    /** Token contract address. */
+    token: t.hex().notNull(),
+
+    /** Creator wallet address (the vesting beneficiary). */
+    beneficiary: t.hex().notNull(),
+
+    /** Total tokens locked at vesting start (wei). */
+    amount: t.bigint().notNull(),
+
+    /** Unix timestamp (seconds) when vesting started (block of VestingAdded). */
+    start: t.integer().notNull(),
+
+    /** Total tokens claimed so far (wei). Incremented on each Claimed event. */
+    claimed: t.bigint().notNull(),
+
+    /** True if the schedule was voided by the owner before full unlock. */
+    voided: t.boolean().notNull(),
+
+    /**
+     * Tokens burned to the dead address when the schedule was voided (wei).
+     * Zero if not yet voided.
+     */
+    burned: t.bigint().notNull(),
+  }),
+  (table) => ({
+    pk:             primaryKey({ columns: [table.token, table.beneficiary] }),
+    beneficiaryIdx: index().on(table.beneficiary),
+    tokenIdx:       index().on(table.token),
   })
 );

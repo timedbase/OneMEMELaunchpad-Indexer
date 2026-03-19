@@ -17,10 +17,11 @@ import compression      from "compression";
 import { NestFactory }  from "@nestjs/core";
 import { WsAdapter }    from "@nestjs/platform-ws";
 import { AppModule }    from "./app.module";
+import { AppLogger }    from "./logger";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
-    logger: ["log", "warn", "error"],
+    logger: AppLogger,
   });
 
   // ── Compression ────────────────────────────────────────────────────────────
@@ -33,30 +34,9 @@ async function bootstrap() {
   app.setGlobalPrefix("api/v1", { exclude: ["/health"] });
 
   // ── CORS ───────────────────────────────────────────────────────────────────
-  const allowedOrigins = new Set(
-    (process.env.ALLOWED_ORIGINS ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-  );
-
-  const isDev = (process.env.NODE_ENV ?? "development") === "development";
-
-  function isLocalhost(origin: string): boolean {
-    try {
-      const { hostname } = new URL(origin);
-      return hostname === "localhost" || hostname === "127.0.0.1";
-    } catch { return false; }
-  }
-
+  // Origin enforcement is handled by Cloudflare WAF — no in-app allowlist needed.
   app.enableCors({
-    origin: (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
-      if (!origin || allowedOrigins.has(origin) || (isDev && isLocalhost(origin))) {
-        cb(null, true);
-      } else {
-        cb(new Error("Not allowed by CORS"), false);
-      }
-    },
+    origin:         true,
     methods:        ["GET", "OPTIONS"],
     allowedHeaders: ["Content-Type"],
     exposedHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After"],

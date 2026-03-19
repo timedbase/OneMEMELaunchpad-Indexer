@@ -105,15 +105,17 @@ Click **Deploy**. This prevents Cloudflare from caching API responses.
 
 **Security → WAF → Custom rules → Create rule**
 
-**Rule 1 — Block non-browser requests to origin-restricted endpoints**
+**Rule 1 — Enforce allowed origins**
 
-This blocks curl/scripts hitting UI-only endpoints without a proper `Origin` header.
+Origin enforcement lives here, not in the app. This blocks any request whose `Origin` header is not from your UI domains.
 
 | Field | Value |
 |---|---|
-| Rule name | `Require Origin for API` |
-| When | URI Path contains `/api/v1` AND NOT URI Path contains `/health` AND http.request.headers["origin"] eq "" |
+| Rule name | `Enforce allowed origins` |
+| When | URI Path starts with `/api/v1` AND NOT URI Path eq `/health` AND NOT http.request.headers["origin"][0] in `{"https://1coin.meme" "https://www.1coin.meme"}` |
 | Action | Block |
+
+> Update the origin values to match your actual frontend domains. `/health` is excluded so BetterStack uptime monitoring still works.
 
 **Rule 2 — Country block (optional)**
 

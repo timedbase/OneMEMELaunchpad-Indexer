@@ -20,59 +20,24 @@ Better Stack covers two things for this project:
 
 ### Step 2 — Install the SDK
 
-```bash
-npm install @logtail/node @logtail/winston winston
-```
+> **Already done.** `@logtail/node`, `@logtail/winston`, `winston`, and `nest-winston` are in `package.json` and installed. Skip this step.
 
-> The NestJS API uses its own logger. We replace it with Winston + Logtail so every `this.logger.log/warn/error` call is shipped to Better Stack automatically.
+```bash
+# Only needed if you're starting from scratch:
+npm install @logtail/node @logtail/winston nest-winston winston
+```
 
 ---
 
-### Step 3 — Create the Logger
+### Step 3 — Logger file
 
-Create `src/api/logger.ts`:
-
-```typescript
-import { WinstonModule } from "nest-winston";
-import { createLogger, transports, format } from "winston";
-import { Logtail } from "@logtail/node";
-import { LogtailTransport } from "@logtail/winston";
-
-const logtail = new Logtail(process.env.BETTERSTACK_TOKEN ?? "");
-
-export const AppLogger = WinstonModule.createLogger(
-  createLogger({
-    level: "info",
-    format: format.combine(
-      format.timestamp(),
-      format.errors({ stack: true }),
-      format.json(),
-    ),
-    transports: [
-      new transports.Console({
-        format: format.combine(format.colorize(), format.simple()),
-      }),
-      new LogtailTransport(logtail),
-    ],
-  })
-);
-```
+> **Already done.** `src/api/logger.ts` exists and creates the Winston + Logtail logger. The Logtail transport is only added when `BETTERSTACK_TOKEN` is set — local dev without a token works fine on console-only output.
 
 ---
 
 ### Step 4 — Wire the Logger into NestJS
 
-In `src/api/main.ts`, replace the default logger:
-
-```typescript
-import { AppLogger } from "./logger";
-
-const app = await NestFactory.create(AppModule, {
-  logger: AppLogger,
-});
-```
-
-Remove the old `logger: ["log", "warn", "error"]` line.
+> **Already done.** `src/api/main.ts` passes `AppLogger` to `NestFactory.create()`.
 
 ---
 
@@ -97,10 +62,13 @@ npm run api:dev
 Open Better Stack → **Live Tail** — you should see startup logs appear within a few seconds:
 
 ```
-BNB price aggregator started (refresh every 10s)
-Chat table ready
-OneMEME Launchpad API listening on port 3001
+OneMEME Launchpad API  (NestJS)
+Listening   : http://localhost:3001
+Route index : http://localhost:3001/api/v1
+Health      : http://localhost:3001/health
 ```
+
+If logs are not appearing, confirm `BETTERSTACK_TOKEN` is set in `.env` and the API was restarted after adding it.
 
 ---
 
@@ -262,4 +230,4 @@ level:warn OR level:error
 | Uptime dashboard | [uptime.betterstack.com](https://uptime.betterstack.com) |
 | Health endpoint monitored | `https://api.1coin.meme/health` |
 | Log token env var | `BETTERSTACK_TOKEN` |
-| Packages | `@logtail/node` `@logtail/winston` `winston` `nest-winston` |
+| Packages | `@logtail/node` `@logtail/winston` `winston` `nest-winston` (already installed) |

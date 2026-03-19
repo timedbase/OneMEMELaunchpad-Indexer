@@ -88,7 +88,6 @@ Edit `.env`:
 | `START_BLOCK` | Recommended | Factory deployment block — skips unnecessary historical scan |
 | `DATABASE_URL` | **Yes** | PostgreSQL connection string |
 | `API_PORT` | No | REST API port (default `3001`) |
-| `ALLOWED_ORIGINS` | Recommended | Comma-separated UI origins for origin-restricted endpoints |
 | `IPFS_GATEWAY` | No | Custom IPFS gateway for token metadata resolution (default: `https://ipfs.io/ipfs/`) |
 
 > Both `BSC_WSS_URL` and `BSC_RPC_URL` are required. The indexer throws at startup if either is missing.
@@ -245,9 +244,7 @@ When exceeded the API returns `429 Too Many Requests` with a `Retry-After` heade
 
 ### Origin Restriction
 
-All endpoints require the `Origin` header to match an entry in `ALLOWED_ORIGINS`. The only public exemption is `GET /health`.
-
-Requests from other origins receive `403 Forbidden`. In development (`NODE_ENV=development`) all `localhost` origins are automatically permitted.
+Origin enforcement is handled by **Cloudflare WAF** — see [CLOUDFLARE.md](CLOUDFLARE.md) Step 5.1. The app itself allows all origins; the WAF rule at the edge blocks requests whose `Origin` header is not in your configured UI domains.
 
 ### Endpoints
 
@@ -686,12 +683,14 @@ Better Stack provides log aggregation, uptime monitoring, and a public status pa
 
 #### Log shipping
 
-1. Go to **Logs** → **Connect source** → **HTTP** source
-2. Copy the **Source token**
-3. Set `BETTERSTACK_TOKEN` in `.env`
-4. Restart the API: `pm2 restart onememe-api`
+Log shipping is built into the API — no code changes needed. To activate:
 
-Logs will appear in the Better Stack dashboard within seconds of startup.
+1. Go to **Logs** → **Connect source** → **Node.js**
+2. Copy the **Source token**
+3. Set `BETTERSTACK_TOKEN=<token>` in `.env`
+4. Restart the API — logs appear in Better Stack Live Tail within seconds
+
+> If `BETTERSTACK_TOKEN` is not set the API still starts normally, logging to console only.
 
 #### Status page
 
@@ -718,7 +717,6 @@ Full Better Stack setup guide: [BETTERSTACK.md](BETTERSTACK.md)
 | `DATABASE_URL` | **Yes** | PostgreSQL connection string (Neon: `postgresql://...?sslmode=require`) |
 | `API_PORT` | No | REST API port (default `3001`) |
 | `NODE_ENV` | Recommended | Set to `production` on VPS |
-| `ALLOWED_ORIGINS` | Recommended | Comma-separated UI origins (e.g. `https://1coin.meme,https://www.1coin.meme`) |
 | `PINATA_JWT` | For uploads | Pinata API JWT — required for `POST /metadata/upload` |
 | `IPFS_GATEWAY` | No | Custom IPFS gateway (default: `https://gateway.pinata.cloud/ipfs/`) |
 | `BETTERSTACK_TOKEN` | No | Better Stack log source token for log shipping |

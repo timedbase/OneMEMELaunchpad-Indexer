@@ -33,6 +33,17 @@
     ]
   },
   {
+    "type": "event",
+    "name": "TokenRegistered",
+    "inputs": [
+      { "name": "token",           "type": "address", "indexed": true  },
+      { "name": "creator",         "type": "address", "indexed": true  },
+      { "name": "totalSupply",     "type": "uint256", "indexed": false },
+      { "name": "virtualBNB",      "type": "uint256", "indexed": false },
+      { "name": "migrationTarget", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
     "type": "function",
     "name": "getAmountOut",
     "stateMutability": "view",
@@ -50,12 +61,12 @@
     "name": "getAmountOutSell",
     "stateMutability": "view",
     "inputs": [
-      { "name": "token_",    "type": "address" },
-      { "name": "tokensIn",  "type": "uint256" }
+      { "name": "token_",   "type": "address" },
+      { "name": "tokensIn", "type": "uint256" }
     ],
     "outputs": [
-      { "name": "bnbOut",  "type": "uint256" },
-      { "name": "feeBNB",  "type": "uint256" }
+      { "name": "bnbOut", "type": "uint256" },
+      { "name": "feeBNB", "type": "uint256" }
     ]
   },
   {
@@ -69,9 +80,79 @@
   },
   {
     "type": "function",
+    "name": "getToken",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "token_", "type": "address" }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "components": [
+          { "name": "token",           "type": "address" },
+          { "name": "creator",         "type": "address" },
+          { "name": "totalSupply",     "type": "uint256" },
+          { "name": "liquidityTokens", "type": "uint256" },
+          { "name": "creatorTokens",   "type": "uint256" },
+          { "name": "bcTokensTotal",   "type": "uint256" },
+          { "name": "bcTokensSold",    "type": "uint256" },
+          { "name": "virtualBNB",      "type": "uint256" },
+          { "name": "k",               "type": "uint256" },
+          { "name": "raisedBNB",       "type": "uint256" },
+          { "name": "migrationTarget", "type": "uint256" },
+          { "name": "pair",            "type": "address" },
+          { "name": "router",          "type": "address" },
+          { "name": "antibotEnabled",  "type": "bool"    },
+          { "name": "creationBlock",   "type": "uint256" },
+          { "name": "tradingBlock",    "type": "uint256" },
+          { "name": "migrated",        "type": "bool"    }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "function",
     "name": "totalTokensLaunched",
     "stateMutability": "view",
     "inputs": [],
     "outputs": [{ "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "name": "allTokens",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "", "type": "uint256" }
+    ],
+    "outputs": [{ "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "name": "getTokensByCreator",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "creator_", "type": "address" }
+    ],
+    "outputs": [{ "name": "", "type": "address[]" }]
+  },
+  {
+    "type": "function",
+    "name": "tokenCountByCreator",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "creator_", "type": "address" }
+    ],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "name": "getAntibotBlocksRange",
+    "stateMutability": "pure",
+    "inputs": [],
+    "outputs": [
+      { "name": "min", "type": "uint256" },
+      { "name": "max", "type": "uint256" }
+    ]
   }
 ]

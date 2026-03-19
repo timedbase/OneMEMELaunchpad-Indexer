@@ -52,7 +52,7 @@ export class ChatService implements OnModuleInit {
       ) sub
       ORDER BY timestamp ASC
     `;
-    return rows as ChatMessage[];
+    return rows as unknown as ChatMessage[];
   }
 
   /** Persist a new message and prune old ones so storage stays bounded. */

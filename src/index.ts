@@ -120,6 +120,7 @@ ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
     volumeBNB:          0n,
     raisedBNB:          0n,
     migrationTarget,
+    creatorTokens:      0n,  // updated by VestingWallet:VestingAdded when schedule is created
   });
 });
 
@@ -260,4 +261,64 @@ ponder.on("MemeToken:Transfer", async ({ event, context }) => {
       .values({ token, address: to, balance: value })
       .onConflictDoUpdate((row) => ({ balance: row.balance + value }));
   }
+});
+
+// ─── Vesting ──────────────────────────────────────────────────────────────────
+
+/**
+ * Emitted by VestingWallet when the factory creates a new vesting schedule
+ * during token creation. The beneficiary is the token creator; the amount
+ * is exactly 5% of total supply (CREATOR_BPS = 500) when enableCreatorAlloc
+ * is true. No event fires when the creator opts out (amount = 0).
+ *
+ * Also backfills creatorTokens on the parent token row so the frontend can
+ * show the creator allocation without a separate vesting query.
+ */
+ponder.on("VestingWallet:VestingAdded", async ({ event, context }) => {
+  const { token, beneficiary, amount } = event.args;
+
+  await context.db.insert(schema.vesting).values({
+    token,
+    beneficiary,
+    amount,
+    start:   Number(event.block.timestamp),
+    claimed: 0n,
+    voided:  false,
+    burned:  0n,
+  });
+
+  // Backfill creatorTokens on the token row for fast API reads.
+  await context.db
+    .update(schema.token, { id: token })
+    .set({ creatorTokens: amount });
+});
+
+/**
+ * Emitted when a beneficiary calls claim() and receives unlocked tokens.
+ * Vesting is linear over 365 days with no cliff; claimable amount grows
+ * continuously from the schedule start timestamp.
+ */
+ponder.on("VestingWallet:Claimed", async ({ event, context }) => {
+  const { token, beneficiary, amount } = event.args;
+
+  // VestingAdded always fires before Claimed (contract guarantee).
+  // Update only — accumulate claimed amount on the existing row.
+  await context.db
+    .update(schema.vesting, { token, beneficiary })
+    .set((row) => ({ claimed: row.claimed + amount }));
+});
+
+/**
+ * Emitted when the VestingWallet owner voids a schedule before it has fully
+ * unlocked. The unvested remainder is burned to the dead address (0x...dEaD).
+ * After voiding, no further claims are possible for this (token, beneficiary).
+ */
+ponder.on("VestingWallet:VestingVoided", async ({ event, context }) => {
+  const { token, beneficiary, burned } = event.args;
+
+  // VestingAdded always fires before VestingVoided (contract guarantee).
+  // Update only — mark the existing row as voided and record the burned amount.
+  await context.db
+    .update(schema.vesting, { token, beneficiary })
+    .set({ voided: true, burned });
 });
