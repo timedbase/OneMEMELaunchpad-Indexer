@@ -1,16 +1,18 @@
 /**
  * On-chain RPC client for real-time quote simulation.
  *
- * Uses viem to call view functions on the LaunchpadFactory contract directly,
- * bypassing the indexed database. This ensures quotes reflect the live
- * bonding-curve state even between indexer sync cycles.
+ * Calls view functions on the BondingCurve contract directly, bypassing the
+ * indexed database. This ensures quotes reflect the live bonding-curve state
+ * even between indexer sync cycles.
  *
- * All functions throw if BSC_RPC_URL or FACTORY_ADDRESS are not configured.
+ * getAmountOut, getAmountOutSell, and getSpotPrice live on the BondingCurve
+ * contract — NOT on LaunchpadFactory. rpc.ts must use BONDING_CURVE_ADDRESS.
+ *
+ * All functions throw if BSC_RPC_URL or BONDING_CURVE_ADDRESS are not set.
  * The quotes route catches these and returns a 503 with a helpful message.
  */
 
-import { createPublicClient, fallback, http, webSocket, parseAbi } from "viem";
-import { bsc } from "viem/chains";
+import { createPublicClient, fallback, http, webSocket, parseAbi, defineChain } from "viem";
 
 // ─── Client ───────────────────────────────────────────────────────────────────
 
@@ -18,14 +20,8 @@ import { bsc } from "viem/chains";
  * Lazily-initialised public client. Created on first call so that importing
  * this module does not crash if env vars are absent at startup.
  *
- * Transport stack (highest priority first):
- *   BSC_WSS_URL   — primary WebSocket (real-time, zero polling)
- *   BSC_WSS_URL_2 — secondary WebSocket (optional)
- *   BSC_RPC_URL   — primary HTTP fallback
- *   BSC_RPC_URL_2 — secondary HTTP fallback (optional)
- *
- * viem's fallback() switches to the next transport on error or timeout,
- * then retries the primary on the next request.
+ * Transport: BSC_WSS_URL (primary) → BSC_RPC_URL (fallback).
+ * viem's fallback() switches on error or timeout and retries primary on next request.
  */
 let _client: ReturnType<typeof createPublicClient> | null = null;
 
@@ -36,42 +32,40 @@ function getClient(): ReturnType<typeof createPublicClient> {
     );
   }
   if (!_client) {
+    const chainId = parseInt(process.env.CHAIN_ID ?? "56");
+    const chain   = defineChain({ id: chainId, name: "EVM", nativeCurrency: { name: "Native", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [process.env.BSC_RPC_URL] } } });
     const transports = [
-      ...(process.env.BSC_WSS_URL   ? [webSocket(process.env.BSC_WSS_URL)]   : []),
-      ...(process.env.BSC_WSS_URL_2 ? [webSocket(process.env.BSC_WSS_URL_2)] : []),
+      ...(process.env.BSC_WSS_URL ? [webSocket(process.env.BSC_WSS_URL)] : []),
       http(process.env.BSC_RPC_URL, { timeout: 10_000, retryCount: 2, retryDelay: 500 }),
-      ...(process.env.BSC_RPC_URL_2
-        ? [http(process.env.BSC_RPC_URL_2, { timeout: 10_000, retryCount: 2, retryDelay: 500 })]
-        : []),
     ];
     _client = createPublicClient({
-      chain:     bsc,
+      chain,
       transport: fallback(transports),
     });
   }
   return _client;
 }
 
-export function factoryAddress(): `0x${string}` {
-  if (!process.env.FACTORY_ADDRESS) {
+export function bondingCurveAddress(): `0x${string}` {
+  if (!process.env.BONDING_CURVE_ADDRESS) {
     throw new Error(
-      "FACTORY_ADDRESS is not configured. Set it in your .env file."
+      "BONDING_CURVE_ADDRESS is not configured. Set it in your .env file."
     );
   }
-  return process.env.FACTORY_ADDRESS as `0x${string}`;
+  return process.env.BONDING_CURVE_ADDRESS as `0x${string}`;
 }
 
-// ─── ABI (quote-related view functions only) ──────────────────────────────────
+// ─── ABI (BondingCurve view functions only) ───────────────────────────────────
 
-const FACTORY_ABI = parseAbi([
-  // Bonding-curve buy quote: returns tokens out given BNB in (after trade fee)
-  "function getAmountOut(address token, uint256 amountIn) view returns (uint256)",
+const BONDING_CURVE_ABI = parseAbi([
+  // Buy quote: returns (tokensOut, feeBNB) given BNB in
+  "function getAmountOut(address token_, uint256 bnbIn) view returns (uint256 tokensOut, uint256 feeBNB)",
 
-  // Bonding-curve sell quote: returns BNB out given tokens in (after trade fee)
-  "function getAmountOutSell(address token, uint256 amountIn) view returns (uint256)",
+  // Sell quote: returns (bnbOut, feeBNB) given tokens in
+  "function getAmountOutSell(address token_, uint256 tokensIn) view returns (uint256 bnbOut, uint256 feeBNB)",
 
-  // Current spot price: BNB per token, scaled to 18 decimals (wei per token)
-  "function getSpotPrice(address token) view returns (uint256)",
+  // Current spot price: BNB per token scaled to 18 decimals
+  "function getSpotPrice(address token_) view returns (uint256)",
 ]);
 
 // ─── Quote helpers ────────────────────────────────────────────────────────────
@@ -88,12 +82,13 @@ export async function quoteBuy(
   token: `0x${string}`,
   bnbIn: bigint
 ): Promise<bigint> {
-  return getClient().readContract({
-    address:      factoryAddress(),
-    abi:          FACTORY_ABI,
+  const [tokensOut] = await getClient().readContract({
+    address:      bondingCurveAddress(),
+    abi:          BONDING_CURVE_ABI,
     functionName: "getAmountOut",
     args:         [token, bnbIn],
-  });
+  }) as [bigint, bigint];
+  return tokensOut;
 }
 
 /**
@@ -107,12 +102,13 @@ export async function quoteSell(
   token: `0x${string}`,
   tokensIn: bigint
 ): Promise<bigint> {
-  return getClient().readContract({
-    address:      factoryAddress(),
-    abi:          FACTORY_ABI,
+  const [bnbOut] = await getClient().readContract({
+    address:      bondingCurveAddress(),
+    abi:          BONDING_CURVE_ABI,
     functionName: "getAmountOutSell",
     args:         [token, tokensIn],
-  });
+  }) as [bigint, bigint];
+  return bnbOut;
 }
 
 /**
@@ -126,11 +122,11 @@ export async function quoteSell(
  */
 export async function getSpotPrice(token: `0x${string}`): Promise<bigint> {
   return getClient().readContract({
-    address:      factoryAddress(),
-    abi:          FACTORY_ABI,
+    address:      bondingCurveAddress(),
+    abi:          BONDING_CURVE_ABI,
     functionName: "getSpotPrice",
     args:         [token],
-  });
+  }) as Promise<bigint>;
 }
 
 // ─── Math helpers ─────────────────────────────────────────────────────────────

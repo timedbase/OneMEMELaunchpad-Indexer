@@ -111,15 +111,14 @@ Fill in every value:
 # Database
 DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
 
-# BSC RPC — use two providers for high availability
-BSC_WSS_URL=wss://your-primary-rpc
-BSC_WSS_URL_2=wss://your-secondary-rpc
-BSC_RPC_URL=https://your-primary-rpc
-BSC_RPC_URL_2=https://your-secondary-rpc
+BSC_WSS_URL=wss://your-rpc-endpoint
+BSC_RPC_URL=https://your-rpc-endpoint
+CHAIN_ID=56
 
 # Contracts
 FACTORY_ADDRESS=0x...
 BONDING_CURVE_ADDRESS=0x...
+VESTING_WALLET_ADDRESS=0x...
 START_BLOCK=...
 
 # API

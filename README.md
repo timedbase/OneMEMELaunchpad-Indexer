@@ -33,14 +33,19 @@ The **OneMEME Launchpad Indexer** listens to events emitted by the `LaunchpadFac
 | `TokenBought` | `BondingCurve` | `trade` | Bonding-curve buy; includes antibot burn amount |
 | `TokenSold` | `BondingCurve` | `trade` | Bonding-curve sell |
 | `TokenMigrated` | `BondingCurve` | `migration` | Token graduates to PancakeSwap V2 |
+| `Transfer` | `MemeToken` (ERC-20) | `holder` | Every token transfer — maintains exact onchain balances |
+| `VestingAdded` | `VestingWallet` | `vesting` | Creator allocation locked (5% of supply, 365-day linear) |
+| `Claimed` | `VestingWallet` | `vesting` | Creator claims unlocked tokens |
+| `VestingVoided` | `VestingWallet` | `vesting` | Schedule voided; unvested remainder burned to dead address |
 
 ### Database Schema
 
 ```
-token      — one row per deployed meme token (tokenType, virtualBNB, migrationTarget, buyCount, sellCount, volumeBNB, raisedBNB)
+token      — one row per deployed meme token (tokenType, virtualBNB, migrationTarget, creatorTokens, buyCount, sellCount, volumeBNB, raisedBNB)
 trade      — one row per bonding-curve buy or sell transaction
 migration  — one row per migrated token (PancakeSwap pair + liquidity)
 holder     — current onchain balance per (token, wallet) — updated from ERC-20 Transfer events
+vesting    — creator vesting schedule per token (amount, claimed, voided, burned — 365-day linear, no cliff)
 ```
 
 ---
@@ -75,9 +80,11 @@ Edit `.env`:
 | Variable | Required | Description |
 |---|---|---|
 | `BSC_WSS_URL` | **Yes** | BSC WebSocket endpoint (`wss://…`) — primary real-time streaming |
-| `BSC_RPC_URL` | **Yes** | BSC HTTP endpoint — fallback transport + used by API for quotes |
+| `BSC_RPC_URL` | **Yes** | BSC HTTP endpoint — fallback transport + used by API for live quotes |
+| `CHAIN_ID` | **Yes** | EVM chain ID (`56` = BSC mainnet, `97` = BSC testnet) |
 | `FACTORY_ADDRESS` | **Yes** | Deployed `LaunchpadFactory` contract address |
 | `BONDING_CURVE_ADDRESS` | **Yes** | Deployed `BondingCurve` contract address |
+| `VESTING_WALLET_ADDRESS` | **Yes** | Deployed `VestingWallet` contract address |
 | `START_BLOCK` | Recommended | Factory deployment block — skips unnecessary historical scan |
 | `DATABASE_URL` | **Yes** | PostgreSQL connection string |
 | `API_PORT` | No | REST API port (default `3001`) |
@@ -329,6 +336,13 @@ Supported resolutions: `1`, `5`, `15`, `30`, `60`, `240`, `D`. Point TradingView
 | `GET` | `/api/v1/chat/:token/messages` | Last 50 messages for a token, oldest-first |
 | `WS`  | `/api/v1/chat/ws` | WebSocket chat — subscribe to a token room, send and receive messages in real time |
 
+#### Vesting
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/vesting/:token` | Creator vesting schedule for a token — amount, claimed, claimable, progress |
+| `GET` | `/api/v1/creators/:address/vesting` | All vesting schedules for a creator across all their tokens |
+
 #### Discovery _(UI only)_
 
 | Method | Path | Description |
@@ -376,9 +390,10 @@ Each message:
 ```
 OneMEMELaunchpad-Indexer/
 ├── abis/
-│   ├── LaunchpadFactory.json        # TokenCreated event + view functions
-│   ├── BondingCurve.json            # TokenBought, TokenSold, TokenMigrated events + view functions
+│   ├── LaunchpadFactory.json        # TokenCreated event + standardImpl/taxImpl/reflectionImpl
+│   ├── BondingCurve.json            # TokenBought, TokenSold, TokenMigrated + getToken, getAmountOut, getSpotPrice
 │   ├── ERC20.json                   # Transfer event (holder balance tracking)
+│   ├── VestingWallet.json           # VestingAdded, Claimed, VestingVoided events + view functions
 │   └── LaunchpadToken.json          # Token contract ABI (metaURI, name, symbol)
 ├── src/
 │   ├── index.ts                     # Ponder event handlers (blockchain → DB)
@@ -405,6 +420,7 @@ OneMEMELaunchpad-Indexer/
 │           ├── price/               # /price/bnb — aggregated BNB/USDT (Binance+OKX+Bybit)
 │           ├── charts/              # /charts/* — TradingView UDF (OHLCV from trades)
 │           ├── chat/                # /chat/:token/messages (REST) + /chat/ws (WebSocket)
+│           ├── vesting/             # /vesting/:token + /creators/:addr/vesting
 │           └── upload/              # POST /metadata/upload — IPFS via Pinata
 ├── ponder.config.ts                 # Network, contract, and transport configuration
 ├── ponder.schema.ts                 # Database schema (onchainTable definitions)
@@ -692,12 +708,12 @@ Full Better Stack setup guide: [BETTERSTACK.md](BETTERSTACK.md)
 
 | Variable | Required | Description |
 |---|---|---|
-| `BSC_WSS_URL` | **Yes** | Primary BSC WebSocket endpoint (`wss://…`) |
-| `BSC_WSS_URL_2` | No | Secondary WSS endpoint — failover if primary drops |
-| `BSC_RPC_URL` | **Yes** | Primary BSC HTTP endpoint — fallback transport + quote RPC |
-| `BSC_RPC_URL_2` | No | Secondary HTTP endpoint — failover if primary drops |
+| `BSC_WSS_URL` | **Yes** | BSC WebSocket endpoint (`wss://…`) — primary real-time streaming |
+| `BSC_RPC_URL` | **Yes** | BSC HTTP endpoint — fallback transport + live quote RPC |
+| `CHAIN_ID` | **Yes** | EVM chain ID (`56` = BSC mainnet, `97` = BSC testnet) |
 | `FACTORY_ADDRESS` | **Yes** | Deployed `LaunchpadFactory` contract address |
 | `BONDING_CURVE_ADDRESS` | **Yes** | Deployed `BondingCurve` contract address |
+| `VESTING_WALLET_ADDRESS` | **Yes** | Deployed `VestingWallet` contract address |
 | `START_BLOCK` | Recommended | Factory deployment block — avoids scanning from genesis |
 | `DATABASE_URL` | **Yes** | PostgreSQL connection string (Neon: `postgresql://...?sslmode=require`) |
 | `API_PORT` | No | REST API port (default `3001`) |
