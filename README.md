@@ -447,53 +447,150 @@ During the pre-migration phase every token is traded through a constant-product 
 
 ### Prerequisites
 
-| Requirement | Minimum version |
+| Requirement | Notes |
 |---|---|
-| Node.js | 20+ |
-| npm | 9+ |
-| Docker + Docker Compose | Latest stable |
-| git | Any |
-| BSC RPC (HTTP + WSS) | Archive-capable node (QuickNode, Ankr, NodeReal) |
+| Node.js 20+ | `node --version` to verify |
+| npm 9+ | Comes with Node.js 20 |
+| Docker + Docker Compose | Latest stable — `docker compose version` to verify |
+| git | Any version |
+| BSC RPC (HTTP + WSS) | Archive-capable — QuickNode, Ankr, NodeReal, or GetBlock |
+| VPS | Ubuntu 24.04 LTS — DigitalOcean, OVHcloud, or Netcup |
 
 ---
 
-### Environment Setup
+### Step 1 — Neon PostgreSQL
 
-```bash
-git clone https://github.com/timedbase/OneMEMELaunchpad-Indexer.git
-cd OneMEMELaunchpad-Indexer
-npm install
-cp .env.example .env
+The indexer requires PostgreSQL. Use [Neon](https://neon.tech) — serverless Postgres with a free tier.
+
+#### Create a Neon project
+
+1. Sign up at [neon.tech](https://neon.tech)
+2. Click **New Project** → give it a name (e.g. `onememe-indexer`) → select the region closest to your VPS
+3. Neon creates a default database (`neondb`) and a default branch (`main`)
+
+#### Get your connection string
+
+1. Open the project dashboard
+2. Click **Connection Details** (top right)
+3. Select **Connection string** tab → copy the full URL:
+
+```
+postgresql://neondb_owner:<password>@ep-xxx-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
 ```
 
-Edit `.env` and fill in all required values. See the **Environment Variables Reference** table below.
+4. Save this as `DATABASE_URL` in your `.env`
+
+#### Neon free tier limits
+
+| Resource | Free tier | Launch plan ($19/mo) |
+|---|---|---|
+| Storage | 0.5 GB | 10 GB |
+| Compute | 0.25 vCPU | 2 vCPU |
+| Branches | 10 | Unlimited |
+
+> 0.5 GB is enough for development and early-stage launch. Upgrade to the **Launch plan** before going public — the `trade` table grows fast under real volume.
+
+Full Neon setup guide: [NEON.md](NEON.md)
 
 ---
 
-### Local Development
+### Step 2 — Vercel Domain
 
-```bash
-# 1. Start PostgreSQL
-docker compose up -d
+If your frontend domain is hosted on Vercel, you need to point your API subdomain to your VPS separately.
 
-# 2. Run the Ponder indexer (watches for file changes)
-npm run dev
+#### Add a custom API subdomain
 
-# 3. In a second terminal, run the REST API
-npm run api:dev
+1. Go to your domain registrar (Namecheap, GoDaddy, etc.) **or** your Vercel project's **Domains** tab
+2. Add a new **A record**:
+
+| Type | Name | Value | TTL |
+|---|---|---|---|
+| `A` | `api` | `YOUR_VPS_IP` | Auto |
+
+This makes `api.yourdomain.com` resolve to your VPS.
+
+> Vercel manages DNS for apex (`@`) and `www` — point only the `api` subdomain to the VPS. Do not touch Vercel's existing records.
+
+#### Example (api.1coin.meme)
+
+```
+Type: A
+Name: api
+Value: 1.2.3.4   ← your VPS IP
+TTL:  Auto
 ```
 
-- Ponder GraphQL playground: http://localhost:42069 (port is fixed, not configurable)
-- REST API: http://localhost:3001/api/v1
-- Health check: http://localhost:3001/health
+Once the DNS record is created, continue to Cloudflare setup below to enable HTTPS.
 
 ---
 
-### Production Deployment on VPS (DigitalOcean / OVHcloud / Netcup)
+### Step 3 — Cloudflare TLS
 
-#### 1. Server setup — Ubuntu 24.04
+The NestJS API runs plain HTTP on port 3001. Cloudflare terminates TLS and proxies requests to your VPS — no SSL certificates to manage.
+
+#### Requirements
+
+- Your domain is registered on Cloudflare **or** uses Cloudflare nameservers
+- Your VPS IP is set as an `A` record with the **orange cloud (proxy) enabled**
+
+#### Setup steps
+
+**1. Add DNS A record** (if not done in Step 2)
+
+In the Cloudflare dashboard → **DNS** → **Add record**:
+
+| Type | Name | IPv4 address | Proxy status |
+|---|---|---|---|
+| A | `api` | `YOUR_VPS_IP` | Proxied (orange cloud ON) |
+
+**2. Set SSL/TLS mode to Full**
+
+Cloudflare dashboard → **SSL/TLS** → **Overview** → select **Full**
+
+> Do not use Flexible — it sends traffic to your server unencrypted on port 80 and causes redirect loops.
+
+**3. Enable WebSocket proxying**
+
+Cloudflare dashboard → **Network** → toggle **WebSockets** to **On**
+
+Required for `wss://` chat and activity WebSocket connections.
+
+**4. Add cache bypass rule for `/api/*`**
+
+Cloudflare dashboard → **Rules** → **Cache Rules** → **Create rule**:
+
+- **Rule name:** `Bypass API cache`
+- **Field:** URI Path → **contains** → `/api`
+- **Cache status:** Bypass
+
+This prevents Cloudflare from caching API responses.
+
+**5. Verify**
 
 ```bash
+curl -I https://api.yourdomain.com/health
+# HTTP/2 200 — served via Cloudflare
+```
+
+Full Cloudflare guide including WAF, rate limiting, and bot protection: [CLOUDFLARE.md](CLOUDFLARE.md)
+
+---
+
+### Step 4 — VPS Setup
+
+#### Provision Ubuntu 24.04 LTS
+
+Minimum specs:
+- **2 vCPU, 4 GB RAM** — fits both Ponder + NestJS
+- **40 GB SSD** — Ponder checkpoint files + logs
+- **IPv4** address
+
+#### Install dependencies
+
+```bash
+# Update system
+sudo apt-get update && sudo apt-get upgrade -y
+
 # Install Docker
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
@@ -502,71 +599,92 @@ newgrp docker
 # Install Docker Compose plugin
 sudo apt-get install -y docker-compose-plugin
 
+# Install Node.js 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Install PM2
+npm install -g pm2
+
 # Verify
-docker --version
-docker compose version
+docker --version && docker compose version && node --version && pm2 --version
 ```
 
-#### 2. Clone and configure
+#### Clone and configure
 
 ```bash
 git clone https://github.com/timedbase/OneMEMELaunchpad-Indexer.git
 cd OneMEMELaunchpad-Indexer
+npm install
 cp .env.example .env
-nano .env   # fill in all required variables
+nano .env   # fill in all required variables (see Environment Variables Reference below)
 ```
 
-#### 3. Build and start
+#### Build and start
 
 ```bash
-# Build the API
+# Build the NestJS API
 npm run api:build
 
-# Start both processes with PM2 (inside the repo directory)
-npm install -g pm2
+# Start both processes with PM2
+pm2 start "npm run start" --name "ponder-indexer"
+pm2 start "npm run api"   --name "onememe-api"
 
-pm2 start "npm run start"    --name "ponder-indexer"
-pm2 start "npm run api"      --name "onememe-api"
+# Save PM2 process list so it survives reboots
 pm2 save
-pm2 startup   # follow the printed command to auto-start on reboot
+
+# Register PM2 as a system service (follow the printed command)
+pm2 startup
 ```
 
-#### 4. Check logs
+#### Check status
 
 ```bash
-pm2 logs ponder-indexer   # Ponder indexer logs
-pm2 logs onememe-api      # REST API logs
-pm2 status                # process overview
+pm2 status                 # process overview
+pm2 logs ponder-indexer    # Ponder indexer logs
+pm2 logs onememe-api       # REST API logs
+pm2 monit                  # live CPU/memory dashboard
+```
+
+#### Restart processes
+
+```bash
+pm2 restart ponder-indexer
+pm2 restart onememe-api
+pm2 restart all
 ```
 
 ---
 
-### Database — Neon PostgreSQL
+### Step 5 — Better Stack Monitoring
 
-1. Create a free project at [neon.tech](https://neon.tech)
-2. Copy the connection string from the **Dashboard → Connection Details** panel
-3. Set `DATABASE_URL` in `.env`:
+Better Stack provides log aggregation, uptime monitoring, and a public status page.
 
-```
-DATABASE_URL=postgresql://user:password@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
-```
+#### Uptime monitor (free)
 
-> **Neon free tier:** 0.5 GB storage, 1 compute unit. Sufficient for development and small deployments. For high-throughput production use, upgrade to the Launch plan or use a dedicated Postgres instance.
+1. Sign up at [betterstack.com](https://betterstack.com)
+2. Go to **Uptime** → **New monitor**
+3. Set URL to `https://api.yourdomain.com/health`
+4. Set check interval to **1 minute**
+5. Add your email or Telegram for alerts
 
----
+#### Log shipping
 
-### Cloudflare Setup
+1. Go to **Logs** → **Connect source** → **HTTP** source
+2. Copy the **Source token**
+3. Set `BETTERSTACK_TOKEN` in `.env`
+4. Restart the API: `pm2 restart onememe-api`
 
-1. **DNS** — add an `A` record pointing your domain to the VPS IP address
-2. **SSL/TLS** — set mode to **Full** (not Flexible) in the Cloudflare dashboard
-3. **WebSocket proxying** — enabled by default in Cloudflare; no extra configuration needed
-4. **Cache bypass for API** — add a Cache Rule:
-   - URL pattern: `*.yourdomain.com/api/*`
-   - Cache status: **Bypass**
+Logs will appear in the Better Stack dashboard within seconds of startup.
 
-This ensures API responses are never cached by Cloudflare and WebSocket connections (`wss://`) are proxied correctly.
+#### Status page
 
-See [CLOUDFLARE.md](CLOUDFLARE.md) for the full nginx + Cloudflare setup guide.
+1. Go to **Status Pages** → **New status page**
+2. Add your uptime monitor as a component
+3. Publish at `status.yourdomain.com` or the provided Better Stack URL
+4. Share with your community
+
+Full Better Stack setup guide: [BETTERSTACK.md](BETTERSTACK.md)
 
 ---
 
@@ -575,41 +693,46 @@ See [CLOUDFLARE.md](CLOUDFLARE.md) for the full nginx + Cloudflare setup guide.
 | Variable | Required | Description |
 |---|---|---|
 | `BSC_WSS_URL` | **Yes** | Primary BSC WebSocket endpoint (`wss://…`) |
-| `BSC_WSS_URL_2` | No | Secondary WSS fallback for high availability |
+| `BSC_WSS_URL_2` | No | Secondary WSS endpoint — failover if primary drops |
 | `BSC_RPC_URL` | **Yes** | Primary BSC HTTP endpoint — fallback transport + quote RPC |
-| `BSC_RPC_URL_2` | No | Secondary HTTP fallback for high availability |
+| `BSC_RPC_URL_2` | No | Secondary HTTP endpoint — failover if primary drops |
 | `FACTORY_ADDRESS` | **Yes** | Deployed `LaunchpadFactory` contract address |
 | `BONDING_CURVE_ADDRESS` | **Yes** | Deployed `BondingCurve` contract address |
-| `START_BLOCK` | Recommended | Factory deployment block — avoids full historical scan |
-| `DATABASE_URL` | **Yes** | PostgreSQL connection string |
+| `START_BLOCK` | Recommended | Factory deployment block — avoids scanning from genesis |
+| `DATABASE_URL` | **Yes** | PostgreSQL connection string (Neon: `postgresql://...?sslmode=require`) |
 | `API_PORT` | No | REST API port (default `3001`) |
-| `ALLOWED_ORIGINS` | Recommended | Comma-separated UI origins for protected endpoints |
+| `NODE_ENV` | Recommended | Set to `production` on VPS |
+| `ALLOWED_ORIGINS` | Recommended | Comma-separated UI origins (e.g. `https://1coin.meme,https://www.1coin.meme`) |
 | `PINATA_JWT` | For uploads | Pinata API JWT — required for `POST /metadata/upload` |
-| `IPFS_GATEWAY` | No | Custom IPFS gateway URL (default: `https://ipfs.io/ipfs/`) |
-| `BETTERSTACK_TOKEN` | No | Better Stack log shipping token |
+| `IPFS_GATEWAY` | No | Custom IPFS gateway (default: `https://gateway.pinata.cloud/ipfs/`) |
+| `BETTERSTACK_TOKEN` | No | Better Stack log source token for log shipping |
 | `PONDER_TELEMETRY_DISABLED` | No | Set to `1` to disable Ponder anonymous telemetry |
 
 ---
 
 ### Health Check
 
-Once deployed, verify everything is working:
+After deployment, verify all services are running:
 
 ```bash
-# REST API health
+# 1. REST API health
 curl https://api.yourdomain.com/health
-# Expected: {"status":"ok","service":"onememe-launchpad-api","timestamp":...}
+# → {"status":"ok","service":"onememe-launchpad-api","timestamp":...}
 
-# Route index
+# 2. Route index
 curl https://api.yourdomain.com/api/v1
-# Expected: {"service":"onememe-launchpad-api","version":"v1","routes":[...]}
+# → {"service":"onememe-launchpad-api","version":"v1","routes":[...]}
+
+# 3. BNB price feed (confirms external exchange connectivity)
+curl https://api.yourdomain.com/api/v1/price/bnb
+# → {"bnbUsdt":"610.42","sources":[...],"stale":false}
+
+# 4. Stats (confirms DB connectivity)
+curl https://api.yourdomain.com/api/v1/stats
+# → {"totalTokens":...,"totalTrades":...}
 ```
 
----
-
-### Monitoring — Better Stack
-
-For production log aggregation and uptime monitoring, see [BETTERSTACK.md](BETTERSTACK.md). Better Stack provides real-time log streaming, alerting, and a status page.
+If step 4 fails, check `pm2 logs ponder-indexer` — the indexer may still be syncing from `START_BLOCK`.
 
 ---
 
