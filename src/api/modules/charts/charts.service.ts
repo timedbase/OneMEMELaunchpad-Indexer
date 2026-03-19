@@ -44,7 +44,7 @@ export class ChartsService {
 
     const addr = symbolParam.toLowerCase();
     const rows = await sql`
-      SELECT "tokenType", "totalSupply", "createdAtTimestamp"
+      SELECT token_type, total_supply, created_at_timestamp
       FROM token
       WHERE id = ${addr}
       LIMIT 1
@@ -58,14 +58,14 @@ export class ChartsService {
     return {
       name:                   addr,
       ticker:                 addr,
-      description:            `OneMEME Token (${row.tokenType})`,
+      description:            `OneMEME Token (${row.token_type})`,
       type:                   "crypto",
       session:                "24x7",
       timezone:               "Etc/UTC",
       exchange:               "OneMEME",
       listed_exchange:        "OneMEME",
       format:                 "price",
-      pricescale:             1_000_000_000, // 9 decimal places (BNB-denominated meme prices)
+      pricescale:             1_000_000_000,
       minmov:                 1,
       has_intraday:           true,
       has_daily:              true,
@@ -78,20 +78,11 @@ export class ChartsService {
 
   /**
    * GET /charts/history — OHLCV bars
-   *
-   * Query params (TradingView UDF spec):
-   *   symbol      token address
-   *   resolution  "1" | "5" | "15" | "30" | "60" | "240" | "D"
-   *   from        unix timestamp (start)
-   *   to          unix timestamp (end)
-   *   countback   number of bars to return (used instead of `from` by TV)
-   *
-   * Returns: { s, t, o, h, l, c, v }
    */
   async history(query: Record<string, string | undefined>) {
     const symbol     = query["symbol"];
     const resolution = query["resolution"] ?? "60";
-    const toRaw       = query["to"]        ? parseInt(query["to"],        10) : null;
+    const toRaw        = query["to"]        ? parseInt(query["to"],        10) : null;
     const countbackRaw = query["countback"] ? parseInt(query["countback"], 10) : null;
     const fromRaw      = query["from"]      ? parseInt(query["from"],      10) : null;
 
@@ -100,9 +91,9 @@ export class ChartsService {
     const resSecs = RESOLUTION_MAP[resolution];
     if (!resSecs) throw new BadRequestException(`Unsupported resolution: ${resolution}`);
 
-    if (toRaw       !== null && isNaN(toRaw))       throw new BadRequestException("to must be a unix timestamp");
+    if (toRaw        !== null && isNaN(toRaw))        throw new BadRequestException("to must be a unix timestamp");
     if (countbackRaw !== null && isNaN(countbackRaw)) throw new BadRequestException("countback must be an integer");
-    if (fromRaw      !== null && isNaN(fromRaw))     throw new BadRequestException("from must be a unix timestamp");
+    if (fromRaw      !== null && isNaN(fromRaw))      throw new BadRequestException("from must be a unix timestamp");
 
     const toTs      = toRaw       ?? Math.floor(Date.now() / 1000);
     const countback = countbackRaw ?? null;
@@ -110,44 +101,39 @@ export class ChartsService {
 
     const addr = symbol.toLowerCase();
 
-    // Derive `from` from countback if provided (TV sends countback instead of from)
     const effectiveFrom = countback !== null
       ? toTs - countback * resSecs
-      : (fromTs ?? toTs - 300 * resSecs); // default: 300 bars back
+      : (fromTs ?? toTs - 300 * resSecs);
 
     const rows = await sql`
       SELECT
-        (floor("timestamp"::numeric / ${resSecs}) * ${resSecs})::bigint       AS t,
+        (floor(timestamp::numeric / ${resSecs}) * ${resSecs})::bigint        AS t,
         (array_agg(
-          "bnbAmount"::numeric / NULLIF("tokenAmount"::numeric, 0)
-          ORDER BY "timestamp" ASC
+          bnb_amount::numeric / NULLIF(token_amount::numeric, 0)
+          ORDER BY timestamp ASC
         ))[1]                                                                  AS o,
-        MAX("bnbAmount"::numeric / NULLIF("tokenAmount"::numeric, 0))          AS h,
-        MIN("bnbAmount"::numeric / NULLIF("tokenAmount"::numeric, 0))          AS l,
+        MAX(bnb_amount::numeric / NULLIF(token_amount::numeric, 0))            AS h,
+        MIN(bnb_amount::numeric / NULLIF(token_amount::numeric, 0))            AS l,
         (array_agg(
-          "bnbAmount"::numeric / NULLIF("tokenAmount"::numeric, 0)
-          ORDER BY "timestamp" DESC
+          bnb_amount::numeric / NULLIF(token_amount::numeric, 0)
+          ORDER BY timestamp DESC
         ))[1]                                                                  AS c,
-        SUM("bnbAmount"::numeric)                                              AS v
+        SUM(bnb_amount::numeric)                                               AS v
       FROM trade
       WHERE
-        "token"     = ${addr}
-        AND "timestamp" >= ${effectiveFrom}
-        AND "timestamp" <= ${toTs}
-      GROUP BY floor("timestamp"::numeric / ${resSecs}) * ${resSecs}
+        token       = ${addr}
+        AND timestamp >= ${effectiveFrom}
+        AND timestamp <= ${toTs}
+      GROUP BY floor(timestamp::numeric / ${resSecs}) * ${resSecs}
       ORDER BY t ASC
     `;
 
-    // Fetch token state to check migration
     const [token] = await sql`
-      SELECT "migrated" FROM token WHERE id = ${addr} LIMIT 1
+      SELECT migrated FROM token WHERE id = ${addr} LIMIT 1
     `;
 
     if (!token) return { s: "error", errmsg: "Symbol not found" };
-
-    // Migrated tokens have no bonding-curve chart — return blank
     if (token.migrated) return { s: "no_data" };
-
     if (rows.length === 0) return { s: "no_data" };
 
     return {
@@ -162,29 +148,28 @@ export class ChartsService {
   }
 
   /**
-   * GET /charts/search?query=<addr>&type=&exchange=&limit=
-   * Basic symbol search — returns tokens whose address starts with the query string.
+   * GET /charts/search?query=<addr>
    */
   async search(query: Record<string, string | undefined>) {
-    const q     = (query["query"] ?? "").toLowerCase();
+    const q        = (query["query"] ?? "").toLowerCase();
     const limitRaw = parseInt(query["limit"] ?? "10", 10);
     const limit    = isNaN(limitRaw) ? 10 : Math.min(limitRaw, 30);
 
     const rows = await sql`
-      SELECT id, "tokenType"
+      SELECT id, token_type
       FROM token
       WHERE id LIKE ${q} || '%'
-      ORDER BY "createdAtTimestamp" DESC
+      ORDER BY created_at_timestamp DESC
       LIMIT ${limit}
     `;
 
     return rows.map((r: any) => ({
-      symbol:          r.id,
-      full_name:       r.id,
-      description:     `OneMEME Token (${r.tokenType})`,
-      exchange:        "OneMEME",
-      ticker:          r.id,
-      type:            "crypto",
+      symbol:      r.id,
+      full_name:   r.id,
+      description: `OneMEME Token (${r.token_type})`,
+      exchange:    "OneMEME",
+      ticker:      r.id,
+      type:        "crypto",
     }));
   }
 }

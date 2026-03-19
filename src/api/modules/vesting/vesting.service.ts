@@ -25,7 +25,7 @@ export class VestingService {
     const token = normalizeAddress(tokenAddress);
 
     const rows = await sql`
-      SELECT * FROM vesting WHERE "token" = ${token}
+      SELECT * FROM vesting WHERE token = ${token}
     `;
     if (!rows.length) throw new NotFoundException(`No vesting schedule found for token ${tokenAddress}`);
 
@@ -54,14 +54,14 @@ export class VestingService {
 
     const [rows, [{ count }]] = await Promise.all([
       sql`
-        SELECT v.*, t."tokenType", t."totalSupply", t."migrated"
+        SELECT v.*, t.token_type, t.total_supply, t.migrated
         FROM vesting v
-        LEFT JOIN token t ON t."id" = v."token"
-        WHERE v."beneficiary" = ${beneficiary}
-        ORDER BY v."start" DESC
+        LEFT JOIN token t ON t.id = v.token
+        WHERE v.beneficiary = ${beneficiary}
+        ORDER BY v.start DESC
         LIMIT ${limit} OFFSET ${offset}
       `,
-      sql`SELECT COUNT(*)::int AS count FROM vesting WHERE "beneficiary" = ${beneficiary}`,
+      sql`SELECT COUNT(*)::int AS count FROM vesting WHERE beneficiary = ${beneficiary}`,
     ]);
 
     return {
@@ -79,9 +79,9 @@ export class VestingService {
           progressPct: r.start > 0
             ? Math.min(100, Math.floor(((Date.now() / 1000 - r.start) / VESTING_DURATION) * 100))
             : 0,
-          tokenType:   r.tokenType  ?? null,
-          totalSupply: r.totalSupply ?? null,
-          migrated:    r.migrated    ?? null,
+          tokenType:   r.token_type   ?? null,
+          totalSupply: r.total_supply ?? null,
+          migrated:    r.migrated      ?? null,
         })),
         count,
         page,

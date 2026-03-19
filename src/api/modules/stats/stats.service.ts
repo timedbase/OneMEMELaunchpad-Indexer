@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { sql } from "../../db";
+import { toCamel } from "../../helpers";
 
 @Injectable()
 export class StatsService {
@@ -14,24 +15,24 @@ export class StatsService {
       sql`
         SELECT
           COUNT(*)::int                                                        AS "totalTokens",
-          COUNT(*) FILTER (WHERE "migrated" = TRUE)::int                      AS "migratedTokens",
-          COUNT(*) FILTER (WHERE "migrated" = FALSE)::int                     AS "activeTokens",
-          COUNT(*) FILTER (WHERE "tokenType" = 'Standard')::int               AS "standardTokens",
-          COUNT(*) FILTER (WHERE "tokenType" = 'Tax')::int                    AS "taxTokens",
-          COUNT(*) FILTER (WHERE "tokenType" = 'Reflection')::int             AS "reflectionTokens",
-          COALESCE(SUM("volumeBNB"::numeric), 0)::text                        AS "totalVolumeBNB"
+          COUNT(*) FILTER (WHERE migrated = TRUE)::int                        AS "migratedTokens",
+          COUNT(*) FILTER (WHERE migrated = FALSE)::int                       AS "activeTokens",
+          COUNT(*) FILTER (WHERE token_type = 'Standard')::int                AS "standardTokens",
+          COUNT(*) FILTER (WHERE token_type = 'Tax')::int                     AS "taxTokens",
+          COUNT(*) FILTER (WHERE token_type = 'Reflection')::int              AS "reflectionTokens",
+          COALESCE(SUM(volume_bnb::numeric), 0)::text                         AS "totalVolumeBNB"
         FROM token
       `,
       sql`
         SELECT
-          COUNT(*)::int                                            AS "totalTrades",
-          COUNT(*) FILTER (WHERE "tradeType" = 'buy')::int        AS "totalBuys",
-          COUNT(*) FILTER (WHERE "tradeType" = 'sell')::int       AS "totalSells"
+          COUNT(*)::int                                             AS "totalTrades",
+          COUNT(*) FILTER (WHERE trade_type = 'buy')::int          AS "totalBuys",
+          COUNT(*) FILTER (WHERE trade_type = 'sell')::int         AS "totalSells"
         FROM trade
       `,
-      sql`SELECT COUNT(DISTINCT "trader")::int AS "uniqueTraders" FROM trade`,
-      sql`SELECT "id", "tokenType", "creator", "volumeBNB", "buyCount", "sellCount", "migrated" FROM token ORDER BY "volumeBNB"::numeric DESC LIMIT 1`,
-      sql`SELECT COALESCE(SUM("liquidityBNB"::numeric), 0)::text AS "totalLiquidityBNB" FROM migration`,
+      sql`SELECT COUNT(DISTINCT trader)::int AS "uniqueTraders" FROM trade`,
+      sql`SELECT id, token_type AS "tokenType", creator, volume_bnb AS "volumeBNB", buy_count AS "buyCount", sell_count AS "sellCount", migrated FROM token ORDER BY volume_bnb::numeric DESC LIMIT 1`,
+      sql`SELECT COALESCE(SUM(liquidity_bnb::numeric), 0)::text AS "totalLiquidityBNB" FROM migration`,
     ]);
 
     const tokens     = tokenStats[0];

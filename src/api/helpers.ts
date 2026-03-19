@@ -83,3 +83,15 @@ export function isAddress(s: string): boolean {
 export function normalizeAddress(addr: string): string {
   return addr.toLowerCase();
 }
+
+// ─── Case conversion ──────────────────────────────────────────────────────────
+
+/** Converts a single snake_case DB row to camelCase for API responses. */
+export function toCamel(obj: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(obj).map(([k, v]) => [
+      k.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()),
+      v,
+    ])
+  );
+}

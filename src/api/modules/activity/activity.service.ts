@@ -20,10 +20,10 @@ export class ActivityService {
     const { typeFilter, token, sinceBlock, limit, offset } = opts;
 
     const sinceFilter = sinceBlock != null
-      ? sql`AND "blockNumber"::numeric > ${sinceBlock.toString()}`
+      ? sql`AND block_number::numeric > ${sinceBlock.toString()}`
       : sql``;
     const tokenFilter = token
-      ? sql`AND "token" = ${token.toLowerCase()}`
+      ? sql`AND token = ${token.toLowerCase()}`
       : sql``;
 
     const createQ = (typeFilter === "buy" || typeFilter === "sell")
@@ -31,36 +31,36 @@ export class ActivityService {
       : sql`
           SELECT
             'create'             AS "eventType",
-            id                   AS "token",
-            "creator"            AS "actor",
+            id                   AS token,
+            creator              AS actor,
             NULL::text           AS "bnbAmount",
             NULL::text           AS "tokenAmount",
-            "createdAtBlock"     AS "blockNumber",
-            "createdAtTimestamp" AS "timestamp",
+            created_at_block     AS "blockNumber",
+            created_at_timestamp AS timestamp,
             NULL::text           AS "txHash"
           FROM token
-          WHERE TRUE ${sinceBlock != null ? sql`AND "createdAtBlock"::numeric > ${sinceBlock.toString()}` : sql``}
+          WHERE TRUE ${sinceBlock != null ? sql`AND created_at_block::numeric > ${sinceBlock.toString()}` : sql``}
                 ${token ? sql`AND id = ${token.toLowerCase()}` : sql``}
         `;
 
     const tradeTypeFilter =
       typeFilter === "create" ? null :
-      typeFilter === "buy"    ? sql`AND "tradeType" = 'buy'`  :
-      typeFilter === "sell"   ? sql`AND "tradeType" = 'sell'` :
+      typeFilter === "buy"    ? sql`AND trade_type = 'buy'`  :
+      typeFilter === "sell"   ? sql`AND trade_type = 'sell'` :
       sql``;
 
     const tradeQ = typeFilter === "create"
       ? null
       : sql`
           SELECT
-            "tradeType"  AS "eventType",
-            "token"      AS "token",
-            "trader"     AS "actor",
-            "bnbAmount"  AS "bnbAmount",
-            "tokenAmount" AS "tokenAmount",
-            "blockNumber" AS "blockNumber",
-            "timestamp"  AS "timestamp",
-            "txHash"     AS "txHash"
+            trade_type   AS "eventType",
+            token        AS token,
+            trader       AS actor,
+            bnb_amount   AS "bnbAmount",
+            token_amount AS "tokenAmount",
+            block_number AS "blockNumber",
+            timestamp    AS timestamp,
+            tx_hash      AS "txHash"
           FROM trade
           WHERE TRUE ${tradeTypeFilter ?? sql``} ${sinceFilter} ${tokenFilter}
         `;
@@ -78,8 +78,8 @@ export class ActivityService {
   }
 
   async count(typeFilter?: string, token?: string) {
-    const tokenFilter      = token ? sql`AND id = ${token.toLowerCase()}`       : sql``;
-    const tradeTokenFilter = token ? sql`AND "token" = ${token.toLowerCase()}`  : sql``;
+    const tokenFilter      = token ? sql`AND id = ${token.toLowerCase()}`      : sql``;
+    const tradeTokenFilter = token ? sql`AND token = ${token.toLowerCase()}`   : sql``;
 
     const createCount =
       typeFilter === "buy" || typeFilter === "sell"
@@ -88,8 +88,8 @@ export class ActivityService {
 
     const tradeFilter =
       typeFilter === "create" ? sql`AND FALSE` :
-      typeFilter === "buy"    ? sql`AND "tradeType" = 'buy'` :
-      typeFilter === "sell"   ? sql`AND "tradeType" = 'sell'` :
+      typeFilter === "buy"    ? sql`AND trade_type = 'buy'` :
+      typeFilter === "sell"   ? sql`AND trade_type = 'sell'` :
       sql``;
 
     const tradeCount =
@@ -112,8 +112,8 @@ export class ActivityService {
     }
     const [row] = await sql`
       SELECT GREATEST(
-        (SELECT MAX("createdAtBlock"::numeric) FROM token),
-        (SELECT MAX("blockNumber"::numeric)    FROM trade)
+        (SELECT MAX(created_at_block::numeric) FROM token),
+        (SELECT MAX(block_number::numeric)     FROM trade)
       )::text AS block
     `;
     const value = BigInt(row?.block ?? "0");

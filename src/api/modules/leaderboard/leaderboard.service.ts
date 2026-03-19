@@ -26,26 +26,26 @@ export class LeaderboardService {
 
     const windowSecs = PERIODS[periodKey];
     const sinceTs    = windowSecs ? Math.floor(Date.now() / 1000) - windowSecs : null;
-    const timeSql    = sinceTs !== null ? sql`AND "timestamp" >= ${sinceTs}` : sql``;
+    const timeSql    = sinceTs !== null ? sql`AND timestamp >= ${sinceTs}` : sql``;
 
     const [rows, [{ count }]] = await Promise.all([
       sql`
         SELECT
-          "trader"                                                AS address,
-          SUM("bnbAmount"::numeric)                              AS "volumeBNB",
-          COUNT(*)::int                                          AS "tradeCount",
-          COUNT(*) FILTER (WHERE "tradeType" = 'buy')::int      AS "buyCount",
-          COUNT(*) FILTER (WHERE "tradeType" = 'sell')::int     AS "sellCount",
-          COUNT(DISTINCT "token")::int                          AS "tokensTraded",
-          MAX("timestamp")                                       AS "lastTradeAt"
+          trader                                                            AS address,
+          SUM(bnb_amount::numeric)                                          AS "volumeBNB",
+          COUNT(*)::int                                                     AS "tradeCount",
+          COUNT(*) FILTER (WHERE trade_type = 'buy')::int                  AS "buyCount",
+          COUNT(*) FILTER (WHERE trade_type = 'sell')::int                 AS "sellCount",
+          COUNT(DISTINCT token)::int                                        AS "tokensTraded",
+          MAX(timestamp)                                                    AS "lastTradeAt"
         FROM trade
         WHERE TRUE ${timeSql}
-        GROUP BY "trader"
-        ORDER BY SUM("bnbAmount"::numeric) DESC
+        GROUP BY trader
+        ORDER BY SUM(bnb_amount::numeric) DESC
         LIMIT ${limit} OFFSET ${offset}
       `,
       sql`
-        SELECT COUNT(DISTINCT "trader")::int AS count
+        SELECT COUNT(DISTINCT trader)::int AS count
         FROM trade
         WHERE TRUE ${timeSql}
       `,

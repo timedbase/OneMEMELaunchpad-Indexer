@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { sql } from "../../db";
-import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir } from "../../helpers";
+import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir, toCamel } from "../../helpers";
 import { getMetaURI } from "../../rpc";
 import { fetchMetadata } from "../../metadata";
 
@@ -12,23 +12,23 @@ export class TokensService {
     const type     = query["type"];
     const migrated = query["migrated"];
 
-    const ALLOWED_ORDER = ["createdAtBlock", "volumeBNB", "buyCount", "sellCount", "raisedBNB", "totalSupply"] as const;
-    const orderBy  = parseOrderBy(query, ALLOWED_ORDER, "createdAtBlock");
+    const ALLOWED_ORDER = ["created_at_block", "volume_bnb", "buy_count", "sell_count", "raised_bnb", "total_supply"] as const;
+    const orderBy  = parseOrderBy(query, ALLOWED_ORDER, "created_at_block");
     const orderDir = parseOrderDir(query);
 
     const migratedFilter =
-      migrated === "true"  ? sql`AND "migrated" = TRUE`  :
-      migrated === "false" ? sql`AND "migrated" = FALSE` :
+      migrated === "true"  ? sql`AND migrated = TRUE`  :
+      migrated === "false" ? sql`AND migrated = FALSE` :
       sql``;
 
-    const typeFilter = type ? sql`AND "tokenType" = ${type}` : sql``;
+    const typeFilter = type ? sql`AND token_type = ${type}` : sql``;
 
     const ALLOWED_TYPES = new Set(["Standard", "Tax", "Reflection"]);
     if (type && !ALLOWED_TYPES.has(type)) {
       throw new BadRequestException(`Invalid type "${type}". Must be Standard, Tax, or Reflection.`);
     }
 
-    const numericCols = new Set(["volumeBNB", "raisedBNB", "createdAtBlock", "tradingBlock", "totalSupply"]);
+    const numericCols = new Set(["volume_bnb", "raised_bnb", "created_at_block", "trading_block", "total_supply"]);
     const orderExpr   = numericCols.has(orderBy)
       ? sql`ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
       : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
@@ -38,7 +38,7 @@ export class TokensService {
       sql`SELECT COUNT(*)::int AS count FROM token WHERE TRUE ${typeFilter} ${migratedFilter}`,
     ]);
 
-    return paginated(rows, count, page, limit);
+    return paginated(rows.map(toCamel), count, page, limit);
   }
 
   async findOne(address: string) {
@@ -48,10 +48,11 @@ export class TokensService {
     const [row] = await sql`SELECT * FROM token WHERE id = ${addr}`;
     if (!row) throw new NotFoundException(`Token ${address} not found`);
 
+    const camelRow = toCamel(row);
     const metaURI  = await getMetaURI(addr as `0x${string}`);
     const metadata = metaURI ? await fetchMetadata(metaURI) : null;
 
-    return { data: { ...row, metaURI: metaURI || null, metadata: metadata ?? null } };
+    return { data: { ...camelRow, metaURI: metaURI || null, metadata: metadata ?? null } };
   }
 
   async trades(address: string, query: Record<string, string | undefined>) {
@@ -62,7 +63,7 @@ export class TokensService {
     const from = query["from"];
     const to   = query["to"];
 
-    const ALLOWED_ORDER = ["timestamp", "bnbAmount", "tokenAmount", "blockNumber"] as const;
+    const ALLOWED_ORDER = ["timestamp", "bnb_amount", "token_amount", "block_number"] as const;
     const orderBy  = parseOrderBy(query, ALLOWED_ORDER, "timestamp");
     const orderDir = parseOrderDir(query);
 
@@ -70,11 +71,11 @@ export class TokensService {
     const toInt   = to   ? parseInt(to,   10) : null;
     if (fromInt !== null && isNaN(fromInt)) throw new BadRequestException("from must be a unix timestamp");
     if (toInt   !== null && isNaN(toInt))   throw new BadRequestException("to must be a unix timestamp");
-    const typeFilter = type              ? sql`AND "tradeType" = ${type}`    : sql``;
-    const fromFilter = fromInt !== null  ? sql`AND "timestamp" >= ${fromInt}` : sql``;
-    const toFilter   = toInt   !== null  ? sql`AND "timestamp" <= ${toInt}`   : sql``;
+    const typeFilter = type              ? sql`AND trade_type = ${type}`      : sql``;
+    const fromFilter = fromInt !== null  ? sql`AND timestamp >= ${fromInt}`   : sql``;
+    const toFilter   = toInt   !== null  ? sql`AND timestamp <= ${toInt}`     : sql``;
 
-    const numericCols = new Set(["bnbAmount", "tokenAmount", "blockNumber"]);
+    const numericCols = new Set(["bnb_amount", "token_amount", "block_number"]);
     const orderExpr   = numericCols.has(orderBy)
       ? sql`ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
       : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
@@ -82,11 +83,11 @@ export class TokensService {
     const addr = normalizeAddress(address);
 
     const [rows, [{ count }]] = await Promise.all([
-      sql`SELECT * FROM trade WHERE "token" = ${addr} ${typeFilter} ${fromFilter} ${toFilter} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,
-      sql`SELECT COUNT(*)::int AS count FROM trade WHERE "token" = ${addr} ${typeFilter} ${fromFilter} ${toFilter}`,
+      sql`SELECT * FROM trade WHERE token = ${addr} ${typeFilter} ${fromFilter} ${toFilter} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,
+      sql`SELECT COUNT(*)::int AS count FROM trade WHERE token = ${addr} ${typeFilter} ${fromFilter} ${toFilter}`,
     ]);
 
-    return paginated(rows, count, page, limit);
+    return paginated(rows.map(toCamel), count, page, limit);
   }
 
   async migration(address: string) {
@@ -95,7 +96,7 @@ export class TokensService {
     const [row] = await sql`SELECT * FROM migration WHERE id = ${normalizeAddress(address)}`;
     if (!row) throw new NotFoundException(`Token ${address} has not migrated yet`);
 
-    return { data: row };
+    return { data: toCamel(row) };
   }
 
   async traders(address: string, query: Record<string, string | undefined>) {
@@ -110,24 +111,24 @@ export class TokensService {
     const [rows, [{ count }]] = await Promise.all([
       sql`
         SELECT
-          "trader",
-          COUNT(*) FILTER (WHERE "tradeType" = 'buy')::int                                AS "buyCount",
-          COUNT(*) FILTER (WHERE "tradeType" = 'sell')::int                               AS "sellCount",
+          trader,
+          COUNT(*) FILTER (WHERE trade_type = 'buy')::int                                AS "buyCount",
+          COUNT(*) FILTER (WHERE trade_type = 'sell')::int                               AS "sellCount",
           COUNT(*)::int                                                                    AS "totalTrades",
-          COALESCE(SUM("bnbAmount"::numeric) FILTER (WHERE "tradeType" = 'buy'),  0)::text AS "totalBNBIn",
-          COALESCE(SUM("bnbAmount"::numeric) FILTER (WHERE "tradeType" = 'sell'), 0)::text AS "totalBNBOut",
-          COALESCE(SUM("bnbAmount"::numeric), 0)::text                                    AS "totalVolumeBNB",
+          COALESCE(SUM(bnb_amount::numeric) FILTER (WHERE trade_type = 'buy'),  0)::text  AS "totalBNBIn",
+          COALESCE(SUM(bnb_amount::numeric) FILTER (WHERE trade_type = 'sell'), 0)::text  AS "totalBNBOut",
+          COALESCE(SUM(bnb_amount::numeric), 0)::text                                     AS "totalVolumeBNB",
           (
-            COALESCE(SUM("bnbAmount"::numeric) FILTER (WHERE "tradeType" = 'sell'), 0) -
-            COALESCE(SUM("bnbAmount"::numeric) FILTER (WHERE "tradeType" = 'buy'),  0)
+            COALESCE(SUM(bnb_amount::numeric) FILTER (WHERE trade_type = 'sell'), 0) -
+            COALESCE(SUM(bnb_amount::numeric) FILTER (WHERE trade_type = 'buy'),  0)
           )::text                                                                          AS "netBNB"
         FROM trade
-        WHERE "token" = ${addr}
-        GROUP BY "trader"
+        WHERE token = ${addr}
+        GROUP BY trader
         ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}
         LIMIT ${limit} OFFSET ${offset}
       `,
-      sql`SELECT COUNT(DISTINCT "trader")::int AS count FROM trade WHERE "token" = ${addr}`,
+      sql`SELECT COUNT(DISTINCT trader)::int AS count FROM trade WHERE token = ${addr}`,
     ]);
 
     return paginated(rows, count, page, limit);
@@ -140,24 +141,22 @@ export class TokensService {
     const orderDir = parseOrderDir(query);
     const addr     = normalizeAddress(address);
 
-    // Query the holder table which is maintained by indexing every Transfer
-    // event on the token contract — exact onchain balances, not estimates.
     const [rows, [{ count }]] = await Promise.all([
       sql`
         SELECT
-          "address",
-          "balance"::text AS "balance"
+          address,
+          balance::text AS balance
         FROM holder
-        WHERE "token" = ${addr}
-          AND "balance"::numeric > 0
-        ORDER BY "balance"::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}
+        WHERE token = ${addr}
+          AND balance::numeric > 0
+        ORDER BY balance::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}
         LIMIT ${limit} OFFSET ${offset}
       `,
       sql`
         SELECT COUNT(*)::int AS count
         FROM holder
-        WHERE "token" = ${addr}
-          AND "balance"::numeric > 0
+        WHERE token = ${addr}
+          AND balance::numeric > 0
       `,
     ]);
 
@@ -171,10 +170,10 @@ export class TokensService {
     const addr = normalizeAddress(address);
 
     const [rows, [{ count }]] = await Promise.all([
-      sql`SELECT * FROM token WHERE "creator" = ${addr} ORDER BY "createdAtBlock"::numeric DESC LIMIT ${limit} OFFSET ${offset}`,
-      sql`SELECT COUNT(*)::int AS count FROM token WHERE "creator" = ${addr}`,
+      sql`SELECT * FROM token WHERE creator = ${addr} ORDER BY created_at_block::numeric DESC LIMIT ${limit} OFFSET ${offset}`,
+      sql`SELECT COUNT(*)::int AS count FROM token WHERE creator = ${addr}`,
     ]);
 
-    return paginated(rows, count, page, limit);
+    return paginated(rows.map(toCamel), count, page, limit);
   }
 }
