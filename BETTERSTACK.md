@@ -79,15 +79,10 @@ Remove the old `logger: ["log", "warn", "error"]` line.
 ### Step 5 — Add the Token to `.env`
 
 ```dotenv
-# Better Stack source token (required for log shipping)
 BETTERSTACK_TOKEN=your_source_token_here
 ```
 
-Add this to `.env.example` too (without the value):
-
-```dotenv
-BETTERSTACK_TOKEN=
-```
+This is already in `.env.example` — just fill in the value.
 
 ---
 
@@ -205,21 +200,23 @@ You can add more monitors later (e.g. separate entries for indexer health, BNB p
 
 Set up `status.1coin.meme` so users remember the URL.
 
+Since your domain's DNS is managed by Cloudflare (after switching nameservers from Vercel — see [CLOUDFLARE.md](CLOUDFLARE.md)):
+
 **In Cloudflare DNS** (DNS → Records → Add record):
 
 | Type | Name | Target | Proxy status |
 |---|---|---|---|
-| `CNAME` | `status` | `statuspage.betterstack.com` | DNS only (grey cloud) |
+| `CNAME` | `status` | `statuspage.betterstack.com` | **DNS only** (grey cloud) |
 
-> The grey cloud (unproxied) is required — Better Stack handles TLS for the status page itself.
+> Grey cloud (unproxied) is required — Better Stack handles TLS for the status page itself. Do not proxy this through Cloudflare.
 
 **In Better Stack:**
 
 1. Open the status page → **Settings** → **Custom domain**
 2. Enter `status.1coin.meme`
-3. Click **Save** — Better Stack will verify the DNS record and issue a certificate automatically (usually under 2 minutes)
+3. Click **Save** — Better Stack verifies the DNS record and issues a certificate automatically (usually under 2 minutes)
 
-Once live, visiting `https://status.1coin.meme` shows your public status page.
+Once live, `https://status.1coin.meme` shows your public status page.
 
 ---
 

@@ -9,7 +9,7 @@
  * The quotes route catches these and returns a 503 with a helpful message.
  */
 
-import { createPublicClient, http, parseAbi } from "viem";
+import { createPublicClient, fallback, http, webSocket, parseAbi } from "viem";
 import { bsc } from "viem/chains";
 
 // ─── Client ───────────────────────────────────────────────────────────────────
@@ -17,6 +17,15 @@ import { bsc } from "viem/chains";
 /**
  * Lazily-initialised public client. Created on first call so that importing
  * this module does not crash if env vars are absent at startup.
+ *
+ * Transport stack (highest priority first):
+ *   BSC_WSS_URL   — primary WebSocket (real-time, zero polling)
+ *   BSC_WSS_URL_2 — secondary WebSocket (optional)
+ *   BSC_RPC_URL   — primary HTTP fallback
+ *   BSC_RPC_URL_2 — secondary HTTP fallback (optional)
+ *
+ * viem's fallback() switches to the next transport on error or timeout,
+ * then retries the primary on the next request.
  */
 let _client: ReturnType<typeof createPublicClient> | null = null;
 
@@ -27,13 +36,17 @@ function getClient(): ReturnType<typeof createPublicClient> {
     );
   }
   if (!_client) {
+    const transports = [
+      ...(process.env.BSC_WSS_URL   ? [webSocket(process.env.BSC_WSS_URL)]   : []),
+      ...(process.env.BSC_WSS_URL_2 ? [webSocket(process.env.BSC_WSS_URL_2)] : []),
+      http(process.env.BSC_RPC_URL, { timeout: 10_000, retryCount: 2, retryDelay: 500 }),
+      ...(process.env.BSC_RPC_URL_2
+        ? [http(process.env.BSC_RPC_URL_2, { timeout: 10_000, retryCount: 2, retryDelay: 500 })]
+        : []),
+    ];
     _client = createPublicClient({
       chain:     bsc,
-      transport: http(process.env.BSC_RPC_URL, {
-        timeout:    10_000, // 10 s — fail fast rather than blocking the API
-        retryCount: 2,
-        retryDelay: 500,
-      }),
+      transport: fallback(transports),
     });
   }
   return _client;

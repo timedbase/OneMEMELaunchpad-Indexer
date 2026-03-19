@@ -1,42 +1,53 @@
-# Cloudflare TLS Setup — api.1coin.meme
+# Cloudflare Setup — api.1coin.meme
 
-Cloudflare acts as a reverse proxy: it terminates TLS and forwards plain HTTP to your NestJS server. No certificates needed on the server.
+Cloudflare sits between the internet and your server: it terminates TLS, proxies WebSockets, and enforces security rules. Your NestJS server runs plain HTTP on port 3001.
 
 ```
-Client (HTTPS / WSS)  →  Cloudflare (TLS terminated)  →  Your server :3001 (plain HTTP)
+Client (HTTPS / WSS)
+  → Cloudflare (TLS terminated, WAF, rate limit)
+    → Your server :3001 (plain HTTP, firewalled)
 ```
 
 ---
 
-## Step 0 — Add Your Domain to Cloudflare
+## Step 0 — Add Your Vercel Domain to Cloudflare
 
-Skip this step if your domain is already on Cloudflare.
+Your frontend domain is on Vercel. The API subdomain (`api.1coin.meme`) needs to be routed through Cloudflare while keeping the root and `www` on Vercel.
 
-1. Go to [dash.cloudflare.com](https://dash.cloudflare.com) → **Add a Site** → enter your domain → choose **Free**
-2. Cloudflare assigns two nameservers (e.g. `aria.ns.cloudflare.com`, `bob.ns.cloudflare.com`)
-3. Log in to your domain registrar and replace the existing nameservers with the two Cloudflare ones
+**1. Add the domain to Cloudflare**
 
-| Registrar | Where to change nameservers |
-|---|---|
-| Vercel | Dashboard → Domains → click domain → Nameservers |
-| Namecheap | Domain List → Manage → Nameservers → Custom DNS |
-| GoDaddy | My Domains → Manage → DNS → Nameservers → Change |
-| Others | Find "Nameservers" or "DNS settings" in your registrar's control panel |
+Go to [dash.cloudflare.com](https://dash.cloudflare.com) → **Add a Site** → enter `1coin.meme` → choose **Free**.
 
-4. Wait for propagation (usually under 1 hour), then confirm in Cloudflare
+Cloudflare gives you two nameservers, e.g.:
+```
+aria.ns.cloudflare.com
+bob.ns.cloudflare.com
+```
 
-> **Vercel frontend note:** After switching nameservers, add these records in Cloudflare so your frontend stays live:
->
-> | Type | Name | Target | Proxy |
-> |---|---|---|---|
-> | `CNAME` | `www` | `cname.vercel-dns.com` | DNS only (grey cloud) |
-> | `A` | `@` | `76.76.21.21` | DNS only (grey cloud) |
->
-> Then re-add your domain in Vercel → Domains so it re-issues its certificate.
+**2. Update nameservers in Vercel**
+
+In Vercel: **Domains** → click `1coin.meme` → **Nameservers** → switch to **Custom** → paste Cloudflare's two nameservers → Save.
+
+> Vercel re-issues its TLS certificate automatically after the nameserver change. Allow 5–30 minutes.
+
+**3. Restore your Vercel frontend records in Cloudflare DNS**
+
+After Cloudflare takes over DNS, add these records so your frontend stays live:
+
+| Type | Name | Target | Proxy |
+|---|---|---|---|
+| `A` | `@` | `76.76.21.21` | **DNS only** (grey cloud) |
+| `CNAME` | `www` | `cname.vercel-dns.com` | **DNS only** (grey cloud) |
+
+> Grey cloud (unproxied) for root and `www` — Vercel handles TLS for your frontend. Only the `api` subdomain goes through Cloudflare.
+
+**4. Verify in Vercel**
+
+In Vercel: **Domains** → `1coin.meme` should show **Valid Configuration**. If it shows a DNS error, re-add the domain in Vercel's project settings so it re-checks.
 
 ---
 
-## Step 1 — Add the DNS Record
+## Step 1 — Add the API DNS Record
 
 In Cloudflare: **DNS → Records → Add record**
 
@@ -48,7 +59,7 @@ In Cloudflare: **DNS → Records → Add record**
 | Proxy status | **Proxied** (orange cloud ✓) |
 | TTL | Auto |
 
-The orange cloud is required — it routes traffic through Cloudflare for TLS termination.
+The orange cloud is required — it routes `api.1coin.meme` through Cloudflare for TLS and security.
 
 ---
 
@@ -58,17 +69,19 @@ The orange cloud is required — it routes traffic through Cloudflare for TLS te
 
 | Mode | Meaning |
 |---|---|
-| Flexible | Cloudflare → server is plain HTTP. Not recommended. |
-| **Full** | Cloudflare → server may use any certificate. Use this. |
-| Full (Strict) | Cloudflare → server must have a valid CA cert. |
+| Flexible | Cloudflare → server is plain HTTP. Not secure end-to-end. |
+| **Full** | Cloudflare → server may use self-signed cert. Use this. |
+| Full (Strict) | Cloudflare → server must have a valid CA cert. Not needed. |
 
 ---
 
 ## Step 3 — Enable WebSockets
 
-**Network** → **WebSockets** → **On**
+**Network → WebSockets → On**
 
-Required for `GET /api/v1/activity/ws`.
+Required for:
+- `wss://api.1coin.meme/api/v1/activity/ws` — real-time activity feed
+- `wss://api.1coin.meme/api/v1/chat/ws` — per-token chat
 
 ---
 
@@ -76,17 +89,91 @@ Required for `GET /api/v1/activity/ws`.
 
 **Rules → Cache Rules → Create rule**
 
-- **Rule name**: `Bypass cache for API`
-- **When**: URI Path starts with `/api`
-- **Cache status**: `Bypass`
+| Field | Value |
+|---|---|
+| Rule name | `Bypass cache for API` |
+| When | URI Path starts with `/api` |
+| Cache status | `Bypass` |
 
-Click **Deploy**.
+Click **Deploy**. This prevents Cloudflare from caching API responses.
 
 ---
 
-## Step 5 — Firewall Port 3001
+## Step 5 — API Security
 
-Block direct access to port 3001 from the public internet. Only allow Cloudflare IP ranges.
+### 5.1 — WAF Custom Rules (block bad actors)
+
+**Security → WAF → Custom rules → Create rule**
+
+**Rule 1 — Block non-browser requests to origin-restricted endpoints**
+
+This blocks curl/scripts hitting UI-only endpoints without a proper `Origin` header.
+
+| Field | Value |
+|---|---|
+| Rule name | `Require Origin for API` |
+| When | URI Path contains `/api/v1` AND NOT URI Path contains `/health` AND http.request.headers["origin"] eq "" |
+| Action | Block |
+
+**Rule 2 — Country block (optional)**
+
+If you want to restrict to specific regions:
+
+| Field | Value |
+|---|---|
+| Rule name | `Geo restriction` |
+| When | ip.geoip.continent not in {"NA" "EU" "AS"} |
+| Action | Block |
+
+---
+
+### 5.2 — Rate Limiting at the Edge
+
+**Security → WAF → Rate limiting rules → Create rule**
+
+Add these on top of the in-app rate limits for extra protection:
+
+**Quote endpoints** (RPC-heavy):
+
+| Field | Value |
+|---|---|
+| Rule name | `Rate limit quote endpoints` |
+| When | URI Path contains `/quote/` |
+| Requests | 30 per 1 minute per IP |
+| Action | Block (with 429) |
+
+**General API**:
+
+| Field | Value |
+|---|---|
+| Rule name | `Rate limit API` |
+| When | URI Path starts with `/api/v1` |
+| Requests | 120 per 1 minute per IP |
+| Action | Block (with 429) |
+
+> Your NestJS in-app rate limits are the primary defence. Cloudflare edge limits stop traffic before it hits your server at all.
+
+---
+
+### 5.3 — Bot Fight Mode
+
+**Security → Bots → Bot Fight Mode → On**
+
+Blocks known malicious bots automatically. Safe to enable — legitimate browsers and your frontend are not affected.
+
+---
+
+### 5.4 — Security Level
+
+**Security → Settings → Security Level → Medium**
+
+Presents a challenge page to IPs with a poor reputation score before they reach your API.
+
+---
+
+## Step 6 — Firewall Port 3001 on Your Server
+
+Block direct access to port 3001 — only Cloudflare IPs should reach it.
 
 ```bash
 sudo ufw allow 22
@@ -114,14 +201,14 @@ sudo ufw status
 
 ---
 
-## Step 6 — Verify
+## Step 7 — Verify
 
 ```bash
-# Health check
+# Health check through Cloudflare
 curl https://api.1coin.meme/health
 # {"status":"ok","service":"onememe-launchpad-api","timestamp":...}
 
-# Confirm Cloudflare certificate
+# Confirm Cloudflare is terminating TLS
 curl -vI https://api.1coin.meme/health 2>&1 | grep -i issuer
 # issuer: Cloudflare Inc ECC CA-3
 ```
@@ -131,16 +218,23 @@ curl -vI https://api.1coin.meme/health 2>&1 | grep -i issuer
 const ws = new WebSocket("wss://api.1coin.meme/api/v1/activity/ws");
 ws.onopen  = () => console.log("connected");
 ws.onclose = (e) => console.log("closed", e.code);
+
+// Chat WebSocket
+const chat = new WebSocket("wss://api.1coin.meme/api/v1/chat/ws");
+chat.onopen = () => console.log("chat connected");
 ```
 
 ---
 
 ## Summary
 
-| What | Where |
+| What | Detail |
 |---|---|
-| TLS certificate | Cloudflare (automatic, auto-renewed) |
-| SSL/TLS mode | Full |
+| Frontend DNS | `@` and `www` → Vercel, **DNS only** (grey cloud) |
+| API DNS | `api` → your server IP, **Proxied** (orange cloud) |
+| TLS | Cloudflare Full mode — automatic, auto-renewed |
 | WebSockets | Enabled in Cloudflare Network settings |
-| API caching | Bypassed via Cache Rule |
-| Server port | `3001` (plain HTTP, firewalled to Cloudflare IPs only) |
+| Cache | Bypassed for all `/api` routes |
+| WAF | Custom rules block missing Origin + rate limit quote endpoints |
+| Bot protection | Bot Fight Mode + Medium security level |
+| Server port | `3001` plain HTTP, firewalled to Cloudflare IPs only |

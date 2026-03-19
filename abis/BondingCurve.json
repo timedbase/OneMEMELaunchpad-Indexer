@@ -1,0 +1,77 @@
+[
+  {
+    "type": "event",
+    "name": "TokenBought",
+    "inputs": [
+      { "name": "token",        "type": "address", "indexed": true  },
+      { "name": "buyer",        "type": "address", "indexed": true  },
+      { "name": "bnbIn",        "type": "uint256", "indexed": false },
+      { "name": "tokensOut",    "type": "uint256", "indexed": false },
+      { "name": "tokensToDead", "type": "uint256", "indexed": false },
+      { "name": "raisedBNB",    "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TokenSold",
+    "inputs": [
+      { "name": "token",     "type": "address", "indexed": true  },
+      { "name": "seller",    "type": "address", "indexed": true  },
+      { "name": "tokensIn",  "type": "uint256", "indexed": false },
+      { "name": "bnbOut",    "type": "uint256", "indexed": false },
+      { "name": "raisedBNB", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TokenMigrated",
+    "inputs": [
+      { "name": "token",           "type": "address", "indexed": true  },
+      { "name": "pair",            "type": "address", "indexed": true  },
+      { "name": "liquidityBNB",    "type": "uint256", "indexed": false },
+      { "name": "liquidityTokens", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getAmountOut",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "token_",  "type": "address" },
+      { "name": "bnbIn",   "type": "uint256" }
+    ],
+    "outputs": [
+      { "name": "tokensOut", "type": "uint256" },
+      { "name": "feeBNB",    "type": "uint256" }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getAmountOutSell",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "token_",    "type": "address" },
+      { "name": "tokensIn",  "type": "uint256" }
+    ],
+    "outputs": [
+      { "name": "bnbOut",  "type": "uint256" },
+      { "name": "feeBNB",  "type": "uint256" }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getSpotPrice",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "token_", "type": "address" }
+    ],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "name": "totalTokensLaunched",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  }
+]

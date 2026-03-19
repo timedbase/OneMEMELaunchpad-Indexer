@@ -42,6 +42,8 @@ DATABASE_URL=postgresql://alex:AbCdEfG@ep-cool-darkness-123456.us-east-2.aws.neo
 
 No other changes needed — Ponder and postgres.js both handle `sslmode=require` automatically.
 
+> **Direct connection only for Ponder.** Do not use the pooled connection string for `DATABASE_URL` — Ponder requires a direct connection to run schema migrations. Use the pooled endpoint only for the API if you scale to multiple API instances.
+
 ---
 
 ## Step 4 — Create a Production Branch (recommended)

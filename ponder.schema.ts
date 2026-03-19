@@ -11,18 +11,24 @@ export const token = onchainTable(
     id: t.hex().primaryKey(),
 
     /**
-     * Token implementation type:
-     *   "Standard"   – plain ERC-20, no taxes
-     *   "Tax"        – configurable buy/sell taxes (up to 5 recipients)
-     *   "Reflection" – RFI-style passive holder distribution
+     * Token implementation type: "Standard" | "Tax" | "Reflection".
+     * Derived at index time by comparing the token's EIP-1167 implementation
+     * address against the factory's standardImpl / taxImpl / reflectionImpl.
+     * Null only if bytecode read fails (extremely unlikely).
      */
-    tokenType: t.text().notNull(),
+    tokenType: t.text(),
 
-    /** Address that called createToken / createTT / createRFL. */
+    /** Address that called createToken on the factory. */
     creator: t.hex().notNull(),
 
     /** Total supply minted at launch (18-decimal). */
     totalSupply: t.bigint().notNull(),
+
+    /**
+     * Initial virtual BNB reserve used in the bonding-curve AMM formula.
+     * Price at any point = (virtualBNB + raisedBNB) / tokensAvailable.
+     */
+    virtualBNB: t.bigint().notNull(),
 
     /** Whether the antibot penalty was enabled at launch. */
     antibotEnabled: t.boolean().notNull(),

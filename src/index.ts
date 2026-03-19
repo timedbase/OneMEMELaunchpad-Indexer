@@ -1,14 +1,14 @@
 /**
  * OneMEME Launchpad Indexer — Event Handlers
  *
- * Processes user-facing events emitted by the LaunchpadFactory contract on BSC
- * and persists them to PostgreSQL via Ponder's type-safe ORM.
+ * Processes user-facing events emitted by the LaunchpadFactory and BondingCurve
+ * contracts on BSC and persists them to PostgreSQL via Ponder's type-safe ORM.
  *
  * Events handled:
  *   LaunchpadFactory:TokenCreated  — new meme token deployed
- *   LaunchpadFactory:TokenBought   — bonding-curve buy
- *   LaunchpadFactory:TokenSold     — bonding-curve sell
- *   LaunchpadFactory:TokenMigrated — token graduates to PancakeSwap V2
+ *   BondingCurve:TokenBought       — bonding-curve buy
+ *   BondingCurve:TokenSold         — bonding-curve sell
+ *   BondingCurve:TokenMigrated     — token graduates to PancakeSwap V2
  *   MemeToken:Transfer             — ERC-20 transfer on any deployed token
  *                                    (used to maintain exact onchain holder balances)
  */
@@ -17,53 +17,96 @@ import { ponder } from "ponder:registry";
 import * as schema from "ponder:schema";
 import LaunchpadFactoryAbi from "../abis/LaunchpadFactory.json";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Implementation address cache ─────────────────────────────────────────────
+// The factory's impl addresses never change after deployment. We read them once
+// on the first TokenCreated event and reuse the result for all subsequent ones.
+
+type ImplAddresses = { standard: string; tax: string; reflection: string };
+const implCache = new Map<string, ImplAddresses>();
 
 /**
- * Maps the on-chain TokenType enum (uint8) to a human-readable string.
- *   0 → "Standard"   (plain ERC-20, no taxes)
- *   1 → "Tax"        (buy/sell tax with up to 5 recipients)
- *   2 → "Reflection" (RFI-style passive distribution)
+ * Reads standardImpl / taxImpl / reflectionImpl from the factory contract.
+ * Results are cached in-process — only 3 RPC calls total per indexer run.
  */
-function tokenTypeLabel(tokenType: number): string {
-  switch (tokenType) {
-    case 0:  return "Standard";
-    case 1:  return "Tax";
-    case 2:  return "Reflection";
-    default: return "Unknown";
+async function getFactoryImpls(factoryAddress: string, client: any): Promise<ImplAddresses | null> {
+  if (implCache.has(factoryAddress)) return implCache.get(factoryAddress)!;
+  try {
+    const [standard, tax, reflection] = await Promise.all([
+      client.readContract({ abi: LaunchpadFactoryAbi, address: factoryAddress, functionName: "standardImpl" }),
+      client.readContract({ abi: LaunchpadFactoryAbi, address: factoryAddress, functionName: "taxImpl" }),
+      client.readContract({ abi: LaunchpadFactoryAbi, address: factoryAddress, functionName: "reflectionImpl" }),
+    ]) as [string, string, string];
+    const result: ImplAddresses = {
+      standard:   standard.toLowerCase(),
+      tax:        tax.toLowerCase(),
+      reflection: reflection.toLowerCase(),
+    };
+    implCache.set(factoryAddress, result);
+    return result;
+  } catch {
+    return null;
   }
+}
+
+/**
+ * Extracts the implementation address from an EIP-1167 minimal proxy's bytecode.
+ *
+ * EIP-1167 layout (36 bytes):
+ *   363d3d373d3d3d363d73  ← 10-byte prefix
+ *   {20-byte-impl}        ← bytes 10–29
+ *   5af43d82803e903d91602b57fd5bf3  ← 15-byte suffix
+ *
+ * The hex-encoded bytecode string (without 0x) has the impl at chars 20–59.
+ */
+function implFromBytecode(bytecode: string): string | null {
+  // bytecode includes "0x" prefix → impl starts at char 22 (2 + 20)
+  if (!bytecode || bytecode.length < 62) return null;
+  return `0x${bytecode.slice(22, 62)}`.toLowerCase();
+}
+
+/**
+ * Returns "Standard" | "Tax" | "Reflection" | null by comparing the token's
+ * EIP-1167 implementation against the factory's known impl addresses.
+ */
+async function resolveTokenType(
+  tokenAddress: string,
+  factoryAddress: string,
+  client: any,
+): Promise<string | null> {
+  const [bytecode, impls] = await Promise.all([
+    client.getBytecode({ address: tokenAddress }).catch(() => null),
+    getFactoryImpls(factoryAddress, client),
+  ]);
+  if (!bytecode || !impls) return null;
+  const impl = implFromBytecode(bytecode);
+  if (!impl) return null;
+  if (impl === impls.standard)   return "Standard";
+  if (impl === impls.tax)        return "Tax";
+  if (impl === impls.reflection) return "Reflection";
+  return null;
 }
 
 // ─── Token Created ────────────────────────────────────────────────────────────
 
 /**
- * Emitted when a new meme token is deployed through the factory.
+ * Emitted by LaunchpadFactory when a new meme token is deployed.
  * Initialises the Token row and zeroes out all running aggregates.
+ *
+ * virtualBNB and migrationTarget are included directly in the event.
+ * tokenType is derived from the token's EIP-1167 implementation bytecode.
  */
 ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
-  const { token, tokenType, creator, totalSupply, antibotEnabled, tradingBlock } =
+  const { token, creator, totalSupply, virtualBNB, migrationTarget, antibotEnabled, tradingBlock } =
     event.args;
 
-  // Read migrationTarget from the factory at creation time so the API can
-  // return bonding-curve progress without an extra on-chain call per token.
-  let migrationTarget = 0n;
-  try {
-    const tokenStruct = await context.client.readContract({
-      abi:          LaunchpadFactoryAbi as any,
-      address:      event.log.address,
-      functionName: "tokens",
-      args:         [token],
-    }) as any;
-    migrationTarget = BigInt(tokenStruct.migrationTarget ?? tokenStruct[11] ?? 0);
-  } catch {
-    // Non-fatal — migrationTarget stays 0n; operator can update via re-index.
-  }
+  const tokenType = await resolveTokenType(token, event.log.address, context.client);
 
   await context.db.insert(schema.token).values({
     id:                 token,
-    tokenType:          tokenTypeLabel(tokenType),
+    tokenType,
     creator,
     totalSupply,
+    virtualBNB,
     antibotEnabled,
     tradingBlock,
     createdAtBlock:     event.block.number,
@@ -81,7 +124,7 @@ ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
 // ─── Bonding Curve Trades ─────────────────────────────────────────────────────
 
 /**
- * Emitted when a user buys tokens from the bonding curve.
+ * Emitted by BondingCurve when a user buys tokens from the bonding curve.
  *
  * Stores the individual trade and updates the token's running stats:
  *   - Increments buyCount
@@ -91,7 +134,7 @@ ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
  * Note: tokensToDead is the portion burned as an antibot penalty and is
  * non-zero only during the antibot window (first N blocks after tradingBlock).
  */
-ponder.on("LaunchpadFactory:TokenBought", async ({ event, context }) => {
+ponder.on("BondingCurve:TokenBought", async ({ event, context }) => {
   const { token, buyer, bnbIn, tokensOut, tokensToDead, raisedBNB } = event.args;
 
   await context.db.insert(schema.trade).values({
@@ -118,14 +161,14 @@ ponder.on("LaunchpadFactory:TokenBought", async ({ event, context }) => {
 });
 
 /**
- * Emitted when a user sells tokens back to the bonding curve.
+ * Emitted by BondingCurve when a user sells tokens back to the bonding curve.
  *
  * Stores the individual trade and updates the token's running stats:
  *   - Increments sellCount
  *   - Adds bnbOut to volumeBNB
  *   - Syncs raisedBNB to the latest on-chain value
  */
-ponder.on("LaunchpadFactory:TokenSold", async ({ event, context }) => {
+ponder.on("BondingCurve:TokenSold", async ({ event, context }) => {
   const { token, seller, tokensIn, bnbOut, raisedBNB } = event.args;
 
   await context.db.insert(schema.trade).values({
@@ -154,13 +197,13 @@ ponder.on("LaunchpadFactory:TokenSold", async ({ event, context }) => {
 // ─── Migration ────────────────────────────────────────────────────────────────
 
 /**
- * Emitted once the bonding-curve fundraising target is met.
+ * Emitted by BondingCurve once the fundraising target is met.
  *
- * All raised BNB plus 38% of the token supply are deposited into a new
+ * All raised BNB plus a portion of the token supply are deposited into a new
  * PancakeSwap V2 pair as permanent liquidity. This marks the end of the
  * bonding-curve phase.
  */
-ponder.on("LaunchpadFactory:TokenMigrated", async ({ event, context }) => {
+ponder.on("BondingCurve:TokenMigrated", async ({ event, context }) => {
   const { token, pair, liquidityBNB, liquidityTokens } = event.args;
 
   await context.db.insert(schema.migration).values({

@@ -11,7 +11,7 @@
 
 ## Overview
 
-The **OneMEME Launchpad Indexer** listens to all events emitted by the `LaunchpadFactory` contract and persists them to PostgreSQL. It exposes two APIs:
+The **OneMEME Launchpad Indexer** listens to events emitted by the `LaunchpadFactory` and `BondingCurve` contracts and persists them to PostgreSQL. It exposes two APIs:
 
 - **GraphQL API** (via Ponder) at `http://localhost:42069` — flexible querying with a built-in playground
 - **REST API** (NestJS) at `https://api.1coin.meme/api/v1` — structured HTTPS endpoints with WebSocket (WSS) activity streaming
@@ -27,19 +27,20 @@ The **OneMEME Launchpad Indexer** listens to all events emitted by the `Launchpa
 
 ### What Gets Indexed
 
-| Event | Table | Description |
-|---|---|---|
-| `TokenCreated` | `token` | New meme token deployed (Standard / Tax / Reflection) |
-| `TokenBought` | `trade` | Bonding-curve buy; includes antibot burn amount |
-| `TokenSold` | `trade` | Bonding-curve sell |
-| `TokenMigrated` | `migration` | Token graduates to PancakeSwap V2 |
+| Event | Contract | Table | Description |
+|---|---|---|---|
+| `TokenCreated` | `LaunchpadFactory` | `token` | New meme token deployed |
+| `TokenBought` | `BondingCurve` | `trade` | Bonding-curve buy; includes antibot burn amount |
+| `TokenSold` | `BondingCurve` | `trade` | Bonding-curve sell |
+| `TokenMigrated` | `BondingCurve` | `migration` | Token graduates to PancakeSwap V2 |
 
 ### Database Schema
 
 ```
-token      — one row per deployed meme token (stats: buyCount, sellCount, volumeBNB, raisedBNB, migrationTarget)
+token      — one row per deployed meme token (tokenType, virtualBNB, migrationTarget, buyCount, sellCount, volumeBNB, raisedBNB)
 trade      — one row per bonding-curve buy or sell transaction
 migration  — one row per migrated token (PancakeSwap pair + liquidity)
+holder     — current onchain balance per (token, wallet) — updated from ERC-20 Transfer events
 ```
 
 ---
@@ -76,6 +77,7 @@ Edit `.env`:
 | `BSC_WSS_URL` | **Yes** | BSC WebSocket endpoint (`wss://…`) — primary real-time streaming |
 | `BSC_RPC_URL` | **Yes** | BSC HTTP endpoint — fallback transport + used by API for quotes |
 | `FACTORY_ADDRESS` | **Yes** | Deployed `LaunchpadFactory` contract address |
+| `BONDING_CURVE_ADDRESS` | **Yes** | Deployed `BondingCurve` contract address |
 | `START_BLOCK` | Recommended | Factory deployment block — skips unnecessary historical scan |
 | `DATABASE_URL` | **Yes** | PostgreSQL connection string |
 | `API_PORT` | No | REST API port (default `3001`) |
@@ -141,6 +143,8 @@ http://localhost:42069/graphql
       tokenType
       creator
       totalSupply
+      virtualBNB
+      migrationTarget
       migrated
       buyCount
       sellCount
@@ -366,7 +370,9 @@ Each message:
 ```
 OneMEMELaunchpad-Indexer/
 ├── abis/
-│   ├── LaunchpadFactory.json        # Contract ABI (events + key view functions)
+│   ├── LaunchpadFactory.json        # TokenCreated event + view functions
+│   ├── BondingCurve.json            # TokenBought, TokenSold, TokenMigrated events + view functions
+│   ├── ERC20.json                   # Transfer event (holder balance tracking)
 │   └── LaunchpadToken.json          # Token contract ABI (metaURI, name, symbol)
 ├── src/
 │   ├── index.ts                     # Ponder event handlers (blockchain → DB)
@@ -416,6 +422,8 @@ OneMEMELaunchpad-Indexer/
 | `"Standard"` | StandardToken | Plain ERC-20, no taxes or reflection |
 | `"Tax"` | TaxToken | Configurable buy/sell tax (max 10% each side), up to 5 recipients |
 | `"Reflection"` | ReflectionToken | RFI-style passive distribution to all holders |
+
+> `tokenType` is derived at index time from the token's EIP-1167 implementation bytecode compared against the factory's `standardImpl` / `taxImpl` / `reflectionImpl` addresses — no longer emitted in the `TokenCreated` event directly.
 
 ---
 

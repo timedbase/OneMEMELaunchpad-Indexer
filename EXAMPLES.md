@@ -115,7 +115,6 @@ curl https://api.1coin.meme/api/v1/stats \
     },
     "topTokenByVolume": {
       "id":        "0xdeadbeef...1111",
-      "tokenType": "Tax",
       "creator":   "0xaaaa...",
       "volumeBNB": "980000000000000000000",
       "buyCount":  3210,
@@ -156,21 +155,22 @@ curl "https://api.1coin.meme/api/v1/tokens?type=Tax&migrated=false&orderBy=volum
 {
   "data": [
     {
-      "id":               "0xabc...1111",
-      "tokenType":        "Tax",
-      "creator":          "0xdeadbeef...",
-      "totalSupply":      "1000000000000000000000000000",
-      "antibotEnabled":   true,
-      "tradingBlock":     "42000100",
-      "createdAtBlock":   "42000000",
+      "id":                 "0xabc...1111",
+      "tokenType":          "Tax",
+      "creator":            "0xdeadbeef...",
+      "totalSupply":        "1000000000000000000000000000",
+      "virtualBNB":         "30000000000000000000",
+      "antibotEnabled":     true,
+      "tradingBlock":       "42000100",
+      "createdAtBlock":     "42000000",
       "createdAtTimestamp": 1741820000,
-      "migrated":         false,
-      "pairAddress":      null,
-      "buyCount":         142,
-      "sellCount":        41,
-      "volumeBNB":        "820000000000000000000",
-      "raisedBNB":        "610000000000000000000",
-      "migrationTarget":  "800000000000000000000"
+      "migrated":           false,
+      "pairAddress":        null,
+      "buyCount":           142,
+      "sellCount":          41,
+      "volumeBNB":          "820000000000000000000",
+      "raisedBNB":          "610000000000000000000",
+      "migrationTarget":    "800000000000000000000"
     }
   ],
   "pagination": { "page": 1, "limit": 5, "total": 1042, "pages": 209, "hasMore": true }
@@ -192,21 +192,22 @@ curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111"
 ```json
 {
   "data": {
-    "id":               "0xabc...1111",
-    "tokenType":        "Tax",
-    "creator":          "0xdeadbeef...",
-    "totalSupply":      "1000000000000000000000000000",
-    "antibotEnabled":   true,
-    "tradingBlock":     "42000100",
-    "createdAtBlock":   "42000000",
+    "id":                 "0xabc...1111",
+    "tokenType":          "Tax",
+    "creator":            "0xdeadbeef...",
+    "totalSupply":        "1000000000000000000000000000",
+    "virtualBNB":         "30000000000000000000",
+    "antibotEnabled":     true,
+    "tradingBlock":       "42000100",
+    "createdAtBlock":     "42000000",
     "createdAtTimestamp": 1741820000,
-    "migrated":         false,
-    "pairAddress":      null,
-    "buyCount":         142,
-    "sellCount":        41,
-    "volumeBNB":        "820000000000000000000",
-    "raisedBNB":        "610000000000000000000",
-    "migrationTarget":  "800000000000000000000",
+    "migrated":           false,
+    "pairAddress":        null,
+    "buyCount":           142,
+    "sellCount":          41,
+    "volumeBNB":          "820000000000000000000",
+    "raisedBNB":          "610000000000000000000",
+    "migrationTarget":    "800000000000000000000",
     "metaURI":  "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
     "metadata": {
       "name":        "PepeBSC",
@@ -372,7 +373,7 @@ curl "https://api.1coin.meme/api/v1/tokens/0xabc...1111/migration"
 
 ## 4. Quote Simulation (Live RPC)
 
-All quote endpoints call the live `LaunchpadFactory` contract via `BSC_RPC_URL`. Rate limit: **20 req/min**.
+All quote endpoints call the live `BondingCurve` contract via `BSC_RPC_URL`. Rate limit: **20 req/min**.
 
 ### 4.1 Spot price
 
@@ -730,17 +731,20 @@ curl "https://api.1coin.meme/api/v1/discover/trending?window=300" \
 {
   "data": [
     {
-      "id":               "0xabc...1111",
-      "tokenType":        "Tax",
-      "buyCount":         142,
-      "sellCount":        41,
-      "volumeBNB":        "820000000000000000000",
-      "raisedBNB":        "610000000000000000000",
-      "migrated":         false,
-      "recentTrades":     23,
-      "recentBuys":       18,
-      "recentSells":      5,
-      "recentVolumeBNB":  "9200000000000000000"
+      "id":              "0xabc...1111",
+      "tokenType":       "Tax",
+      "creator":         "0xdeadbeef...",
+      "virtualBNB":      "30000000000000000000",
+      "migrationTarget": "800000000000000000000",
+      "buyCount":        142,
+      "sellCount":       41,
+      "volumeBNB":       "820000000000000000000",
+      "raisedBNB":       "610000000000000000000",
+      "migrated":        false,
+      "recentTrades":    23,
+      "recentBuys":      18,
+      "recentSells":     5,
+      "recentVolumeBNB": "9200000000000000000"
     }
   ],
   "pagination": { "page": 1, "limit": 20, "total": 47, "pages": 3, "hasMore": true },
