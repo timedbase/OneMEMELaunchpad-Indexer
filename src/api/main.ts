@@ -13,6 +13,7 @@ import "reflect-metadata";
 import { config } from "dotenv";
 config();
 
+import fs              from "fs";
 import compression      from "compression";
 import { NestFactory }  from "@nestjs/core";
 import { WsAdapter }    from "@nestjs/platform-ws";
@@ -20,8 +21,15 @@ import { AppModule }    from "./app.module";
 import { AppLogger }    from "./logger";
 
 async function bootstrap() {
+  const certPath = process.env.SSL_CERT_PATH;
+  const keyPath  = process.env.SSL_KEY_PATH;
+  const httpsOptions = certPath && keyPath
+    ? { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) }
+    : undefined;
+
   const app = await NestFactory.create(AppModule, {
     logger: AppLogger,
+    httpsOptions,
   });
 
   // ── Compression ────────────────────────────────────────────────────────────
@@ -43,18 +51,19 @@ async function bootstrap() {
   });
 
   // ── Listen ─────────────────────────────────────────────────────────────────
-  const port = parseInt(process.env.API_PORT ?? "3001", 10);
+  const port     = parseInt(process.env.API_PORT ?? "3001", 10);
+  const protocol = httpsOptions ? "https" : "http";
 
   await app.listen(port);
 
   console.log(`
   OneMEME Launchpad API  (NestJS)
   ─────────────────────────────────────────────────
-  Listening   : http://localhost:${port}
-  Route index : http://localhost:${port}/api/v1
-  Health      : http://localhost:${port}/health
-  Activity WS : ws://localhost:${port}/api/v1/activity/ws
-  Chat WS     : ws://localhost:${port}/api/v1/chat/ws
+  Listening   : ${protocol}://localhost:${port}
+  Route index : ${protocol}://localhost:${port}/api/v1
+  Health      : ${protocol}://localhost:${port}/health
+  Activity WS : ${httpsOptions ? "wss" : "ws"}://localhost:${port}/api/v1/activity/ws
+  Chat WS     : ${httpsOptions ? "wss" : "ws"}://localhost:${port}/api/v1/chat/ws
 
   Rate limits (per IP / per minute):
     /quote/*  → 20   (live BSC RPC)
