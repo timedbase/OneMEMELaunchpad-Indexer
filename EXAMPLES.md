@@ -40,6 +40,9 @@ Complete reference of every endpoint with `curl` commands and expected JSON resp
    - [Migrated](#94-migrated)
 10. [Leaderboard](#10-leaderboard)
     - [Traders by volume](#101-traders-by-volume)
+    - [Tokens by volume](#102-tokens-by-volume)
+    - [Creators](#103-creators)
+    - [Users (combined)](#104-users-traders--creators-combined)
 11. [Metadata Upload (IPFS)](#11-metadata-upload-ipfs)
     - [Full flow](#111-full-flow)
     - [Upload](#112-upload)
@@ -829,30 +832,16 @@ curl "https://api.1coin.meme/api/v1/discover/migrated?orderBy=liquidityBNB&limit
 
 ## 10. Leaderboard
 
-Traders ranked by total BNB trading volume (buys + sells). No origin restriction.
+Platform leaderboards. All support `?period=alltime|1d|7d|30d`. No origin restriction.
 
 ### 10.1 Traders by volume
 
 ```bash
-# All-time leaderboard (default)
 curl "https://api.1coin.meme/api/v1/leaderboard/traders"
-
-# Last 24 hours
 curl "https://api.1coin.meme/api/v1/leaderboard/traders?period=1d"
-
-# Last 7 days
 curl "https://api.1coin.meme/api/v1/leaderboard/traders?period=7d"
-
-# Last 30 days
 curl "https://api.1coin.meme/api/v1/leaderboard/traders?period=30d"
 ```
-
-**Query params:**
-
-| Param | Values | Default |
-|---|---|---|
-| `period` | `alltime` \| `1d` \| `7d` \| `30d` | `alltime` |
-| `page`, `limit` | int | 1, 50 |
 
 **Response `200 OK`**
 
@@ -861,29 +850,118 @@ curl "https://api.1coin.meme/api/v1/leaderboard/traders?period=30d"
   "period": "7d",
   "data": [
     {
-      "address":       "0xwhale...",
-      "volumeBNB":     "42000000000000000000",
-      "tradeCount":    38,
-      "buyCount":      22,
-      "sellCount":     16,
-      "tokensTraded":  5,
-      "lastTradeAt":   1741900000
-    },
-    {
-      "address":       "0xtrader2...",
-      "volumeBNB":     "17500000000000000000",
-      "tradeCount":    14,
-      "buyCount":      10,
-      "sellCount":     4,
-      "tokensTraded":  2,
-      "lastTradeAt":   1741895000
+      "address":      "0xwhale...",
+      "volumeBNB":    "42000000000000000000",
+      "tradeCount":   38,
+      "buyCount":     22,
+      "sellCount":    16,
+      "tokensTraded": 5,
+      "lastTradeAt":  1741900000
     }
   ],
   "pagination": { "page": 1, "limit": 50, "total": 214, "pages": 5, "hasMore": true }
 }
 ```
 
-> `volumeBNB` is the sum of all BNB across buys and sells in the selected period, in wei.
+### 10.2 Tokens by volume
+
+```bash
+curl "https://api.1coin.meme/api/v1/leaderboard/tokens"
+curl "https://api.1coin.meme/api/v1/leaderboard/tokens?period=7d&orderBy=tradeCount"
+```
+
+**Query params:**
+
+| Param | Values | Default |
+|---|---|---|
+| `period` | `alltime` \| `1d` \| `7d` \| `30d` | `alltime` |
+| `orderBy` | `volumeBNB` \| `tradeCount` \| `buyCount` \| `sellCount` \| `raisedBNB` | `volumeBNB` |
+| `page`, `limit` | int | 1, 50 |
+
+**Response `200 OK`**
+
+```json
+{
+  "period": "7d",
+  "orderBy": "volumeBNB",
+  "data": [
+    {
+      "address":       "0xtoken...1111",
+      "tokenType":     "Standard",
+      "creator":       "0xcreator...",
+      "migrated":      false,
+      "volumeBNB":     "980000000000000000000",
+      "tradeCount":    3210,
+      "buyCount":      2100,
+      "sellCount":     1110,
+      "uniqueTraders": 842,
+      "raisedBNB":     "4800000000000000000",
+      "createdAt":     1741800000
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 1042, "pages": 21, "hasMore": true }
+}
+```
+
+### 10.3 Creators
+
+```bash
+curl "https://api.1coin.meme/api/v1/leaderboard/creators"
+curl "https://api.1coin.meme/api/v1/leaderboard/creators?period=30d"
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "period": "30d",
+  "data": [
+    {
+      "address":        "0xcreator...",
+      "tokensLaunched": 12,
+      "tokensMigrated": 3,
+      "totalVolumeBNB": "142000000000000000000",
+      "totalRaisedBNB": "15000000000000000000",
+      "lastLaunchAt":   1741900000
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 380, "pages": 8, "hasMore": true }
+}
+```
+
+### 10.4 Users (traders + creators combined)
+
+Combined view merging trading activity and token creation stats per wallet.
+
+```bash
+curl "https://api.1coin.meme/api/v1/leaderboard/users"
+curl "https://api.1coin.meme/api/v1/leaderboard/users?period=7d"
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "period": "7d",
+  "data": [
+    {
+      "address":        "0xwhale...",
+      "volumeBNB":      "42000000000000000000",
+      "tradeCount":     38,
+      "buyCount":       22,
+      "sellCount":      16,
+      "tokensTraded":   5,
+      "lastTradeAt":    1741900000,
+      "tokensLaunched": 2,
+      "tokensMigrated": 1,
+      "totalRaisedBNB": "10000000000000000000"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 520, "pages": 11, "hasMore": true }
+}
+```
+
+> Sorted by `volumeBNB` descending, then `tokensLaunched` descending. Wallets with no trades show `volumeBNB: "0"`. Wallets with no launches show `tokensLaunched: 0`.
 
 ---
 
@@ -909,6 +987,18 @@ Token creator
 
 ### 11.2 Upload
 
+**Form fields:**
+
+| Field | Required | Description |
+|---|---|---|
+| `image` | Yes | Token image — jpeg/png/gif/webp/svg, max 3 MB |
+| `name` | Yes | Token display name |
+| `symbol` | Yes | Token ticker (e.g. `PEPE`) |
+| `description` | Yes | Short token description |
+| `website` | No | Project website URL |
+| `x` | No | Twitter/X URL |
+| `telegram` | No | Telegram link |
+
 ```bash
 curl -X POST https://api.1coin.meme/api/v1/metadata/upload \
   -F "image=@./pepe.png;type=image/png" \
@@ -920,7 +1010,7 @@ curl -X POST https://api.1coin.meme/api/v1/metadata/upload \
   -F "telegram=https://t.me/pepebsc"
 ```
 
-**Response `201 Created`**
+**Response `200 OK`**
 
 ```json
 {
@@ -961,13 +1051,13 @@ curl -X POST https://api.1coin.meme/api/v1/metadata/upload \
 // React / Next.js example
 async function uploadMetadata({ name, symbol, description, website, x, telegram, imageFile }) {
   const form = new FormData();
-  form.append("image",       imageFile);          // File from <input type="file"> — required
-  form.append("name",        name);
-  form.append("symbol",      symbol      ?? "");
-  form.append("description", description ?? "");
-  form.append("website",     website     ?? "");
-  form.append("x",           x           ?? "");
-  form.append("telegram",    telegram    ?? "");
+  form.append("image",       imageFile);   // File — required
+  form.append("name",        name);        // required
+  form.append("symbol",      symbol);      // required
+  form.append("description", description); // required
+  if (website)  form.append("website",  website);
+  if (x)        form.append("x",        x);
+  if (telegram) form.append("telegram", telegram);
   // Do NOT set Content-Type — browser sets it with boundary automatically.
 
   const res = await fetch("https://api.1coin.meme/api/v1/metadata/upload", {

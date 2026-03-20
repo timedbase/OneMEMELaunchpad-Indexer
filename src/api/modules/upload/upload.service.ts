@@ -29,8 +29,8 @@ const ALLOWED_MIME_TYPES = new Set([
 
 export interface UploadMetadataDto {
   name:        string;
-  symbol?:     string;
-  description?: string;
+  symbol:      string;
+  description: string;
   website?:    string;
   x?:          string;   // Twitter / X
   telegram?:   string;
@@ -127,9 +127,9 @@ export class UploadService {
     fields: UploadMetadataDto,
     imageFile: Express.Multer.File,
   ): Promise<UploadResult> {
-    if (!fields.name?.trim()) {
-      throw new BadRequestException("name is required");
-    }
+    if (!fields.name?.trim())        throw new BadRequestException("name is required");
+    if (!fields.symbol?.trim())      throw new BadRequestException("symbol is required");
+    if (!fields.description?.trim()) throw new BadRequestException("description is required");
 
     // ── Validate image MIME type ─────────────────────────────────────────────
     if (!ALLOWED_MIME_TYPES.has(imageFile.mimetype)) {
@@ -159,8 +159,8 @@ export class UploadService {
 
     const metadata: Record<string, unknown> = {
       name:        fields.name.trim(),
-      symbol:      fields.symbol?.trim() || undefined,
-      description: fields.description?.trim() || undefined,
+      symbol:      fields.symbol.trim(),
+      description: fields.description.trim(),
       image:       `ipfs://${imageHash}`,
       website:     fields.website?.trim() || undefined,
     };

@@ -36,10 +36,10 @@ export class UploadController {
    * POST /api/v1/metadata/upload
    *
    * Form fields:
-   *   image        File    Required image (jpeg/png/gif/webp/svg, max 3 MB)
+   *   image        File    Required — token image (jpeg/png/gif/webp/svg, max 3 MB)
    *   name         string  Required — token display name
-   *   symbol       string  Optional — token ticker symbol (e.g. "PEPE")
-   *   description  string  Optional — short token description
+   *   symbol       string  Required — token ticker symbol (e.g. "PEPE")
+   *   description  string  Required — short token description
    *   website      string  Optional — project website URL
    *   x            string  Optional — Twitter/X URL or handle
    *   telegram     string  Optional — Telegram link

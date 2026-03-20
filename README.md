@@ -298,13 +298,16 @@ Origin enforcement is handled by **Cloudflare WAF** — see [CLOUDFLARE.md](CLOU
 |---|---|---|
 | `POST` | `/api/v1/metadata/upload` | Upload image + metadata JSON to IPFS — returns `metaURI` for `setMetaURI()` |
 
-Requires `PINATA_JWT` in `.env`. Accepts `multipart/form-data`. Fields: `image` (required, max 3 MB), `name` (required), `symbol`, `description`, `website`, `x`, `telegram`.
+Requires `PINATA_JWT` in `.env`. Accepts `multipart/form-data`. Fields: `image`, `name`, `symbol`, `description` (all required, image max 3 MB); `website`, `x`, `telegram` (optional).
 
 #### Leaderboard
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/v1/leaderboard/traders` | Traders ranked by BNB volume — `?period=alltime\|1d\|7d\|30d` |
+| `GET` | `/api/v1/leaderboard/tokens` | Tokens ranked by volume/trades — `?orderBy=volumeBNB\|tradeCount\|...` |
+| `GET` | `/api/v1/leaderboard/creators` | Creators ranked by tokens launched + raised BNB |
+| `GET` | `/api/v1/leaderboard/users` | Combined trader + creator stats per wallet |
 
 #### BNB Price
 
@@ -413,7 +416,7 @@ OneMEMELaunchpad-Indexer/
 │           ├── quotes/              # /tokens/:addr/quote/price|buy|sell (live RPC)
 │           ├── activity/            # /activity, /activity/stream (SSE), /activity/ws (WSS)
 │           ├── discover/            # /discover/trending|new|bonding|migrated
-│           ├── leaderboard/         # /leaderboard/traders (alltime|1d|7d|30d)
+│           ├── leaderboard/         # /leaderboard/traders|tokens|creators|users (alltime|1d|7d|30d)
 │           ├── price/               # /price/bnb — aggregated BNB/USDT (Binance+OKX+Bybit)
 │           ├── charts/              # /charts/* — TradingView UDF (OHLCV from trades)
 │           ├── chat/                # /chat/:token/messages (REST) + /chat/ws (WebSocket)
