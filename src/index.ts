@@ -288,9 +288,14 @@ ponder.on("VestingWallet:VestingAdded", async ({ event, context }) => {
   });
 
   // Backfill creatorTokens on the token row for fast API reads.
-  await context.db
-    .update(schema.token, { id: token })
-    .set({ creatorTokens: amount });
+  // Token row may not exist yet if VestingAdded fires before TokenCreated.
+  try {
+    await context.db
+      .update(schema.token, { id: token })
+      .set({ creatorTokens: amount });
+  } catch {
+    // Token not yet indexed — skip, creatorTokens starts at 0n from TokenCreated handler
+  }
 });
 
 /**
