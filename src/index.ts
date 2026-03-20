@@ -76,7 +76,7 @@ async function resolveTokenType(
   client: PublicClient,
 ): Promise<string | null> {
   const [bytecode, impls] = await Promise.all([
-    client.getBytecode({ address: tokenAddress as `0x${string}` }).catch(() => null),
+    client.getCode({ address: tokenAddress as `0x${string}` }).catch(() => null),
     getFactoryImpls(factoryAddress, client),
   ]);
   if (!bytecode || !impls) return null;
