@@ -1,8 +1,7 @@
 /**
  * Activity feed controller
  *
- * GET /api/v1/activity           Paginated unified create/buy/sell feed
- * GET /api/v1/activity/marquee   Last 15 events (flat array, no pagination wrapper) — for header marquee
+ * GET /api/v1/activity           Last 15 create/buy/sell events (flat array) — for header marquee
  * GET /api/v1/activity/stream    Server-Sent Events (SSE) real-time push
  *
  * The SSE endpoint uses RxJS Observable — NestJS serialises each emitted
@@ -10,7 +9,6 @@
  */
 
 import {
-  BadRequestException,
   Controller,
   Get,
   Query,
@@ -28,20 +26,16 @@ const KEEPALIVE_MS = 15_000;
 export class ActivityController {
   constructor(private readonly activity: ActivityService) {}
 
-  /** GET /api/v1/activity/marquee — last 15 events, flat array, no pagination wrapper */
-  @Get("marquee")
-  async marquee() {
-    return this.activity.query({ limit: 15, offset: 0 });
-  }
-
-  /** GET /api/v1/activity */
+  /**
+   * GET /api/v1/activity
+   *
+   * Returns the 15 most recent create/buy/sell events as a flat array.
+   * As new events are indexed older ones naturally drop off.
+   * Intended for the header marquee — poll or pair with the SSE stream.
+   */
   @Get()
-  list(@Query() query: Record<string, string>) {
-    const type = query["type"];
-    if (type && !VALID_TYPES.has(type)) {
-      throw new BadRequestException(`Invalid type. Must be one of: ${[...VALID_TYPES].join(", ")}`);
-    }
-    return this.activity.list(query);
+  async list() {
+    return this.activity.query({ limit: 15, offset: 0 });
   }
 
   /**
@@ -65,7 +59,8 @@ export class ActivityController {
     const tokenFilter = query["token"];
 
     if (typeFilter && !VALID_TYPES.has(typeFilter)) {
-      throw new BadRequestException(`Invalid type. Must be one of: ${[...VALID_TYPES].join(", ")}`);
+      // Invalid type — stream will immediately error; client should reconnect with valid params.
+      return new Observable(s => s.error(new Error(`Invalid type: ${typeFilter}`)));
     }
 
     return new Observable<MessageEvent>((subscriber) => {
@@ -90,7 +85,7 @@ export class ActivityController {
           const snapshot = await this.activity.query({
             typeFilter,
             token:  tokenFilter,
-            limit:  20,
+            limit:  15,
             offset: 0,
           });
           if (!destroyed) {
