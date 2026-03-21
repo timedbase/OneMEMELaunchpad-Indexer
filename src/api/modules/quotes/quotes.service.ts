@@ -20,7 +20,7 @@ export class QuotesService {
 
   private async requireActiveBondingCurve(address: string) {
     const [row] = await sql`
-      SELECT "id", "migrated", "tokenType", "tradingBlock", "antibotEnabled"
+      SELECT id, migrated, token_type AS "tokenType", trading_block AS "tradingBlock", antibot_enabled AS "antibotEnabled"
       FROM token
       WHERE id = ${normalizeAddress(address)}
     `;
