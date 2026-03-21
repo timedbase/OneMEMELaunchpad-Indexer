@@ -33,8 +33,8 @@ export class ActivityService {
             'create'             AS "eventType",
             id                   AS token,
             creator              AS actor,
-            NULL::text           AS "bnbAmount",
-            NULL::text           AS "tokenAmount",
+            NULL::numeric        AS "bnbAmount",
+            NULL::numeric        AS "tokenAmount",
             created_at_block     AS "blockNumber",
             created_at_timestamp AS timestamp,
             creation_tx_hash     AS "txHash"
