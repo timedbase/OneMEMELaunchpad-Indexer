@@ -42,6 +42,9 @@ export const token = onchainTable(
     /** Unix timestamp (seconds) of the TokenCreated event. */
     createdAtTimestamp: t.integer().notNull(),
 
+    /** Transaction hash of the TokenCreated event. */
+    creationTxHash: t.hex().notNull(),
+
     /** Whether the token has been migrated to PancakeSwap. */
     migrated: t.boolean().notNull(),
 

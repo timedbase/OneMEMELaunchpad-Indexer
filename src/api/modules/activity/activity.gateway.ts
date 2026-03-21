@@ -12,12 +12,12 @@
  *   token  0x-address                 — filter by token
  *
  * Message format (JSON):
- *   { event: "activity", data: { eventType, token, actor, bnbAmount,
- *                                 tokenAmount, blockNumber, timestamp, txHash } }
+ *   { event: "activity",  data: { eventType, token, actor, bnbAmount,
+ *                                  tokenAmount, blockNumber, timestamp, txHash } }
  *   { event: "keepalive", data: "" }
  *
  * Example (browser):
- *   const ws = new WebSocket("wss://api.onememe.io/api/v1/activity/ws?type=buy");
+ *   const ws = new WebSocket("wss://api.1coin.meme/api/v1/activity/ws?type=buy");
  *   ws.onmessage = (e) => console.log(JSON.parse(e.data));
  */
 
@@ -33,6 +33,7 @@ import { ActivityService, VALID_TYPES } from "./activity.service";
 
 const POLL_MS      = 2_000;
 const KEEPALIVE_MS = 15_000;
+const WS_OPEN      = 1; // WebSocket.OPEN constant
 
 interface ConnState {
   typeFilter?:  string;
@@ -54,7 +55,7 @@ export class ActivityGateway
   constructor(private readonly activity: ActivityService) {}
 
   async handleConnection(client: WebSocket, req: IncomingMessage): Promise<void> {
-    const url = new URL(req.url ?? "/", "http://localhost");
+    const url         = new URL(req.url ?? "/", "http://localhost");
     const typeFilter  = url.searchParams.get("type")  ?? undefined;
     const tokenFilter = url.searchParams.get("token") ?? undefined;
 
@@ -66,8 +67,30 @@ export class ActivityGateway
 
     const lastBlock = await this.activity.latestBlock();
 
+    // Guard: client may have disconnected during the latestBlock() await.
+    // If so, nothing is in the connections map yet — just bail out.
+    if ((client as unknown as { readyState: number }).readyState !== WS_OPEN) return;
+
+    // Send initial snapshot so the feed isn't empty on first connect.
+    try {
+      const snapshot = await this.activity.query({
+        typeFilter,
+        token:  tokenFilter,
+        limit:  20,
+        offset: 0,
+      });
+      if ((client as unknown as { readyState: number }).readyState === WS_OPEN) {
+        for (const row of [...snapshot].reverse()) {
+          client.send(JSON.stringify({ event: "activity", data: JSON.stringify(row) }));
+        }
+      }
+    } catch { /* non-fatal — connection stays open */ }
+
+    // Guard again after snapshot query (may have taken time).
+    if ((client as unknown as { readyState: number }).readyState !== WS_OPEN) return;
+
     const keepalive = setInterval(() => {
-      if (client.readyState === (client as unknown as { OPEN: number }).OPEN) {
+      if ((client as unknown as { readyState: number }).readyState === WS_OPEN) {
         client.send(JSON.stringify({ event: "keepalive", data: "" }));
       }
     }, KEEPALIVE_MS);
@@ -75,7 +98,7 @@ export class ActivityGateway
     const state: ConnState = { typeFilter, tokenFilter, lastBlock, keepalive, poll: null! };
 
     state.poll = setInterval(async () => {
-      if ((client as unknown as { readyState: number }).readyState !== 1 /* OPEN */) return;
+      if ((client as unknown as { readyState: number }).readyState !== WS_OPEN) return;
       try {
         const rows = await this.activity.query({
           typeFilter:  state.typeFilter,
@@ -91,7 +114,7 @@ export class ActivityGateway
             if (b > state.lastBlock) state.lastBlock = b;
           }
           for (const row of [...rows].reverse()) {
-            client.send(JSON.stringify({ event: "activity", data: row }));
+            client.send(JSON.stringify({ event: "activity", data: JSON.stringify(row) }));
           }
         }
       } catch { /* keep alive on DB errors */ }

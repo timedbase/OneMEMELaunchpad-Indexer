@@ -343,6 +343,15 @@ Supported resolutions: `1`, `5`, `15`, `30`, `60`, `240`, `D`. Point TradingView
 | `GET` | `/api/v1/vesting/:token` | Creator vesting schedule for a token — amount, claimed, claimable, progress |
 | `GET` | `/api/v1/creators/:address/vesting` | All vesting schedules for a creator across all their tokens |
 
+#### Vanity Salt Mining
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/salt/:address` | Return current session result (partial or complete — all three token types) |
+| `GET` | `/api/v1/salt/:address/stream` | SSE stream — every connect starts a **fresh mine** for all 3 types in parallel; worker threads are killed on disconnect |
+
+Three worker threads are spawned simultaneously (one per token type: Standard, Tax, Reflection). Each mines independently until it finds an address ending in `0x1111`. The SSE stream completes once all three are found. The frontend stores the salt per type and passes the correct one to `LaunchpadFactory.createToken(tokenType, userSalt, ...)` at launch time.
+
 #### Discovery _(UI only)_
 
 | Method | Path | Description |
@@ -421,7 +430,8 @@ OneMEMELaunchpad-Indexer/
 │           ├── charts/              # /charts/* — TradingView UDF (OHLCV from trades)
 │           ├── chat/                # /chat/:token/messages (REST) + /chat/ws (WebSocket)
 │           ├── vesting/             # /vesting/:token + /creators/:addr/vesting
-│           └── upload/              # POST /metadata/upload — IPFS via Pinata
+│           ├── upload/              # POST /metadata/upload — IPFS via Pinata
+│           └── salt/                # /salt/:addr (cached) + /salt/:addr/stream (SSE mining)
 ├── ponder.config.ts                 # Network, contract, and transport configuration
 ├── ponder.schema.ts                 # Database schema (onchainTable definitions)
 ├── docker-compose.yml               # Local PostgreSQL for development

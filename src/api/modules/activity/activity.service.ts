@@ -37,7 +37,7 @@ export class ActivityService {
             NULL::text           AS "tokenAmount",
             created_at_block     AS "blockNumber",
             created_at_timestamp AS timestamp,
-            NULL::text           AS "txHash"
+            creation_tx_hash     AS "txHash"
           FROM token
           WHERE TRUE ${sinceBlock != null ? sql`AND created_at_block::numeric > ${sinceBlock.toString()}` : sql``}
                 ${token ? sql`AND id = ${token.toLowerCase()}` : sql``}

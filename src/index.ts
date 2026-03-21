@@ -113,6 +113,7 @@ ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
     tradingBlock,
     createdAtBlock:     event.block.number,
     createdAtTimestamp: Number(event.block.timestamp),
+    creationTxHash:     event.transaction.hash,
     migrated:           false,
     pairAddress:        null,
     buyCount:           0,

@@ -20,6 +20,7 @@ import { ChartsModule }        from "./modules/charts/charts.module";
 import { PriceModule }         from "./modules/price/price.module";
 import { ChatModule }          from "./modules/chat/chat.module";
 import { VestingModule }       from "./modules/vesting/vesting.module";
+import { SaltModule }          from "./modules/salt/salt.module";
 
 import {
   QuoteRateLimitMiddleware,
@@ -43,6 +44,7 @@ import {
     PriceModule,
     ChatModule,
     VestingModule,
+    SaltModule,
   ],
   controllers: [HealthController],
 })

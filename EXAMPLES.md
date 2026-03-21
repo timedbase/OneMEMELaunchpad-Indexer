@@ -59,9 +59,13 @@ Complete reference of every endpoint with `curl` commands and expected JSON resp
 15. [Vesting](#15-vesting)
     - [Token vesting schedule](#151-token-vesting-schedule)
     - [Creator vesting schedules](#152-creator-vesting-schedules)
-16. [Rate Limit Response](#16-rate-limit-response)
-17. [Origin Restriction (403)](#17-origin-restriction-403)
-18. [Error Shapes](#18-error-shapes)
+16. [Vanity Salt Mining](#16-vanity-salt-mining)
+    - [Get session result](#161-get-session-result)
+    - [Stream (start fresh mine)](#162-stream-start-fresh-mine)
+    - [Frontend integration](#163-frontend-integration)
+17. [Rate Limit Response](#17-rate-limit-response)
+18. [Origin Restriction (403)](#18-origin-restriction-403)
+19. [Error Shapes](#19-error-shapes)
 
 ---
 
@@ -628,7 +632,7 @@ curl "https://api.1coin.meme/api/v1/activity?token=0xabc...1111" \
       "tokenAmount": null,
       "blockNumber": "42001200",
       "timestamp":   1741822900,
-      "txHash":      null
+      "txHash":      "0xcreationtx..."
     }
   ],
   "pagination": { "page": 1, "limit": 20, "total": 86705, "pages": 4336, "hasMore": true }
@@ -696,20 +700,22 @@ const ws = new WebSocket("wss://api.1coin.meme/api/v1/activity/ws?type=buy");
 ws.onopen    = ()  => console.log("Connected");
 ws.onmessage = (e) => {
   const { event, data } = JSON.parse(e.data);
-  if (event === "activity")  console.log("New event:", data);
+  if (event === "activity")  console.log("New event:", JSON.parse(data));
   if (event === "keepalive") {} // heartbeat, ignore
 };
 ws.onclose   = ()  => console.log("Disconnected");
 ```
 
+The `data` field is a **JSON string** — same format as SSE's `e.data` — so `JSON.parse(data)` gives the row object in both transports.
+
 **Message format:**
 
-```json
-{ "event": "activity", "data": { "eventType": "buy", "token": "0xabc...1111", "actor": "0xbuyer...", "bnbAmount": "500000000000000000", "tokenAmount": "6172839000000000000000", "blockNumber": "42001234", "timestamp": 1741823000, "txHash": "0xtxhash..." } }
+```
+{ "event": "activity",  "data": "{\"eventType\":\"buy\",\"token\":\"0xabc...1111\",\"actor\":\"0xbuyer...\",\"bnbAmount\":\"500000000000000000\",\"tokenAmount\":\"6172839000000000000000\",\"blockNumber\":\"42001234\",\"timestamp\":1741823000,\"txHash\":\"0xtxhash...\"}" }
 
 { "event": "keepalive", "data": "" }
 
-{ "event": "error", "data": "Invalid type: foo" }
+{ "event": "error",     "data": "Invalid type: foo" }
 ```
 
 ---
@@ -1477,7 +1483,144 @@ if (schedule) {
 
 ---
 
-## 16. Rate Limit Response
+## 16. Vanity Salt Mining
+
+The backend mines a `bytes32` userSalt such that the CREATE2-predicted token address ends with `0x1111` (matching the factory's vanity addressing convention). Three worker threads are spawned in parallel — one per token type — so the salt is ready for whichever type the user picks at launch time. The event loop is never blocked.
+
+### How it works
+
+```
+CREATE2 address = keccak256(0xff ++ factory ++ keccak256(abi.encode(creator, userSalt)) ++ initCodeHash)[12:]
+```
+
+Each token type (`Standard`, `Tax`, `Reflection`) has a different impl address → different `initCodeHash` → independent salt. All three are mined simultaneously.
+
+Expected attempts per type: ~65 536 on average. Typical wall-clock time: < 5 seconds per type on a modern server.
+
+---
+
+### 16.1 Get session result
+
+Returns whatever has been mined so far in the current session. May be partial (some types still running) or complete (all three found). Returns `404` if no session has been started yet.
+
+```bash
+curl 'https://api.1coin.meme/api/v1/salt/0xAbCd...1234'
+```
+
+**Response `200 OK` (complete — all three types found)**
+
+```json
+{
+  "data": {
+    "address": "0xAbCd...1234",
+    "standard": {
+      "salt": "0xdeadbeef000000000000000000000000000000000000000000000042000001",
+      "predictedAddress": "0xF3a8C9e21b4D7f6A3E0B5C8D9F2A1B4C7E0D3F1111",
+      "attempts": 71024
+    },
+    "tax": {
+      "salt": "0xabcdef000000000000000000000000000000000000000000000000cafe0001",
+      "predictedAddress": "0x7B2E4A9C1F6D8E3B0C5A2F7D4E1B8C3A6F9D2E1111",
+      "attempts": 43210
+    },
+    "reflection": {
+      "salt": "0x1234560000000000000000000000000000000000000000000000000beef0001",
+      "predictedAddress": "0x9D1F3C7A4B8E2F6C0A5D3E8B1F4C7A2E9B6D3F1111",
+      "attempts": 88901
+    }
+  }
+}
+```
+
+**Response `404` (no session started)**
+
+```json
+{
+  "statusCode": 404,
+  "message": "No salt session for this address. Open GET /api/v1/salt/:address/stream to start mining."
+}
+```
+
+---
+
+### 16.2 Stream (start fresh mine)
+
+SSE endpoint. Every connection clears any previous result and starts a **fresh mine** across all three token types in parallel. Worker threads are terminated immediately when the client disconnects. Stream completes once all three types are found.
+
+```bash
+curl -N 'https://api.1coin.meme/api/v1/salt/0xAbCd...1234/stream'
+```
+
+**Stream output:**
+
+```
+data: {"type":"progress","tokenType":"Standard","attempts":50000}
+
+data: {"type":"progress","tokenType":"Tax","attempts":50000}
+
+data: {"type":"found","tokenType":"Tax","attempts":43210,"salt":"0xabcdef...","predictedAddress":"0x7B2E...1111"}
+
+data: {"type":"progress","tokenType":"Standard","attempts":100000}
+
+data: {"type":"found","tokenType":"Reflection","attempts":88901,"salt":"0x123456...","predictedAddress":"0x9D1F...1111"}
+
+data: {"type":"found","tokenType":"Standard","attempts":71024,"salt":"0xdeadbeef...","predictedAddress":"0xF3a8...1111"}
+```
+
+Stream closes after the third `found` event.
+
+---
+
+### 16.3 Frontend integration
+
+```typescript
+// Salts keyed by token type — populated as each type is mined.
+const minedSalts: Record<string, { salt: string; predictedAddress: string }> = {};
+
+// On wallet connect — open the stream, mine all 3 types in the background.
+function startSaltMining(walletAddress: string) {
+  const url = `https://api.1coin.meme/api/v1/salt/${walletAddress}/stream`;
+  const evtSource = new EventSource(url);
+
+  evtSource.onmessage = (e) => {
+    const event = JSON.parse(e.data);
+
+    if (event.type === "progress") {
+      console.log(`[${event.tokenType}] Mining... ${event.attempts.toLocaleString()} attempts`);
+    }
+
+    if (event.type === "found") {
+      console.log(`[${event.tokenType}] Salt ready:`, event.salt);
+      minedSalts[event.tokenType] = {
+        salt:             event.salt,
+        predictedAddress: event.predictedAddress,
+      };
+    }
+  };
+
+  evtSource.onerror = () => evtSource.close();
+}
+
+// On token launch — use the salt for the chosen token type.
+function getSaltForLaunch(tokenType: "Standard" | "Tax" | "Reflection") {
+  const result = minedSalts[tokenType];
+  if (!result) throw new Error(`Salt for ${tokenType} not yet mined`);
+  return result.salt; // bytes32 hex — pass to LaunchpadFactory.createToken()
+}
+
+// Alternatively — fetch from backend if local state was lost (e.g. page refresh).
+async function fetchSaltFromBackend(walletAddress: string, tokenType: string) {
+  const res = await fetch(`https://api.1coin.meme/api/v1/salt/${walletAddress}`);
+  if (!res.ok) throw new Error("Salt session not available — open stream to start mining");
+  const { data } = await res.json();
+  return data[tokenType.toLowerCase()]; // { salt, predictedAddress, attempts }
+}
+```
+
+---
+
+## 17. Rate Limit Response
+
 
 When a rate limit is exceeded the API returns **`429 Too Many Requests`**:
 
@@ -1511,7 +1654,7 @@ Limits are keyed by **client IP only** (not IP+path). Rotating token addresses d
 
 ---
 
-## 17. Origin Restriction (403)
+## 18. Origin Restriction (403)
 
 Origin enforcement is handled by **Cloudflare WAF** (see [CLOUDFLARE.md](CLOUDFLARE.md) Step 5.1). Requests whose `Origin` header is not in the configured allowlist are blocked at the edge with a `403` before they reach the API.
 
@@ -1528,7 +1671,7 @@ In local development the app allows all origins — Cloudflare is not in the pat
 
 ---
 
-## 18. Error Shapes
+## 19. Error Shapes
 
 All errors follow the NestJS standard exception shape:
 
