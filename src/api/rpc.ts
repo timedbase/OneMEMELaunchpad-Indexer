@@ -178,6 +178,61 @@ export function priceImpactBps(
   return (diff * 10_000n) / spotPrice;
 }
 
+// ─── PancakeSwap V2 pair helpers ──────────────────────────────────────────────
+
+const PAIR_ABI = parseAbi([
+  "function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)",
+  "function token0() view returns (address)",
+]);
+
+/**
+ * Fetches live price and market cap for a migrated token from its PancakeSwap V2 pair.
+ * Returns null if the call fails (pair not yet created, RPC error, etc.).
+ *
+ * @param pairAddress    PancakeSwap V2 pair contract address
+ * @param tokenAddress   Token contract address (to determine reserve ordering)
+ * @param totalSupplyWei Token total supply in wei (18 decimals)
+ * @returns { priceBnb, marketCapBnb } as decimal strings, or null on failure
+ */
+export async function getPairPrice(
+  pairAddress:    `0x${string}`,
+  tokenAddress:   `0x${string}`,
+  totalSupplyWei: bigint,
+): Promise<{ priceBnb: string; marketCapBnb: string } | null> {
+  try {
+    const client = getClient();
+    const [token0, [reserve0, reserve1]] = await Promise.all([
+      client.readContract({ address: pairAddress, abi: PAIR_ABI, functionName: "token0" }),
+      client.readContract({ address: pairAddress, abi: PAIR_ABI, functionName: "getReserves" }),
+    ]) as [`0x${string}`, [bigint, bigint, number]];
+
+    const isToken0     = token0.toLowerCase() === tokenAddress.toLowerCase();
+    const tokenReserve = isToken0 ? reserve0 : reserve1;
+    const bnbReserve   = isToken0 ? reserve1 : reserve0;
+
+    if (tokenReserve === 0n || bnbReserve === 0n) return null;
+
+    // price (BNB per token) = bnbReserve / tokenReserve, scaled to 18 decimals
+    const SCALE        = BigInt("1000000000000000000");
+    const priceScaled  = (bnbReserve * SCALE) / tokenReserve;
+    const marketCapWei = (bnbReserve * totalSupplyWei) / tokenReserve;
+
+    return {
+      priceBnb:     formatBigDecimal(priceScaled,  18),
+      marketCapBnb: formatBigDecimal(marketCapWei, 18),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatBigDecimal(value: bigint, decimals: number): string {
+  const s       = value.toString().padStart(decimals + 1, "0");
+  const intPart = s.slice(0, -decimals) || "0";
+  const decPart = s.slice(-decimals).replace(/0+$/, "") || "0";
+  return `${intPart}.${decPart}`;
+}
+
 // ─── Token contract helpers ────────────────────────────────────────────────────
 
 const TOKEN_ABI = parseAbi([

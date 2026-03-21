@@ -1,23 +1,29 @@
 import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { sql } from "../../db";
 import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir, toCamel } from "../../helpers";
-import { getMetaURI } from "../../rpc";
+import { getMetaURI, getPairPrice } from "../../rpc";
 import { fetchMetadata } from "../../metadata";
 
 /**
- * Computed price columns using constant-product AMM formula.
- * price_bnb     = (virtualBNB + raisedBNB)² / (virtualBNB × totalSupply)  — BNB per token
- * market_cap_bnb = (virtualBNB + raisedBNB)² / (virtualBNB × 1e18)        — total BNB market cap
- * NULL for migrated tokens (price lives on PancakeSwap).
+ * Computed price columns — requires token alias `t` and migration LEFT JOIN alias `m`.
+ *
+ * Bonding curve tokens: constant-product AMM formula from virtualBNB/raisedBNB/totalSupply.
+ * Migrated tokens:      migration-time liquidity (liquidity_bnb / liquidity_tokens).
+ *                       findOne() overrides this with a live PancakeSwap getReserves() call.
  */
 const PRICE_COLS = sql`
-  CASE WHEN migrated THEN NULL
-    ELSE ((virtual_bnb::numeric + raised_bnb::numeric)^2
-          / NULLIF(virtual_bnb::numeric * total_supply::numeric, 0))::text
+  CASE
+    WHEN t.migrated
+      THEN (m.liquidity_bnb::numeric / NULLIF(m.liquidity_tokens::numeric, 0))::text
+    ELSE ((t.virtual_bnb::numeric + t.raised_bnb::numeric)^2
+          / NULLIF(t.virtual_bnb::numeric * t.total_supply::numeric, 0))::text
   END AS price_bnb,
-  CASE WHEN migrated THEN NULL
-    ELSE ((virtual_bnb::numeric + raised_bnb::numeric)^2
-          / NULLIF(virtual_bnb::numeric, 0) / 1e18)::text
+  CASE
+    WHEN t.migrated
+      THEN (m.liquidity_bnb::numeric * t.total_supply::numeric
+            / NULLIF(m.liquidity_tokens::numeric, 0) / 1e18)::text
+    ELSE ((t.virtual_bnb::numeric + t.raised_bnb::numeric)^2
+          / NULLIF(t.virtual_bnb::numeric, 0) / 1e18)::text
   END AS market_cap_bnb
 `;
 
@@ -34,11 +40,11 @@ export class TokensService {
     const orderDir = parseOrderDir(query);
 
     const migratedFilter =
-      migrated === "true"  ? sql`AND migrated = TRUE`  :
-      migrated === "false" ? sql`AND migrated = FALSE` :
+      migrated === "true"  ? sql`AND t.migrated = TRUE`  :
+      migrated === "false" ? sql`AND t.migrated = FALSE` :
       sql``;
 
-    const typeFilter = type ? sql`AND token_type = ${type}` : sql``;
+    const typeFilter = type ? sql`AND t.token_type = ${type}` : sql``;
 
     const ALLOWED_TYPES = new Set(["Standard", "Tax", "Reflection"]);
     if (type && !ALLOWED_TYPES.has(type)) {
@@ -51,7 +57,7 @@ export class TokensService {
       : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
 
     const [rows, [{ count }]] = await Promise.all([
-      sql`SELECT *, ${PRICE_COLS} FROM token WHERE TRUE ${typeFilter} ${migratedFilter} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,
+      sql`SELECT t.*, ${PRICE_COLS} FROM token t LEFT JOIN migration m ON m.id = t.id WHERE TRUE ${typeFilter} ${migratedFilter} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,
       sql`SELECT COUNT(*)::int AS count FROM token WHERE TRUE ${typeFilter} ${migratedFilter}`,
     ]);
 
@@ -62,10 +68,24 @@ export class TokensService {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
 
     const addr = normalizeAddress(address);
-    const [row] = await sql`SELECT *, ${PRICE_COLS} FROM token WHERE id = ${addr}`;
+    const [row] = await sql`SELECT t.*, ${PRICE_COLS} FROM token t LEFT JOIN migration m ON m.id = t.id WHERE t.id = ${addr}`;
     if (!row) throw new NotFoundException(`Token ${address} not found`);
 
     const camelRow = toCamel(row);
+
+    // Override with live PancakeSwap price for migrated tokens.
+    if (camelRow.migrated && camelRow.pairAddress) {
+      const live = await getPairPrice(
+        camelRow.pairAddress  as `0x${string}`,
+        addr                  as `0x${string}`,
+        BigInt(camelRow.totalSupply as string),
+      );
+      if (live) {
+        camelRow.priceBnb     = live.priceBnb;
+        camelRow.marketCapBnb = live.marketCapBnb;
+      }
+    }
+
     const metaURI  = await getMetaURI(addr as `0x${string}`);
     const metadata = metaURI ? await fetchMetadata(metaURI) : null;
 
@@ -187,7 +207,7 @@ export class TokensService {
     const addr = normalizeAddress(address);
 
     const [rows, [{ count }]] = await Promise.all([
-      sql`SELECT *, ${PRICE_COLS} FROM token WHERE creator = ${addr} ORDER BY created_at_block::numeric DESC LIMIT ${limit} OFFSET ${offset}`,
+      sql`SELECT t.*, ${PRICE_COLS} FROM token t LEFT JOIN migration m ON m.id = t.id WHERE t.creator = ${addr} ORDER BY t.created_at_block::numeric DESC LIMIT ${limit} OFFSET ${offset}`,
       sql`SELECT COUNT(*)::int AS count FROM token WHERE creator = ${addr}`,
     ]);
 
