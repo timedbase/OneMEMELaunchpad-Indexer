@@ -2,6 +2,7 @@
  * Activity feed controller
  *
  * GET /api/v1/activity           Paginated unified create/buy/sell feed
+ * GET /api/v1/activity/marquee   Last 15 events (flat array, no pagination wrapper) — for header marquee
  * GET /api/v1/activity/stream    Server-Sent Events (SSE) real-time push
  *
  * The SSE endpoint uses RxJS Observable — NestJS serialises each emitted
@@ -26,6 +27,12 @@ const KEEPALIVE_MS = 15_000;
 @Controller("activity")
 export class ActivityController {
   constructor(private readonly activity: ActivityService) {}
+
+  /** GET /api/v1/activity/marquee — last 15 events, flat array, no pagination wrapper */
+  @Get("marquee")
+  async marquee() {
+    return this.activity.query({ limit: 15, offset: 0 });
+  }
 
   /** GET /api/v1/activity */
   @Get()
