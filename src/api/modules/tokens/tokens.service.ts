@@ -4,6 +4,23 @@ import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, 
 import { getMetaURI } from "../../rpc";
 import { fetchMetadata } from "../../metadata";
 
+/**
+ * Computed price columns using constant-product AMM formula.
+ * price_bnb     = (virtualBNB + raisedBNB)² / (virtualBNB × totalSupply)  — BNB per token
+ * market_cap_bnb = (virtualBNB + raisedBNB)² / (virtualBNB × 1e18)        — total BNB market cap
+ * NULL for migrated tokens (price lives on PancakeSwap).
+ */
+const PRICE_COLS = sql`
+  CASE WHEN migrated THEN NULL
+    ELSE ((virtual_bnb::numeric + raised_bnb::numeric)^2
+          / NULLIF(virtual_bnb::numeric * total_supply::numeric, 0))::text
+  END AS price_bnb,
+  CASE WHEN migrated THEN NULL
+    ELSE ((virtual_bnb::numeric + raised_bnb::numeric)^2
+          / NULLIF(virtual_bnb::numeric, 0) / 1e18)::text
+  END AS market_cap_bnb
+`;
+
 @Injectable()
 export class TokensService {
 
@@ -34,7 +51,7 @@ export class TokensService {
       : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
 
     const [rows, [{ count }]] = await Promise.all([
-      sql`SELECT * FROM token WHERE TRUE ${typeFilter} ${migratedFilter} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,
+      sql`SELECT *, ${PRICE_COLS} FROM token WHERE TRUE ${typeFilter} ${migratedFilter} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,
       sql`SELECT COUNT(*)::int AS count FROM token WHERE TRUE ${typeFilter} ${migratedFilter}`,
     ]);
 
@@ -45,7 +62,7 @@ export class TokensService {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
 
     const addr = normalizeAddress(address);
-    const [row] = await sql`SELECT * FROM token WHERE id = ${addr}`;
+    const [row] = await sql`SELECT *, ${PRICE_COLS} FROM token WHERE id = ${addr}`;
     if (!row) throw new NotFoundException(`Token ${address} not found`);
 
     const camelRow = toCamel(row);
@@ -170,7 +187,7 @@ export class TokensService {
     const addr = normalizeAddress(address);
 
     const [rows, [{ count }]] = await Promise.all([
-      sql`SELECT * FROM token WHERE creator = ${addr} ORDER BY created_at_block::numeric DESC LIMIT ${limit} OFFSET ${offset}`,
+      sql`SELECT *, ${PRICE_COLS} FROM token WHERE creator = ${addr} ORDER BY created_at_block::numeric DESC LIMIT ${limit} OFFSET ${offset}`,
       sql`SELECT COUNT(*)::int AS count FROM token WHERE creator = ${addr}`,
     ]);
 
