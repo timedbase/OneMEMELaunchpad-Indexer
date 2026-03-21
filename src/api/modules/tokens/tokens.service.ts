@@ -3,6 +3,7 @@ import { sql } from "../../db";
 import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir, toCamel } from "../../helpers";
 import { getMetaURI, getPairPrice } from "../../rpc";
 import { fetchMetadata } from "../../metadata";
+import { PriceService } from "../price/price.service";
 
 /**
  * Computed price columns — requires token alias `t` and migration LEFT JOIN alias `m`.
@@ -29,6 +30,16 @@ const PRICE_COLS = sql`
 
 @Injectable()
 export class TokensService {
+  constructor(private readonly price: PriceService) {}
+
+  private withUsd<T extends Record<string, unknown>>(row: T): T & { marketCapUsd: string | null } {
+    const bnbPrice = this.price.getPrice()?.bnbUsdt ?? null;
+    const mcBnb    = row["marketCapBnb"] as string | null;
+    const mcUsd    = (bnbPrice !== null && mcBnb !== null)
+      ? (parseFloat(mcBnb) * bnbPrice).toFixed(2)
+      : null;
+    return { ...row, marketCapUsd: mcUsd };
+  }
 
   async list(query: Record<string, string | undefined>) {
     const { page, limit, offset } = parsePagination(query);
@@ -61,7 +72,7 @@ export class TokensService {
       sql`SELECT COUNT(*)::int AS count FROM token WHERE TRUE ${typeFilter} ${migratedFilter}`,
     ]);
 
-    return paginated(rows.map(toCamel), count, page, limit);
+    return paginated(rows.map(r => this.withUsd(toCamel(r))), count, page, limit);
   }
 
   async findOne(address: string) {
@@ -89,7 +100,7 @@ export class TokensService {
     const metaURI  = await getMetaURI(addr as `0x${string}`);
     const metadata = metaURI ? await fetchMetadata(metaURI) : null;
 
-    return { data: { ...camelRow, metaURI: metaURI || null, metadata: metadata ?? null } };
+    return { data: { ...this.withUsd(camelRow), metaURI: metaURI || null, metadata: metadata ?? null } };
   }
 
   async trades(address: string, query: Record<string, string | undefined>) {
@@ -211,6 +222,6 @@ export class TokensService {
       sql`SELECT COUNT(*)::int AS count FROM token WHERE creator = ${addr}`,
     ]);
 
-    return paginated(rows.map(toCamel), count, page, limit);
+    return paginated(rows.map(r => this.withUsd(toCamel(r))), count, page, limit);
   }
 }
