@@ -39,7 +39,11 @@ async function bootstrap() {
   app.useWebSocketAdapter(new WsAdapter(app));
 
   // ── Global route prefix ────────────────────────────────────────────────────
-  app.setGlobalPrefix("api/v1", { exclude: ["/health"] });
+  // CHAIN_SLUG identifies the network (e.g. "bsc", "eth", "polygon").
+  // All routes become /api/v1/<chain>/... — ready for multi-chain deployments.
+  const chainSlug = process.env.CHAIN_SLUG ?? "bsc";
+  const apiPrefix = `api/v1/${chainSlug}`;
+  app.setGlobalPrefix(apiPrefix, { exclude: ["/health"] });
 
   // ── CORS ───────────────────────────────────────────────────────────────────
   // Origin enforcement is handled by Cloudflare WAF — no in-app allowlist needed.
@@ -60,10 +64,11 @@ async function bootstrap() {
   OneMEME Launchpad API  (NestJS)
   ─────────────────────────────────────────────────
   Listening   : ${protocol}://localhost:${port}
-  Route index : ${protocol}://localhost:${port}/api/v1
+  Chain       : ${chainSlug}
+  Route index : ${protocol}://localhost:${port}/${apiPrefix}
   Health      : ${protocol}://localhost:${port}/health
-  Activity WS : ${httpsOptions ? "wss" : "ws"}://localhost:${port}/api/v1/activity/ws
-  Chat WS     : ${httpsOptions ? "wss" : "ws"}://localhost:${port}/api/v1/chat/ws
+  Activity WS : ${httpsOptions ? "wss" : "ws"}://localhost:${port}/${apiPrefix}/activity/ws
+  Chat WS     : ${httpsOptions ? "wss" : "ws"}://localhost:${port}/${apiPrefix}/chat/ws
 
   Rate limits (per IP / per minute):
     /quote/*  → 20   (live BSC RPC)
