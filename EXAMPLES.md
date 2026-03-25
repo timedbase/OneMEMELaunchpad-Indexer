@@ -1158,7 +1158,7 @@ async function launchToken(
   tokenType: "Standard" | "Tax" | "Reflection",
   imageFile: File,
   metadata: { name: string; symbol: string; description: string },
-  salt: `0x${string}`, // bytes32 userSalt from CREATE2 pre-computation
+  salt: `0x${string}`, // bytes32 salt passed to the factory
 ) {
   // 1. Upload metadata to IPFS
   const { metaURI } = await uploadMetadata(imageFile, metadata);
