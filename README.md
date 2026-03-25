@@ -155,7 +155,7 @@ The AMM spot price at any snapshot: `(virtualBNB + raisedBNB)² / (virtualBNB ×
 
 **Base URL:** `https://api.1coin.meme/api/v1/bsc`
 
-The chain slug (`bsc`) is controlled by the `CHAIN_SLUG` environment variable, making it straightforward to deploy the same codebase for additional chains.
+The `bsc` segment is the chain slug, set via the `CHAIN_SLUG` environment variable (default: `bsc`). All routes are served under `/api/v1/<chain>/` — deploying a second chain means spinning up a new instance with a different `CHAIN_SLUG`.
 
 All paginated endpoints return:
 ```json
@@ -175,10 +175,10 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 
 ### Rate Limits
 
-| Route | Limit |
+| Route pattern | Limit |
 |---|---|
-| `/tokens/*/quote/*` | 20 req / min (live RPC) |
-| `/stats` | 10 req / min (heavy aggregation) |
+| `/api/v1/{chain}/tokens/*/quote/*` | 20 req / min (live RPC) |
+| `/api/v1/{chain}/stats` | 10 req / min (heavy aggregation) |
 | Everything else | 60 req / min |
 
 ---
@@ -187,7 +187,7 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Liveness check |
+| `GET` | `/health` | Liveness check (not chain-scoped) |
 
 ---
 
@@ -195,18 +195,18 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/tokens` | Paginated token list with pricing |
-| `GET` | `/tokens/:address` | Single token — live PancakeSwap price if migrated |
-| `GET` | `/tokens/:address/trades` | Trades for a token |
-| `GET` | `/tokens/:address/traders` | Per-trader stats for a token |
-| `GET` | `/tokens/:address/holders` | Token holder balances |
-| `GET` | `/tokens/:address/migration` | Migration details (404 if not migrated) |
-| `GET` | `/tokens/:address/snapshots` | Per-block bonding-curve history with AMM price |
-| `GET` | `/tokens/:address/quote/price` | Live bonding-curve spot price (RPC) |
-| `GET` | `/tokens/:address/quote/buy` | Buy quote with price impact (RPC) |
-| `GET` | `/tokens/:address/quote/sell` | Sell quote with price impact (RPC) |
+| `GET` | `/api/v1/{chain}/tokens` | Paginated token list with pricing |
+| `GET` | `/api/v1/{chain}/tokens/:address` | Single token — live PancakeSwap price if migrated |
+| `GET` | `/api/v1/{chain}/tokens/:address/trades` | Trades for a token |
+| `GET` | `/api/v1/{chain}/tokens/:address/traders` | Per-trader stats for a token |
+| `GET` | `/api/v1/{chain}/tokens/:address/holders` | Token holder balances |
+| `GET` | `/api/v1/{chain}/tokens/:address/migration` | Migration details (404 if not migrated) |
+| `GET` | `/api/v1/{chain}/tokens/:address/snapshots` | Per-block bonding-curve history with AMM price |
+| `GET` | `/api/v1/{chain}/tokens/:address/quote/price` | Live bonding-curve spot price (RPC) |
+| `GET` | `/api/v1/{chain}/tokens/:address/quote/buy` | Buy quote with price impact (RPC) |
+| `GET` | `/api/v1/{chain}/tokens/:address/quote/sell` | Sell quote with price impact (RPC) |
 
-**`GET /tokens` query params:**
+**`GET /api/v1/{chain}/tokens` query params:**
 
 | Param | Default | Description |
 |---|---|---|
@@ -226,7 +226,7 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 | `marketCapBnb` | `priceBnb × totalSupply` in BNB |
 | `marketCapUsd` | `marketCapBnb × bnbSpotPrice` (2 decimal string) |
 
-**`GET /tokens/:address/trades` query params:**
+**`GET /api/v1/{chain}/tokens/:address/trades` query params:**
 
 | Param | Default | Description |
 |---|---|---|
@@ -236,7 +236,7 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 | `orderBy` | `timestamp` | `timestamp` \| `bnb_amount` \| `token_amount` \| `block_number` |
 | `orderDir` | `desc` | `asc` \| `desc` |
 
-**`GET /tokens/:address/traders` query params:**
+**`GET /api/v1/{chain}/tokens/:address/traders` query params:**
 
 | Param | Default | Description |
 |---|---|---|
@@ -244,21 +244,21 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 | `orderBy` | `totalVolumeBNB` | `totalVolumeBNB` \| `totalTrades` \| `buyCount` \| `sellCount` \| `netBNB` |
 | `orderDir` | `desc` | `asc` \| `desc` |
 
-**`GET /tokens/:address/snapshots` query params:**
+**`GET /api/v1/{chain}/tokens/:address/snapshots` query params:**
 
 | Param | Default | Description |
 |---|---|---|
 | `page` / `limit` | 1 / 100 | Pagination |
 | `from` / `to` | — | Unix timestamp range |
 
-**`GET /tokens/:address/quote/buy` query params:**
+**`GET /api/v1/{chain}/tokens/:address/quote/buy` query params:**
 
 | Param | Required | Description |
 |---|---|---|
 | `bnbIn` | Yes | BNB input in wei |
 | `slippage` | No | Basis points (default `100` = 1%) |
 
-**`GET /tokens/:address/quote/sell` query params:**
+**`GET /api/v1/{chain}/tokens/:address/quote/sell` query params:**
 
 | Param | Required | Description |
 |---|---|---|
@@ -271,8 +271,8 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/creators/:address/tokens` | Tokens launched by this address (includes pricing) |
-| `GET` | `/creators/:address/vesting` | Vesting schedules for this creator |
+| `GET` | `/api/v1/{chain}/creators/:address/tokens` | Tokens launched by this address (includes pricing) |
+| `GET` | `/api/v1/{chain}/creators/:address/vesting` | Vesting schedules for this creator |
 
 ---
 
@@ -280,8 +280,8 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/trades` | All trades, paginated |
-| `GET` | `/traders/:address/trades` | All trades by a specific wallet |
+| `GET` | `/api/v1/{chain}/trades` | All trades, paginated |
+| `GET` | `/api/v1/{chain}/traders/:address/trades` | All trades by a specific wallet |
 
 ---
 
@@ -289,7 +289,7 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/migrations` | All migration events, paginated |
+| `GET` | `/api/v1/{chain}/migrations` | All migration events, paginated |
 
 ---
 
@@ -297,11 +297,11 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/activity` | Last 15 create/buy/sell events — flat array for header marquee |
-| `GET` | `/activity/stream` | SSE — pushes new events as they are indexed |
-| `WS` | `/activity/ws` | WebSocket — same real-time feed |
+| `GET` | `/api/v1/{chain}/activity` | Last 15 create/buy/sell events — flat array for header marquee |
+| `GET` | `/api/v1/{chain}/activity/stream` | SSE — pushes new events as they are indexed |
+| `WS` | `/api/v1/{chain}/activity/ws` | WebSocket — same real-time feed |
 
-**`GET /activity/stream` / WS query params:**
+**`GET /api/v1/{chain}/activity/stream` / WS query params:**
 
 | Param | Description |
 |---|---|
@@ -334,12 +334,12 @@ WebSocket sends `{ event: "activity", data: "<JSON string>" }`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/discover/trending` | Tokens with the most trades in a recent window |
-| `GET` | `/discover/new` | Newest non-migrated tokens |
-| `GET` | `/discover/bonding` | Active bonding-curve tokens sorted by `raisedBNB` |
-| `GET` | `/discover/migrated` | Migrated tokens with liquidity details |
+| `GET` | `/api/v1/{chain}/discover/trending` | Tokens with the most trades in a recent window |
+| `GET` | `/api/v1/{chain}/discover/new` | Newest non-migrated tokens |
+| `GET` | `/api/v1/{chain}/discover/bonding` | Active bonding-curve tokens sorted by `raisedBNB` |
+| `GET` | `/api/v1/{chain}/discover/migrated` | Migrated tokens with liquidity details |
 
-**`GET /discover/trending` query params:**
+**`GET /api/v1/{chain}/discover/trending` query params:**
 
 | Param | Default | Description |
 |---|---|---|
@@ -348,14 +348,14 @@ WebSocket sends `{ event: "activity", data: "<JSON string>" }`.
 
 Trending objects include: `recentTrades`, `recentBuys`, `recentSells`, `recentVolumeBNB`.
 
-**`GET /discover/new` / `/discover/bonding` query params:**
+**`GET /api/v1/{chain}/discover/new` / `/api/v1/{chain}/discover/bonding` query params:**
 
 | Param | Description |
 |---|---|
 | `type` | `Standard` \| `Tax` \| `Reflection` |
 | `page` / `limit` | Pagination |
 
-**`GET /discover/migrated` query params:**
+**`GET /api/v1/{chain}/discover/migrated` query params:**
 
 | Param | Default | Description |
 |---|---|---|
@@ -369,7 +369,7 @@ Trending objects include: `recentTrades`, `recentBuys`, `recentSells`, `recentVo
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/stats` | Platform-wide aggregated statistics |
+| `GET` | `/api/v1/{chain}/stats` | Platform-wide aggregated statistics |
 
 Returns: `totalTokens`, `migratedTokens`, `activeTokens`, `tokensByType`, `totalTrades`, `totalBuys`, `totalSells`, `uniqueTraders`, `totalVolumeBNB`, `totalLiquidityBNB`, `topTokenByVolume`.
 
@@ -379,10 +379,10 @@ Returns: `totalTokens`, `migratedTokens`, `activeTokens`, `tokensByType`, `total
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/leaderboard/tokens` | Tokens ranked by trading activity |
-| `GET` | `/leaderboard/creators` | Creators ranked by tokens launched and BNB raised |
-| `GET` | `/leaderboard/traders` | Traders ranked by BNB volume |
-| `GET` | `/leaderboard/users` | Combined traders + creators |
+| `GET` | `/api/v1/{chain}/leaderboard/tokens` | Tokens ranked by trading activity |
+| `GET` | `/api/v1/{chain}/leaderboard/creators` | Creators ranked by tokens launched and BNB raised |
+| `GET` | `/api/v1/{chain}/leaderboard/traders` | Traders ranked by BNB volume |
+| `GET` | `/api/v1/{chain}/leaderboard/users` | Combined traders + creators |
 
 **Common query params:**
 
@@ -391,7 +391,7 @@ Returns: `totalTokens`, `migratedTokens`, `activeTokens`, `tokensByType`, `total
 | `period` | `alltime` | `1d` \| `7d` \| `30d` \| `alltime` |
 | `page` / `limit` | 1 / 20 | Pagination |
 
-**`GET /leaderboard/tokens` additional param:**
+**`GET /api/v1/{chain}/leaderboard/tokens` additional param:**
 
 | Param | Default | Description |
 |---|---|---|
@@ -403,15 +403,15 @@ Returns: `totalTokens`, `migratedTokens`, `activeTokens`, `tokensByType`, `total
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/charts/config` | UDF configuration |
-| `GET` | `/charts/time` | Server unix timestamp |
-| `GET` | `/charts/symbols?symbol=:address` | Symbol metadata |
-| `GET` | `/charts/history` | OHLCV bars |
-| `GET` | `/charts/search?query=:addr` | Symbol search |
+| `GET` | `/api/v1/{chain}/charts/config` | UDF configuration |
+| `GET` | `/api/v1/{chain}/charts/time` | Server unix timestamp |
+| `GET` | `/api/v1/{chain}/charts/symbols?symbol=:address` | Symbol metadata |
+| `GET` | `/api/v1/{chain}/charts/history` | OHLCV bars |
+| `GET` | `/api/v1/{chain}/charts/search?query=:addr` | Symbol search |
 
 OHLCV price is computed from the bonding-curve AMM formula using `token_snapshot` data — not raw per-trade ratios. This gives accurate market price at each point in time.
 
-**`GET /charts/history` query params:**
+**`GET /api/v1/{chain}/charts/history` query params:**
 
 | Param | Required | Description |
 |---|---|---|
@@ -427,8 +427,8 @@ OHLCV price is computed from the bonding-curve AMM formula using `token_snapshot
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/vesting/:token` | Vesting schedule for a specific token |
-| `GET` | `/creators/:address/vesting` | All vesting schedules for a creator |
+| `GET` | `/api/v1/{chain}/vesting/:token` | Vesting schedule for a specific token |
+| `GET` | `/api/v1/{chain}/creators/:address/vesting` | All vesting schedules for a creator |
 
 Responses include computed fields: `claimable` (currently unlocked and unclaimed), `vestingEnds` (unix timestamp), `progressPct` (0–100).
 
@@ -438,17 +438,9 @@ Responses include computed fields: `claimable` (currently unlocked and unclaimed
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/price/bnb` | BNB/USDT aggregated from 6 exchanges |
+| `GET` | `/api/v1/{chain}/price/bnb` | BNB/USDT aggregated from 6 exchanges |
 
 Sources: Binance, OKX, Bybit, CoinGecko, MEXC, GateIO. Refreshed every 10 seconds. Returns trimmed average with per-source breakdown.
-
----
-
-### Stats
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/stats` | Platform-wide aggregated statistics |
 
 ---
 
@@ -456,7 +448,7 @@ Sources: Binance, OKX, Bybit, CoinGecko, MEXC, GateIO. Refreshed every 10 second
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/chat/:token/messages` | Last 50 messages for a token (oldest-first) |
+| `GET` | `/api/v1/{chain}/chat/:token/messages` | Last 50 messages for a token (oldest-first) |
 
 ---
 
@@ -464,7 +456,7 @@ Sources: Binance, OKX, Bybit, CoinGecko, MEXC, GateIO. Refreshed every 10 second
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/metadata/upload` | Pin token metadata and image to IPFS via Pinata |
+| `POST` | `/api/v1/{chain}/metadata/upload` | Pin token metadata and image to IPFS via Pinata |
 
 **Form fields (`multipart/form-data`):**
 
@@ -532,20 +524,20 @@ npm run api:dev        # API (separate terminal)
 │       ├── helpers.ts
 │       ├── metadata.ts
 │       └── modules/
-│           ├── tokens/          # /tokens, /creators/:addr/tokens
-│           ├── trades/          # /trades, /traders/:addr/trades
-│           ├── migrations/      # /migrations
-│           ├── activity/        # GET + SSE + WebSocket gateway
-│           ├── discover/        # trending / new / bonding / migrated
-│           ├── stats/           # /stats
-│           ├── charts/          # TradingView UDF
-│           ├── quotes/          # /tokens/:addr/quote/*
-│           ├── price/           # /price/bnb
-│           ├── leaderboard/     # /leaderboard/*
-│           ├── vesting/         # /vesting/:token, /creators/:addr/vesting
-│           ├── chat/            # /chat/:token/messages
-│           ├── upload/          # /metadata/upload
-│           └── index/           # GET /api/v1/<chain> route index
+│           ├── tokens/          # /api/v1/{chain}/tokens, /creators/:addr/tokens
+│           ├── trades/          # /api/v1/{chain}/trades, /traders/:addr/trades
+│           ├── migrations/      # /api/v1/{chain}/migrations
+│           ├── activity/        # /api/v1/{chain}/activity — GET + SSE + WebSocket
+│           ├── discover/        # /api/v1/{chain}/discover/*
+│           ├── stats/           # /api/v1/{chain}/stats
+│           ├── charts/          # /api/v1/{chain}/charts/* — TradingView UDF
+│           ├── quotes/          # /api/v1/{chain}/tokens/:addr/quote/*
+│           ├── price/           # /api/v1/{chain}/price/bnb
+│           ├── leaderboard/     # /api/v1/{chain}/leaderboard/*
+│           ├── vesting/         # /api/v1/{chain}/vesting/:token, /creators/:addr/vesting
+│           ├── chat/            # /api/v1/{chain}/chat/:token/messages
+│           ├── upload/          # /api/v1/{chain}/metadata/upload
+│           └── index/           # GET /api/v1/{chain} — route index
 ├── ponder.config.ts
 ├── ponder.schema.ts
 ├── docker-compose.yml
