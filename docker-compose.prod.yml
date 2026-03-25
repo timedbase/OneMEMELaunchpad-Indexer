@@ -30,6 +30,7 @@ services:
 
     volumes:
       - ponder_data:/app/.ponder    # Ponder checkpoint + cache (persistent)
+      - /etc/ssl/onememe:/etc/ssl/onememe:ro   # Cloudflare origin cert (host → container)
 
     # Healthcheck hits the NestJS /health endpoint
     healthcheck:
