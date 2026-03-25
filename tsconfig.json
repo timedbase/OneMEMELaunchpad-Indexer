@@ -10,12 +10,8 @@
     "resolveJsonModule": true,
     "skipLibCheck":      true,
     "outDir":            "dist",
-    "baseUrl":           ".",
-    "paths": {
-      "ponder:registry": [".ponder/registry.d.ts"],
-      "ponder:schema":   [".ponder/schema.d.ts"]
-    }
+    "baseUrl":           "."
   },
-  "include": ["src", "ponder.config.ts", "ponder.schema.ts", "abis"],
+  "include": ["src", "ponder.config.ts", "ponder.schema.ts", "ponder-env.d.ts", "abis/**/*.ts"],
   "exclude": ["node_modules", "dist", ".ponder"]
 }

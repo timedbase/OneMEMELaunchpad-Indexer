@@ -1,16 +1,11 @@
 import { createConfig, factory } from "ponder";
 import { fallback, http, webSocket } from "viem";
-import type { Abi, AbiEvent } from "viem";
+import type { AbiEvent } from "viem";
 
-import LaunchpadFactoryAbiRaw from "./abis/LaunchpadFactory.json";
-import BondingCurveAbiRaw     from "./abis/BondingCurve.json";
-import ERC20AbiRaw            from "./abis/ERC20.json";
-import VestingWalletAbiRaw    from "./abis/VestingWallet.json";
-
-const LaunchpadFactoryAbi = LaunchpadFactoryAbiRaw as Abi;
-const BondingCurveAbi     = BondingCurveAbiRaw     as Abi;
-const ERC20Abi            = ERC20AbiRaw            as Abi;
-const VestingWalletAbi    = VestingWalletAbiRaw    as Abi;
+import LaunchpadFactoryAbi from "./abis/LaunchpadFactory";
+import BondingCurveAbi     from "./abis/BondingCurve";
+import ERC20Abi            from "./abis/ERC20";
+import VestingWalletAbi    from "./abis/VestingWallet";
 
 /**
  * Ponder configuration for the OneMEME Launchpad Indexer.
@@ -60,7 +55,7 @@ const transports = [
 
 // Locate the TokenCreated event in the factory ABI for the factory() helper.
 // Cast to AbiEvent after the runtime check — the JSON shape is compatible.
-const tokenCreatedRaw = LaunchpadFactoryAbiRaw.find(
+const tokenCreatedRaw = LaunchpadFactoryAbi.find(
   (e) => "type" in e && e.type === "event" && "name" in e && e.name === "TokenCreated",
 );
 if (!tokenCreatedRaw) throw new Error("TokenCreated event not found in LaunchpadFactory ABI");
