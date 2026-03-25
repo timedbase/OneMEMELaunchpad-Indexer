@@ -15,76 +15,30 @@
 
 import { ponder } from "ponder:registry";
 import * as schema from "ponder:schema";
-import type { PublicClient } from "viem";
-import LaunchpadFactoryAbi from "../abis/LaunchpadFactory.json";
+import { keccak256, toBytes } from "viem";
 
-// ─── Implementation address cache ─────────────────────────────────────────────
-// The factory's impl addresses never change after deployment. We read them once
-// on the first TokenCreated event and reuse the result for all subsequent ones.
+// ─── Token type from calldata ──────────────────────────────────────────────────
+// The factory has three creation functions, one per token type:
+//   createToken((string,string,uint8,bool,bool,uint256,string,bytes32)) → Standard
+//   createTT((string,string,string,uint8,bool,bool,uint256,bytes32))    → Tax
+//   createRFL((string,string,string,uint8,bool,bool,uint256,bytes32))   → Reflection
+//
+// The function selector (first 4 bytes of calldata) uniquely identifies which
+// was called — no RPC calls needed.
 
-type ImplAddresses = { standard: string; tax: string; reflection: string };
-const implCache = new Map<string, ImplAddresses>();
-
-/**
- * Reads standardImpl / taxImpl / reflectionImpl from the factory contract.
- * Results are cached in-process — only 3 RPC calls total per indexer run.
- */
-async function getFactoryImpls(factoryAddress: string, client: PublicClient): Promise<ImplAddresses | null> {
-  if (implCache.has(factoryAddress)) return implCache.get(factoryAddress)!;
-  try {
-    const addr = factoryAddress as `0x${string}`;
-    const [standard, tax, reflection] = await Promise.all([
-      client.readContract({ abi: LaunchpadFactoryAbi, address: addr, functionName: "standardImpl" }),
-      client.readContract({ abi: LaunchpadFactoryAbi, address: addr, functionName: "taxImpl" }),
-      client.readContract({ abi: LaunchpadFactoryAbi, address: addr, functionName: "reflectionImpl" }),
-    ]) as [string, string, string];
-    const result: ImplAddresses = {
-      standard:   standard.toLowerCase(),
-      tax:        tax.toLowerCase(),
-      reflection: reflection.toLowerCase(),
-    };
-    implCache.set(factoryAddress, result);
-    return result;
-  } catch {
-    return null;
-  }
+function makeSelector(sig: string): string {
+  return keccak256(toBytes(sig)).slice(0, 10).toLowerCase();
 }
 
-/**
- * Extracts the implementation address from an EIP-1167 minimal proxy's bytecode.
- *
- * EIP-1167 layout (36 bytes):
- *   363d3d373d3d3d363d73  ← 10-byte prefix
- *   {20-byte-impl}        ← bytes 10–29
- *   5af43d82803e903d91602b57fd5bf3  ← 15-byte suffix
- *
- * The hex-encoded bytecode string (without 0x) has the impl at chars 20–59.
- */
-function implFromBytecode(bytecode: string): string | null {
-  // bytecode includes "0x" prefix → impl starts at char 22 (2 + 20)
-  if (!bytecode || bytecode.length < 62) return null;
-  return `0x${bytecode.slice(22, 62)}`.toLowerCase();
-}
+const SELECTOR_STANDARD   = makeSelector("createToken((string,string,uint8,bool,bool,uint256,string,bytes32))");
+const SELECTOR_TAX        = makeSelector("createTT((string,string,string,uint8,bool,bool,uint256,bytes32))");
+const SELECTOR_REFLECTION = makeSelector("createRFL((string,string,string,uint8,bool,bool,uint256,bytes32))");
 
-/**
- * Returns "Standard" | "Tax" | "Reflection" | null by comparing the token's
- * EIP-1167 implementation against the factory's known impl addresses.
- */
-async function resolveTokenType(
-  tokenAddress: string,
-  factoryAddress: string,
-  client: PublicClient,
-): Promise<string | null> {
-  const [bytecode, impls] = await Promise.all([
-    client.getCode({ address: tokenAddress as `0x${string}` }).catch(() => null),
-    getFactoryImpls(factoryAddress, client),
-  ]);
-  if (!bytecode || !impls) return null;
-  const impl = implFromBytecode(bytecode);
-  if (!impl) return null;
-  if (impl === impls.standard)   return "Standard";
-  if (impl === impls.tax)        return "Tax";
-  if (impl === impls.reflection) return "Reflection";
+function tokenTypeFromCalldata(input: `0x${string}`): string | null {
+  const sel = input.slice(0, 10).toLowerCase();
+  if (sel === SELECTOR_STANDARD)   return "Standard";
+  if (sel === SELECTOR_TAX)        return "Tax";
+  if (sel === SELECTOR_REFLECTION) return "Reflection";
   return null;
 }
 
@@ -95,13 +49,13 @@ async function resolveTokenType(
  * Initialises the Token row and zeroes out all running aggregates.
  *
  * virtualBNB and migrationTarget are included directly in the event.
- * tokenType is derived from the token's EIP-1167 implementation bytecode.
+ * tokenType is derived from the factory function selector in the creation calldata.
  */
 ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
   const { token, creator, totalSupply, virtualBNB, migrationTarget, antibotEnabled, tradingBlock } =
     event.args;
 
-  const tokenType = await resolveTokenType(token, event.log.address, context.client);
+  const tokenType = tokenTypeFromCalldata(event.transaction.input);
 
   await context.db.insert(schema.token).values({
     id:                 token,

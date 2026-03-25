@@ -14,6 +14,63 @@
   },
   {
     "type": "function",
+    "name": "createToken",
+    "stateMutability": "payable",
+    "inputs": [{
+      "name": "p", "type": "tuple",
+      "components": [
+        { "name": "name",               "type": "string"  },
+        { "name": "symbol",             "type": "string"  },
+        { "name": "supplyOption",       "type": "uint8"   },
+        { "name": "enableCreatorAlloc", "type": "bool"    },
+        { "name": "enableAntibot",      "type": "bool"    },
+        { "name": "antibotBlocks",      "type": "uint256" },
+        { "name": "metaURI",            "type": "string"  },
+        { "name": "salt",               "type": "bytes32" }
+      ]
+    }],
+    "outputs": [{ "name": "token", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "name": "createTT",
+    "stateMutability": "payable",
+    "inputs": [{
+      "name": "p", "type": "tuple",
+      "components": [
+        { "name": "name",               "type": "string"  },
+        { "name": "symbol",             "type": "string"  },
+        { "name": "metaURI",            "type": "string"  },
+        { "name": "supplyOption",       "type": "uint8"   },
+        { "name": "enableCreatorAlloc", "type": "bool"    },
+        { "name": "enableAntibot",      "type": "bool"    },
+        { "name": "antibotBlocks",      "type": "uint256" },
+        { "name": "salt",               "type": "bytes32" }
+      ]
+    }],
+    "outputs": [{ "name": "token", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "name": "createRFL",
+    "stateMutability": "payable",
+    "inputs": [{
+      "name": "p", "type": "tuple",
+      "components": [
+        { "name": "name",               "type": "string"  },
+        { "name": "symbol",             "type": "string"  },
+        { "name": "metaURI",            "type": "string"  },
+        { "name": "supplyOption",       "type": "uint8"   },
+        { "name": "enableCreatorAlloc", "type": "bool"    },
+        { "name": "enableAntibot",      "type": "bool"    },
+        { "name": "antibotBlocks",      "type": "uint256" },
+        { "name": "salt",               "type": "bytes32" }
+      ]
+    }],
+    "outputs": [{ "name": "token", "type": "address" }]
+  },
+  {
+    "type": "function",
     "name": "standardImpl",
     "stateMutability": "view",
     "inputs": [],
