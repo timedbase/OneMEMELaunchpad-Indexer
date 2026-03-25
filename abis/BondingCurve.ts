@@ -33,17 +33,6 @@ export default [
     ]
   },
   {
-    "type": "event",
-    "name": "TokenRegistered",
-    "inputs": [
-      { "name": "token",           "type": "address", "indexed": true  },
-      { "name": "creator",         "type": "address", "indexed": true  },
-      { "name": "totalSupply",     "type": "uint256", "indexed": false },
-      { "name": "virtualBNB",      "type": "uint256", "indexed": false },
-      { "name": "migrationTarget", "type": "uint256", "indexed": false }
-    ]
-  },
-  {
     "type": "function",
     "name": "getAmountOut",
     "stateMutability": "view",

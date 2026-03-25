@@ -31,16 +31,17 @@ export class VestingService {
 
     return {
       data: rows.map((r) => ({
-        token:       r.token,
-        beneficiary: r.beneficiary,
-        amount:      r.amount,
-        start:       r.start,
-        claimed:     r.claimed,
-        voided:      r.voided,
-        burned:      r.burned,
-        claimable:   computeClaimable(r.amount, r.start, r.claimed, r.voided),
-        vestingEnds: r.start + VESTING_DURATION,
-        progressPct: r.start > 0
+        token:        r.token,
+        beneficiary:  r.beneficiary,
+        amount:       r.amount,
+        blockNumber:  r.block_number,
+        start:        r.start,
+        claimed:      r.claimed,
+        voided:       r.voided,
+        burned:       r.burned,
+        claimable:    computeClaimable(r.amount, r.start, r.claimed, r.voided),
+        vestingEnds:  r.start + VESTING_DURATION,
+        progressPct:  r.start > 0
           ? Math.min(100, Math.floor(((Date.now() / 1000 - r.start) / VESTING_DURATION) * 100))
           : 0,
       })),
@@ -67,21 +68,22 @@ export class VestingService {
     return {
       ...paginated(
         rows.map((r) => ({
-          token:       r.token,
-          beneficiary: r.beneficiary,
-          amount:      r.amount,
-          start:       r.start,
-          claimed:     r.claimed,
-          voided:      r.voided,
-          burned:      r.burned,
-          claimable:   computeClaimable(r.amount, r.start, r.claimed, r.voided),
-          vestingEnds: r.start + VESTING_DURATION,
-          progressPct: r.start > 0
+          token:        r.token,
+          beneficiary:  r.beneficiary,
+          amount:       r.amount,
+          blockNumber:  r.block_number,
+          start:        r.start,
+          claimed:      r.claimed,
+          voided:       r.voided,
+          burned:       r.burned,
+          claimable:    computeClaimable(r.amount, r.start, r.claimed, r.voided),
+          vestingEnds:  r.start + VESTING_DURATION,
+          progressPct:  r.start > 0
             ? Math.min(100, Math.floor(((Date.now() / 1000 - r.start) / VESTING_DURATION) * 100))
             : 0,
-          tokenType:   r.token_type   ?? null,
-          totalSupply: r.total_supply ?? null,
-          migrated:    r.migrated      ?? null,
+          tokenType:    r.token_type   ?? null,
+          totalSupply:  r.total_supply ?? null,
+          migrated:     r.migrated      ?? null,
         })),
         count,
         page,

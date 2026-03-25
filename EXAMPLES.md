@@ -227,8 +227,18 @@ curl 'https://api.1coin.meme/api/v1/bsc/tokens/0x7cff...1111/holders?limit=5'
 ```json
 {
   "data": [
-    { "address": "0xholder1...", "balance": "50000000000000000000000" },
-    { "address": "0xholder2...", "balance": "20000000000000000000000" }
+    {
+      "address":              "0xholder1...",
+      "balance":              "50000000000000000000000",
+      "lastUpdatedBlock":     "96795000",
+      "lastUpdatedTimestamp": 1773998400
+    },
+    {
+      "address":              "0xholder2...",
+      "balance":              "20000000000000000000000",
+      "lastUpdatedBlock":     "96793000",
+      "lastUpdatedTimestamp": 1773997200
+    }
   ],
   "pagination": { "page": 1, "limit": 5, "total": 18, "pages": 4, "hasMore": true }
 }
@@ -943,7 +953,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/charts/history?symbol=0x7cff...1111&reso
 }
 ```
 
-Returns `{ "s": "no_data" }` when no snapshots exist in the requested range, or for migrated tokens (price moved to PancakeSwap).
+Returns `{ "s": "no_data" }` when no snapshots exist in the requested time range. Migrated tokens return their full bonding-curve history up to the migration block — the chart simply stops updating after that point.
 
 ### Search
 
@@ -1007,6 +1017,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/vesting/0x7cff...1111'
       "token":       "0x7cff...1111",
       "beneficiary": "0xcreator...",
       "amount":      "50000000000000000000000",
+      "blockNumber": "96789778",
       "start":       1773995248,
       "claimed":     "10000000000000000000000",
       "voided":      false,
@@ -1036,6 +1047,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/creators/0xcreator.../vesting?limit=5'
       "token":       "0x7cff...1111",
       "beneficiary": "0xcreator...",
       "amount":      "50000000000000000000000",
+      "blockNumber": "96789778",
       "start":       1773995248,
       "claimed":     "10000000000000000000000",
       "voided":      false,

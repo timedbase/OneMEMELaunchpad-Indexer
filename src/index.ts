@@ -243,7 +243,16 @@ ponder.on("MemeToken:Transfer", async ({ event, context }) => {
   const { from, to, value } = event.args;
   const token = event.log.address;
 
+  // Once a token migrates to PancakeSwap every swap emits 2-3 Transfer events
+  // (router → pair, pair → recipient, etc.) — not useful for bonding-curve
+  // holder tracking and the volume would bloat the table with DEX addresses.
+  const tokenRow = await context.db.find(schema.token, { id: token });
+  if (tokenRow?.migrated) return;
+
   const ZERO = "0x0000000000000000000000000000000000000000";
+
+  const blockNumber         = event.block.number;
+  const lastUpdatedTimestamp = Number(event.block.timestamp);
 
   // Deduct from sender (skip zero address = mint)
   if (from !== ZERO) {
@@ -252,16 +261,16 @@ ponder.on("MemeToken:Transfer", async ({ event, context }) => {
       // On first-ever transfer out from this address, initialise balance as negative.
       // The onConflictDoUpdate will correct it once the matching credit arrives.
       // This upsert pattern ensures row creation and update are a single atomic op.
-      .values({ token, address: from, balance: -value })
-      .onConflictDoUpdate((row) => ({ balance: row.balance - value }));
+      .values({ token, address: from, balance: -value, lastUpdatedBlock: blockNumber, lastUpdatedTimestamp })
+      .onConflictDoUpdate((row) => ({ balance: row.balance - value, lastUpdatedBlock: blockNumber, lastUpdatedTimestamp }));
   }
 
   // Credit receiver (skip zero address = burn)
   if (to !== ZERO) {
     await context.db
       .insert(schema.holder)
-      .values({ token, address: to, balance: value })
-      .onConflictDoUpdate((row) => ({ balance: row.balance + value }));
+      .values({ token, address: to, balance: value, lastUpdatedBlock: blockNumber, lastUpdatedTimestamp })
+      .onConflictDoUpdate((row) => ({ balance: row.balance + value, lastUpdatedBlock: blockNumber, lastUpdatedTimestamp }));
   }
 });
 
@@ -283,10 +292,11 @@ ponder.on("VestingWallet:VestingAdded", async ({ event, context }) => {
     token,
     beneficiary,
     amount,
-    start:   Number(event.block.timestamp),
-    claimed: 0n,
-    voided:  false,
-    burned:  0n,
+    blockNumber: event.block.number,
+    start:       Number(event.block.timestamp),
+    claimed:     0n,
+    voided:      false,
+    burned:      0n,
   });
 
   // Backfill creatorTokens on the token row for fast API reads.
@@ -295,8 +305,10 @@ ponder.on("VestingWallet:VestingAdded", async ({ event, context }) => {
     await context.db
       .update(schema.token, { id: token })
       .set({ creatorTokens: amount });
-  } catch {
-    // Token not yet indexed — skip, creatorTokens starts at 0n from TokenCreated handler
+  } catch (err) {
+    // Token not yet indexed — skip, creatorTokens starts at 0n from TokenCreated handler.
+    // Log unexpected errors so they're visible in Ponder's output.
+    console.warn("[VestingAdded] token update skipped:", token, err);
   }
 });
 

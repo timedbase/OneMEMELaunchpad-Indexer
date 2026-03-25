@@ -167,6 +167,12 @@ export const holder = onchainTable(
 
     /** Current onchain balance (wei). Updated on every Transfer event. */
     balance: t.bigint().notNull(),
+
+    /** BSC block number of the most recent Transfer that touched this row. */
+    lastUpdatedBlock: t.bigint().notNull(),
+
+    /** Unix timestamp (seconds) of the most recent Transfer that touched this row. */
+    lastUpdatedTimestamp: t.integer().notNull(),
   }),
   (table) => ({
     pk:         primaryKey({ columns: [table.token, table.address] }),
@@ -284,6 +290,9 @@ export const vesting = onchainTable(
 
     /** Total tokens locked at vesting start (wei). */
     amount: t.bigint().notNull(),
+
+    /** BSC block number of the VestingAdded event. */
+    blockNumber: t.bigint().notNull(),
 
     /** Unix timestamp (seconds) when vesting started (block of VestingAdded). */
     start: t.integer().notNull(),

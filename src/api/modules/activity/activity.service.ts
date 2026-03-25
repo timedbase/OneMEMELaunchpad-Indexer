@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { sql } from "../../db";
-import { paginated, parsePagination } from "../../helpers";
+import { paginated, parsePagination, normalizeAddress } from "../../helpers";
 
 export const VALID_TYPES = new Set(["create", "buy", "sell"]);
 
@@ -23,7 +23,7 @@ export class ActivityService {
       ? sql`AND block_number::numeric > ${sinceBlock.toString()}`
       : sql``;
     const tokenFilter = token
-      ? sql`AND token = ${token.toLowerCase()}`
+      ? sql`AND token = ${normalizeAddress(token)}`
       : sql``;
 
     const createQ = (typeFilter === "buy" || typeFilter === "sell")
@@ -40,7 +40,7 @@ export class ActivityService {
             creation_tx_hash     AS "txHash"
           FROM token
           WHERE TRUE ${sinceBlock != null ? sql`AND created_at_block::numeric > ${sinceBlock.toString()}` : sql``}
-                ${token ? sql`AND id = ${token.toLowerCase()}` : sql``}
+                ${token ? sql`AND id = ${normalizeAddress(token)}` : sql``}
         `;
 
     const tradeTypeFilter =
@@ -78,8 +78,8 @@ export class ActivityService {
   }
 
   async count(typeFilter?: string, token?: string) {
-    const tokenFilter      = token ? sql`AND id = ${token.toLowerCase()}`      : sql``;
-    const tradeTokenFilter = token ? sql`AND token = ${token.toLowerCase()}`   : sql``;
+    const tokenFilter      = token ? sql`AND id = ${normalizeAddress(token)}`      : sql``;
+    const tradeTokenFilter = token ? sql`AND token = ${normalizeAddress(token)}`   : sql``;
 
     const createCount =
       typeFilter === "buy" || typeFilter === "sell"

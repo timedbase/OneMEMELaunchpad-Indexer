@@ -199,7 +199,9 @@ export class TokensService {
       sql`
         SELECT
           address,
-          balance::text AS balance
+          balance::text              AS balance,
+          last_updated_block::text   AS "lastUpdatedBlock",
+          last_updated_timestamp     AS "lastUpdatedTimestamp"
         FROM holder
         WHERE token = ${addr}
           AND balance::numeric > 0

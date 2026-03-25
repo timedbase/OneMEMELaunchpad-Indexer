@@ -120,7 +120,6 @@ export class ChartsService {
     `;
 
     if (!token) return { s: "error", errmsg: "Symbol not found" };
-    if (token.migrated) return { s: "no_data" };
 
     // AMM formula computed entirely in SQL by joining the token row.
     // Avoids passing JS bigint values as postgres.js parameters (unsupported type).

@@ -42,7 +42,7 @@ Both processes run in the same Docker container under PM2. The indexer writes to
 | `TokenBought` | `token` (buyCount, volumeBNB, raisedBNB), `trade` (insert), `token_snapshot` (upsert) |
 | `TokenSold` | `token` (sellCount, volumeBNB, raisedBNB), `trade` (insert), `token_snapshot` (upsert) |
 | `TokenMigrated` | `token` (migrated, pairAddress), `migration` (insert) |
-| `Transfer` | `holder` (upsert balance) |
+| `Transfer` | `holder` (upsert balance, lastUpdatedBlock, lastUpdatedTimestamp) — skipped after migration |
 | `VestingAdded` | `vesting` (insert), `token` (creatorTokens) |
 | `Claimed` | `vesting` (claimed) |
 | `VestingVoided` | `vesting` (voided, burned) |
@@ -101,8 +101,10 @@ Both processes run in the same Docker container under PM2. The indexer writes to
 | `token` | hex | Token contract address |
 | `address` | hex | Wallet address |
 | `balance` | bigint | Current token balance (wei) |
+| `lastUpdatedBlock` | bigint | Block number of the most recent Transfer that touched this row |
+| `lastUpdatedTimestamp` | integer | Unix timestamp of the most recent Transfer that touched this row |
 
-Composite PK: `(token, address)`. Rows with zero balance are retained.
+Composite PK: `(token, address)`. Rows with zero balance are retained. Only populated while the token is on the bonding curve — Transfer tracking stops after migration.
 
 ### `migration`
 
@@ -124,6 +126,7 @@ Composite PK: `(token, address)`. Rows with zero balance are retained.
 | `token` | hex | Token address |
 | `beneficiary` | hex | Creator wallet (vesting recipient) |
 | `amount` | bigint | Total tokens locked at start (wei) |
+| `blockNumber` | bigint | Block number of the `VestingAdded` event |
 | `start` | integer | Unix timestamp vesting began |
 | `claimed` | bigint | Tokens claimed so far (wei) |
 | `voided` | boolean | Whether schedule was voided early |
