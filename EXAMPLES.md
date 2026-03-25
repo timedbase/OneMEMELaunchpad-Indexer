@@ -146,7 +146,9 @@ curl 'https://api.1coin.meme/api/v1/bsc/tokens/0x7cff1dd19e357e7e0c7b0bef189e415
       "description": "The next pepe",
       "image":       "ipfs://QmImg...",
       "website":     "https://pepe2.io",
-      "telegram":    "https://t.me/pepe2"
+      "socials": {
+        "telegram": "https://t.me/pepe2"
+      }
     }
   }
 }
@@ -333,15 +335,24 @@ curl 'https://api.1coin.meme/api/v1/bsc/tokens/0x7cff...1111/quote/buy?bnbIn=100
 ```json
 {
   "data": {
-    "token":          "0x7cff...1111",
-    "side":           "buy",
-    "bnbIn":          "1000000000000000000",
-    "bnbInFormatted": "1.0",
-    "tokensOut":      "780000000000000000000",
-    "minTokensOut":   "772200000000000000000",
-    "slippageBps":    100,
-    "priceImpactBps": 142,
-    "spotPriceWei":   "1241000000000"
+    "token":                  "0x7cff...1111",
+    "type":                   "buy",
+    "migrated":               false,
+    "bnbIn":                  "1000000000000000000",
+    "bnbInFormatted":         "1.0",
+    "tokensOut":              "780000000000000000000",
+    "tokensOutFormatted":     "780.0",
+    "spotPriceWei":           "1241000000000",
+    "spotPriceBNB":           "0.000001241",
+    "effectivePriceWei":      "1282051282051282",
+    "effectivePriceBNB":      "0.001282051282051282",
+    "priceImpactBps":         "142",
+    "priceImpactPct":         "1.42%",
+    "slippageBps":            "100",
+    "minimumOutput":          "772200000000000000000",
+    "minimumOutputFormatted": "772.2",
+    "antibotEnabled":         false,
+    "tradingBlock":           "96789778"
   }
 }
 ```
@@ -355,13 +366,24 @@ curl 'https://api.1coin.meme/api/v1/bsc/tokens/0x7cff...1111/quote/sell?tokensIn
 ```json
 {
   "data": {
-    "token":         "0x7cff...1111",
-    "side":          "sell",
-    "tokensIn":      "780000000000000000000",
-    "bnbOut":        "960000000000000000",
-    "minBnbOut":     "950400000000000000",
-    "slippageBps":   100,
-    "priceImpactBps": 98
+    "token":                  "0x7cff...1111",
+    "type":                   "sell",
+    "migrated":               false,
+    "tokensIn":               "780000000000000000000",
+    "tokensInFormatted":      "780.0",
+    "bnbOut":                 "960000000000000000",
+    "bnbOutFormatted":        "0.96",
+    "spotPriceWei":           "1241000000000",
+    "spotPriceBNB":           "0.000001241",
+    "effectivePriceWei":      "1230769230769230",
+    "effectivePriceBNB":      "0.00123076923076923",
+    "priceImpactBps":         "98",
+    "priceImpactPct":         "0.98%",
+    "slippageBps":            "100",
+    "minimumOutput":          "950400000000000000",
+    "minimumOutputFormatted": "0.9504",
+    "antibotEnabled":         false,
+    "tradingBlock":           "96789778"
   }
 }
 ```
@@ -404,16 +426,17 @@ curl 'https://api.1coin.meme/api/v1/bsc/trades?limit=3&type=buy&orderBy=bnb_amou
 {
   "data": [
     {
-      "id":          "0xtxhash...-12",
-      "token":       "0x7cff...1111",
-      "tradeType":   "buy",
-      "trader":      "0xbuyer...",
-      "bnbAmount":   "2000000000000000000",
-      "tokenAmount": "1500000000000000000000",
-      "raisedBnb":   "4000000000000000000",
-      "blockNumber": "96791234",
-      "txHash":      "0xtxhash...",
-      "timestamp":   1773996100
+      "id":           "0xtxhash...-12",
+      "token":        "0x7cff...1111",
+      "tradeType":    "buy",
+      "trader":       "0xbuyer...",
+      "bnbAmount":    "2000000000000000000",
+      "tokenAmount":  "1500000000000000000000",
+      "tokensToDead": null,
+      "raisedBnb":    "4000000000000000000",
+      "blockNumber":  "96791234",
+      "txHash":       "0xtxhash...",
+      "timestamp":    1773996100
     }
   ],
   "pagination": { "page": 1, "limit": 3, "total": 28, "pages": 10, "hasMore": true }
@@ -560,27 +583,45 @@ Wire format:
 
 ## 17. Discover — Trending
 
+Tokens with the most buy/sell trades in the last 5 minutes, ordered by trade count then volume.
+
 ```bash
-curl 'https://api.1coin.meme/api/v1/bsc/discover/trending?window=3600&limit=5'
+curl 'https://api.1coin.meme/api/v1/bsc/discover/trending?limit=5'
 ```
 
 ```json
 {
   "data": [
     {
-      "id":              "0x7cff...1111",
-      "tokenType":       "Standard",
-      "creator":         "0xcreator...",
-      "raisedBnb":       "4000000000000000000",
-      "migrated":        false,
-      "recentTrades":    12,
-      "recentBuys":      9,
-      "recentSells":     3,
-      "recentVolumeBNB": "3200000000000000000"
+      "id":                 "0x7cff...1111",
+      "tokenType":          "Standard",
+      "creator":            "0xcreator...",
+      "totalSupply":        "1000000000000000000000000",
+      "virtualBnb":         "1000000000000000000",
+      "antibotEnabled":     false,
+      "tradingBlock":       "96789778",
+      "createdAtBlock":     "96789778",
+      "createdAtTimestamp": 1773995248,
+      "creationTxHash":     "0xcreationtx...",
+      "migrated":           false,
+      "pairAddress":        null,
+      "buyCount":           8,
+      "sellCount":          2,
+      "volumeBnb":          "3200000000000000000",
+      "raisedBnb":          "4000000000000000000",
+      "migrationTarget":    "5000000000000000000",
+      "creatorTokens":      "0",
+      "priceBnb":           "0.000001241",
+      "priceUsd":           "0.0007241800",
+      "marketCapBnb":       "1.241",
+      "marketCapUsd":       "724.18",
+      "recentTrades":       12,
+      "recentBuys":         9,
+      "recentSells":        3,
+      "recentVolumeBNB":    "3200000000000000000"
     }
   ],
-  "pagination": { "page": 1, "limit": 5, "total": 4, "pages": 1, "hasMore": false },
-  "window": 3600
+  "pagination": { "page": 1, "limit": 5, "total": 4, "pages": 1, "hasMore": false }
 }
 ```
 
@@ -602,18 +643,36 @@ Returns newest non-migrated tokens, ordered by `createdAtBlock` descending. Same
 curl 'https://api.1coin.meme/api/v1/bsc/discover/bonding?limit=5'
 ```
 
-Non-migrated tokens sorted by `raisedBNB` descending. Includes `recentTrades` and `recentVolumeBNB` for the last 24 hours.
+Non-migrated tokens sorted by `raisedBNB` descending. Includes `recentTrades` and `recentVolumeBNB` for the last 24 hours, plus full pricing fields.
 
 ```json
 {
   "data": [
     {
-      "id":              "0xbe5b...1111",
-      "tokenType":       "Standard",
-      "raisedBnb":       "3800000000000000000",
-      "migrationTarget": "5000000000000000000",
-      "recentTrades":    7,
-      "recentVolumeBNB": "1200000000000000000"
+      "id":                 "0xbe5b...1111",
+      "tokenType":          "Standard",
+      "creator":            "0xcreator...",
+      "totalSupply":        "1000000000000000000000000",
+      "virtualBnb":         "1000000000000000000",
+      "antibotEnabled":     false,
+      "tradingBlock":       "96780000",
+      "createdAtBlock":     "96780000",
+      "createdAtTimestamp": 1773990000,
+      "creationTxHash":     "0xcreationtx...",
+      "migrated":           false,
+      "pairAddress":        null,
+      "buyCount":           14,
+      "sellCount":          3,
+      "volumeBnb":          "4200000000000000000",
+      "raisedBnb":          "3800000000000000000",
+      "migrationTarget":    "5000000000000000000",
+      "creatorTokens":      "0",
+      "priceBnb":           "0.000001198",
+      "priceUsd":           "0.0006984200",
+      "marketCapBnb":       "1.198",
+      "marketCapUsd":       "698.42",
+      "recentTrades":       7,
+      "recentVolumeBNB":    "1200000000000000000"
     }
   ],
   "pagination": { "page": 1, "limit": 5, "total": 2, "pages": 1, "hasMore": false }
@@ -632,15 +691,33 @@ curl 'https://api.1coin.meme/api/v1/bsc/discover/migrated?orderBy=liquidityBNB&o
 {
   "data": [
     {
-      "id":              "0x7cff...1111",
-      "tokenType":       "Standard",
-      "migrated":        true,
-      "pairAddress":     "0xpair...",
-      "liquidityBNB":    "5000000000000000001",
-      "liquidityTokens": "800000000000000000000000",
-      "migratedAtBlock": "96799999",
-      "migratedAt":      1774002000,
-      "migrationTxHash": "0xmigrationtx..."
+      "id":                 "0x7cff...1111",
+      "tokenType":          "Standard",
+      "creator":            "0xcreator...",
+      "totalSupply":        "1000000000000000000000000",
+      "virtualBnb":         "1000000000000000000",
+      "antibotEnabled":     false,
+      "tradingBlock":       "96789778",
+      "createdAtBlock":     "96789778",
+      "createdAtTimestamp": 1773995248,
+      "creationTxHash":     "0xcreationtx...",
+      "migrated":           true,
+      "pairAddress":        "0xpair...",
+      "buyCount":           6,
+      "sellCount":          0,
+      "volumeBnb":          "5102040816326530613",
+      "raisedBnb":          "5000000000000000001",
+      "migrationTarget":    "5000000000000000000",
+      "creatorTokens":      "0",
+      "priceBnb":           "0.000001241",
+      "priceUsd":           "0.0007241800",
+      "marketCapBnb":       "1.241",
+      "marketCapUsd":       "724.18",
+      "liquidityBNB":       "5000000000000000001",
+      "liquidityTokens":    "800000000000000000000000",
+      "migratedAtBlock":    "96799999",
+      "migratedAt":         1774002000,
+      "migrationTxHash":    "0xmigrationtx..."
     }
   ],
   "pagination": { "page": 1, "limit": 5, "total": 1, "pages": 1, "hasMore": false }
@@ -826,19 +903,23 @@ curl 'https://api.1coin.meme/api/v1/bsc/charts/symbols?symbol=0x7cff...1111'
 
 ```json
 {
-  "name":                   "0x7cff...1111",
-  "ticker":                 "0x7cff...1111",
-  "description":            "OneMEME Token (Standard)",
-  "type":                   "crypto",
-  "session":                "24x7",
-  "timezone":               "Etc/UTC",
-  "exchange":               "OneMEME",
-  "pricescale":             1000000000,
-  "minmov":                 1,
-  "has_intraday":           true,
-  "has_daily":              true,
-  "supported_resolutions":  ["1", "5", "15", "30", "60", "240", "D"],
-  "data_status":            "streaming"
+  "name":                    "0x7cff...1111",
+  "ticker":                  "0x7cff...1111",
+  "description":             "OneMEME Token (Standard)",
+  "type":                    "crypto",
+  "session":                 "24x7",
+  "timezone":                "Etc/UTC",
+  "exchange":                "OneMEME",
+  "listed_exchange":         "OneMEME",
+  "format":                  "price",
+  "pricescale":              1000000000,
+  "minmov":                  1,
+  "has_intraday":            true,
+  "has_daily":               true,
+  "has_weekly_and_monthly":  false,
+  "supported_resolutions":   ["1", "5", "15", "30", "60", "240", "D"],
+  "volume_precision":        4,
+  "data_status":             "streaming"
 }
 ```
 
@@ -902,7 +983,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/price/bnb'
     { "exchange": "Bybit",     "price": 583.40, "ok": true,  "cachedAt": 1774058096 },
     { "exchange": "CoinGecko", "price": 583.20, "ok": true,  "cachedAt": 1774058040 },
     { "exchange": "MEXC",      "price": 583.55, "ok": true,  "cachedAt": 1774058093 },
-    { "exchange": "GateIO",    "price": 583.48, "ok": false, "cachedAt": 1774057800 }
+    { "exchange": "GateIO",    "price": null,   "ok": false, "cachedAt": null }
   ]
 }
 ```
@@ -983,10 +1064,10 @@ curl 'https://api.1coin.meme/api/v1/bsc/chat/0x7cff...1111/messages'
 {
   "data": [
     {
-      "id":        "msg_001",
+      "id":        "1",
       "token":     "0x7cff...1111",
       "sender":    "0xuser...",
-      "message":   "gm, this is going to moon",
+      "text":      "gm, this is going to moon",
       "timestamp": 1774050000
     }
   ]

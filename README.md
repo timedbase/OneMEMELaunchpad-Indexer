@@ -334,7 +334,7 @@ WebSocket sends `{ event: "activity", data: "<JSON string>" }`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/{chain}/discover/trending` | Tokens with the most trades in a recent window |
+| `GET` | `/api/v1/{chain}/discover/trending` | Tokens with the most trades in the last 5 minutes |
 | `GET` | `/api/v1/{chain}/discover/new` | Newest non-migrated tokens |
 | `GET` | `/api/v1/{chain}/discover/bonding` | Active bonding-curve tokens sorted by `raisedBNB` |
 | `GET` | `/api/v1/{chain}/discover/migrated` | Migrated tokens with liquidity details |
@@ -343,10 +343,10 @@ WebSocket sends `{ event: "activity", data: "<JSON string>" }`.
 
 | Param | Default | Description |
 |---|---|---|
-| `window` | `1800` | Lookback window in seconds (60–86400) |
+| `type` | — | `Standard` \| `Tax` \| `Reflection` |
 | `page` / `limit` | 1 / 20 | Pagination |
 
-Trending objects include: `recentTrades`, `recentBuys`, `recentSells`, `recentVolumeBNB`.
+Trending objects include: `recentTrades`, `recentBuys`, `recentSells`, `recentVolumeBNB`, `priceBnb`, `priceUsd`, `marketCapBnb`, `marketCapUsd`.
 
 **`GET /api/v1/{chain}/discover/new` / `/api/v1/{chain}/discover/bonding` query params:**
 
