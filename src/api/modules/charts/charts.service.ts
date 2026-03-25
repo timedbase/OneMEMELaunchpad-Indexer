@@ -116,41 +116,40 @@ export class ChartsService {
       : (fromTs ?? toTs - 300 * resSecs);
 
     const [token] = await sql`
-      SELECT migrated, virtual_bnb, total_supply FROM token WHERE id = ${addr} LIMIT 1
+      SELECT migrated FROM token WHERE id = ${addr} LIMIT 1
     `;
 
     if (!token) return { s: "error", errmsg: "Symbol not found" };
     if (token.migrated) return { s: "no_data" };
 
-    // AMM formula expressed in SQL:
-    //   price = (virtualBNB + raisedBNB)^2 / (virtualBNB * totalSupply)
-    // virtualBNB and totalSupply are constant per token; raisedBNB varies per snapshot.
-    const vBNB        = BigInt(token.virtual_bnb);
-    const totalSupply = BigInt(token.total_supply);
-
+    // AMM formula computed entirely in SQL by joining the token row.
+    // Avoids passing JS bigint values as postgres.js parameters (unsupported type).
     const rows = await sql`
       WITH buckets AS (
         SELECT
-          (floor(timestamp::numeric / ${resSecs}) * ${resSecs})::bigint  AS t,
-          (array_agg(open_raised_bnb::numeric  ORDER BY block_number ASC))[1]   AS open_raised,
-          (array_agg(close_raised_bnb::numeric ORDER BY block_number DESC))[1]  AS close_raised,
-          MAX(close_raised_bnb::numeric)                                         AS high_raised,
-          MIN(close_raised_bnb::numeric)                                         AS low_raised,
-          SUM(volume_bnb::numeric)                                               AS v
-        FROM token_snapshot
+          (floor(s.timestamp::numeric / ${resSecs}) * ${resSecs})::bigint       AS t,
+          (array_agg(s.open_raised_bnb::numeric  ORDER BY s.block_number ASC))[1]  AS open_raised,
+          (array_agg(s.close_raised_bnb::numeric ORDER BY s.block_number DESC))[1] AS close_raised,
+          MAX(s.close_raised_bnb::numeric)                                          AS high_raised,
+          MIN(s.close_raised_bnb::numeric)                                          AS low_raised,
+          SUM(s.volume_bnb::numeric)                                                AS v,
+          MAX(t.virtual_bnb::numeric)                                               AS v_bnb,
+          MAX(t.total_supply::numeric)                                              AS total_supply
+        FROM token_snapshot s
+        JOIN token t ON t.id = s.token
         WHERE
-          token       = ${addr}
-          AND timestamp >= ${effectiveFrom}
-          AND timestamp <= ${toTs}
-        GROUP BY floor(timestamp::numeric / ${resSecs}) * ${resSecs}
+          s.token       = ${addr}
+          AND s.timestamp >= ${effectiveFrom}
+          AND s.timestamp <= ${toTs}
+        GROUP BY floor(s.timestamp::numeric / ${resSecs}) * ${resSecs}
         ORDER BY t ASC
       )
       SELECT
         t,
-        (open_raised  + ${vBNB})^2 / NULLIF(${vBNB} * ${totalSupply}, 0)  AS o,
-        (close_raised + ${vBNB})^2 / NULLIF(${vBNB} * ${totalSupply}, 0)  AS c,
-        (high_raised  + ${vBNB})^2 / NULLIF(${vBNB} * ${totalSupply}, 0)  AS h,
-        (low_raised   + ${vBNB})^2 / NULLIF(${vBNB} * ${totalSupply}, 0)  AS l,
+        (open_raised  + v_bnb)^2 / NULLIF(v_bnb * total_supply, 0)  AS o,
+        (close_raised + v_bnb)^2 / NULLIF(v_bnb * total_supply, 0)  AS c,
+        (high_raised  + v_bnb)^2 / NULLIF(v_bnb * total_supply, 0)  AS h,
+        (low_raised   + v_bnb)^2 / NULLIF(v_bnb * total_supply, 0)  AS l,
         v
       FROM buckets
     `;

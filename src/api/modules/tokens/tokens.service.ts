@@ -32,13 +32,19 @@ const PRICE_COLS = sql`
 export class TokensService {
   constructor(private readonly price: PriceService) {}
 
-  private withUsd<T extends Record<string, unknown>>(row: T): T & { marketCapUsd: string | null } {
+  private withUsd<T extends Record<string, unknown>>(
+    row: T,
+  ): T & { priceUsd: string | null; marketCapUsd: string | null } {
     const bnbPrice = this.price.getPrice()?.bnbUsdt ?? null;
+    const priceBnb = row["priceBnb"]     as string | null;
     const mcBnb    = row["marketCapBnb"] as string | null;
-    const mcUsd    = (bnbPrice !== null && mcBnb !== null)
+    const priceUsd = (bnbPrice !== null && priceBnb !== null)
+      ? (parseFloat(priceBnb) * bnbPrice).toFixed(10)
+      : null;
+    const mcUsd = (bnbPrice !== null && mcBnb !== null)
       ? (parseFloat(mcBnb) * bnbPrice).toFixed(2)
       : null;
-    return { ...row, marketCapUsd: mcUsd };
+    return { ...row, priceUsd, marketCapUsd: mcUsd };
   }
 
   async list(query: Record<string, string | undefined>) {
@@ -230,33 +236,31 @@ export class TokensService {
     if (fromTs !== null && isNaN(fromTs)) throw new BadRequestException("from must be a unix timestamp");
     if (toTs   !== null && isNaN(toTs))   throw new BadRequestException("to must be a unix timestamp");
 
-    const [tokenRow] = await sql`SELECT virtual_bnb, total_supply FROM token WHERE id = ${addr} LIMIT 1`;
+    const [tokenRow] = await sql`SELECT id FROM token WHERE id = ${addr} LIMIT 1`;
     if (!tokenRow) throw new NotFoundException(`Token ${address} not found`);
 
-    const vBNB        = BigInt(tokenRow.virtual_bnb);
-    const totalSupply = BigInt(tokenRow.total_supply);
-
-    const fromFilter = fromTs !== null ? sql`AND timestamp >= ${fromTs}` : sql``;
-    const toFilter   = toTs   !== null ? sql`AND timestamp <= ${toTs}`   : sql``;
+    const fromFilter = fromTs !== null ? sql`AND s.timestamp >= ${fromTs}` : sql``;
+    const toFilter   = toTs   !== null ? sql`AND s.timestamp <= ${toTs}`   : sql``;
 
     const [rows, [{ count }]] = await Promise.all([
       sql`
         SELECT
-          block_number::text                                                                           AS "blockNumber",
-          timestamp,
-          open_raised_bnb::text                                                                        AS "openRaisedBNB",
-          close_raised_bnb::text                                                                       AS "closeRaisedBNB",
-          volume_bnb::text                                                                             AS "volumeBNB",
-          buy_count                                                                                    AS "buyCount",
-          sell_count                                                                                   AS "sellCount",
-          ((close_raised_bnb::numeric + ${vBNB})^2
-            / NULLIF(${vBNB} * ${totalSupply}, 0))::text                                              AS "priceBnb"
-        FROM token_snapshot
-        WHERE token = ${addr} ${fromFilter} ${toFilter}
-        ORDER BY block_number::numeric DESC
+          s.block_number::text                                                                              AS "blockNumber",
+          s.timestamp,
+          s.open_raised_bnb::text                                                                           AS "openRaisedBNB",
+          s.close_raised_bnb::text                                                                          AS "closeRaisedBNB",
+          s.volume_bnb::text                                                                                AS "volumeBNB",
+          s.buy_count                                                                                       AS "buyCount",
+          s.sell_count                                                                                      AS "sellCount",
+          ((s.close_raised_bnb::numeric + t.virtual_bnb::numeric)^2
+            / NULLIF(t.virtual_bnb::numeric * t.total_supply::numeric, 0))::text                           AS "priceBnb"
+        FROM token_snapshot s
+        JOIN token t ON t.id = s.token
+        WHERE s.token = ${addr} ${fromFilter} ${toFilter}
+        ORDER BY s.block_number::numeric DESC
         LIMIT ${limit} OFFSET ${offset}
       `,
-      sql`SELECT COUNT(*)::int AS count FROM token_snapshot WHERE token = ${addr} ${fromFilter} ${toFilter}`,
+      sql`SELECT COUNT(*)::int AS count FROM token_snapshot WHERE token = ${addr} ${fromTs !== null ? sql`AND timestamp >= ${fromTs}` : sql``} ${toTs !== null ? sql`AND timestamp <= ${toTs}` : sql``}`,
     ]);
 
     return paginated(rows, count, page, limit);
