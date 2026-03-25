@@ -3,6 +3,7 @@ node_modules/
 
 # Ponder build artifacts and generated types
 .ponder/
+generated/
 
 # Environment secrets — never commit the real .env
 .env
