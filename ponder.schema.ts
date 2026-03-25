@@ -84,6 +84,23 @@ export const token = onchainTable(
      * Populated when VestingAdded fires for this token.
      */
     creatorTokens: t.bigint().notNull(),
+
+    // ── Off-chain metadata (fetched from metaURI at index time) ──────────────
+
+    /** Raw metaURI string as stored on the token contract. */
+    metaUri:  t.text(),
+
+    /** Resolved image URL (IPFS gateway substituted if original was ipfs://). */
+    image:    t.text(),
+
+    /** Token website URL. */
+    website:  t.text(),
+
+    /** Twitter / X link. */
+    twitter:  t.text(),
+
+    /** Telegram link. */
+    telegram: t.text(),
   }),
   (table) => ({
     creatorIdx:        index().on(table.creator),

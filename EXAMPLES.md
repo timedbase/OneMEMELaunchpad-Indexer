@@ -90,7 +90,12 @@ curl 'https://api.1coin.meme/api/v1/bsc/tokens?limit=2'
       "priceBnb":           "0.000001241",
       "priceUsd":           "0.0007241800",
       "marketCapBnb":       "1.241",
-      "marketCapUsd":       "724.18"
+      "marketCapUsd":       "724.18",
+      "metaUri":            "ipfs://QmXyz...",
+      "image":              "https://gateway.pinata.cloud/ipfs/QmImg...",
+      "website":            "https://pepe2.io",
+      "twitter":            "https://x.com/pepe2bsc",
+      "telegram":           "https://t.me/pepe2"
     }
   ],
   "pagination": {
@@ -139,17 +144,11 @@ curl 'https://api.1coin.meme/api/v1/bsc/tokens/0x7cff1dd19e357e7e0c7b0bef189e415
     "priceUsd":           "0.0007305000",
     "marketCapBnb":       "1.253",
     "marketCapUsd":       "731.18",
-    "metaURI":            "ipfs://QmXyz...",
-    "metadata": {
-      "name":        "PEPE2",
-      "symbol":      "PEPE2",
-      "description": "The next pepe",
-      "image":       "ipfs://QmImg...",
-      "website":     "https://pepe2.io",
-      "socials": {
-        "telegram": "https://t.me/pepe2"
-      }
-    }
+    "metaUri":            "ipfs://QmXyz...",
+    "image":              "https://gateway.pinata.cloud/ipfs/QmImg...",
+    "website":            "https://pepe2.io",
+    "twitter":            "https://x.com/pepe2bsc",
+    "telegram":           "https://t.me/pepe2"
   }
 }
 ```

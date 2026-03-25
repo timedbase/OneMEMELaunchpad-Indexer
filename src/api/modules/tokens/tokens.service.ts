@@ -1,8 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { sql } from "../../db";
 import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir, toCamel } from "../../helpers";
-import { getMetaURI, getPairPrice } from "../../rpc";
-import { fetchMetadata } from "../../metadata";
+import { getPairPrice } from "../../rpc";
 import { PriceService } from "../price/price.service";
 
 /**
@@ -103,10 +102,7 @@ export class TokensService {
       }
     }
 
-    const metaURI  = await getMetaURI(addr as `0x${string}`);
-    const metadata = metaURI ? await fetchMetadata(metaURI) : null;
-
-    return { data: { ...this.withUsd(camelRow), metaURI: metaURI || null, metadata: metadata ?? null } };
+    return { data: this.withUsd(camelRow) };
   }
 
   async trades(address: string, query: Record<string, string | undefined>) {

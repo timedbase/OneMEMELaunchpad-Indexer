@@ -15,7 +15,69 @@
 
 import { ponder } from "ponder:registry";
 import * as schema from "ponder:schema";
-import { keccak256, toBytes } from "viem";
+import { keccak256, toBytes, parseAbi } from "viem";
+
+// ─── Metadata helpers ─────────────────────────────────────────────────────────
+
+const META_URI_ABI = parseAbi(["function metaURI() view returns (string)"]);
+
+const IPFS_GATEWAY = (process.env.IPFS_GATEWAY ?? "https://gateway.pinata.cloud/ipfs/").replace(/\/?$/, "/");
+
+function resolveUri(uri: string): string {
+  if (uri.startsWith("ipfs://")) return IPFS_GATEWAY + uri.slice(7);
+  if (uri.startsWith("ipfs/"))   return IPFS_GATEWAY + uri.slice(5);
+  return uri;
+}
+
+interface TokenMeta {
+  metaUri:  string;
+  image:    string | null;
+  website:  string | null;
+  twitter:  string | null;
+  telegram: string | null;
+}
+
+async function fetchTokenMeta(
+  token:  `0x${string}`,
+  client: { readContract: (...args: any[]) => Promise<unknown> },
+): Promise<TokenMeta | null> {
+  try {
+    const uri = await client.readContract({
+      address:      token,
+      abi:          META_URI_ABI,
+      functionName: "metaURI",
+    }) as string;
+
+    if (!uri || !uri.trim()) return null;
+
+    const httpUri = resolveUri(uri.trim());
+    const res = await fetch(httpUri, {
+      signal:  AbortSignal.timeout(8_000),
+      headers: { Accept: "application/json" },
+    });
+
+    if (!res.ok) return { metaUri: uri, image: null, website: null, twitter: null, telegram: null };
+
+    const raw = await res.json() as Record<string, unknown>;
+
+    // Support both flat fields and a nested `socials` object.
+    const socials = (raw.socials && typeof raw.socials === "object")
+      ? raw.socials as Record<string, unknown>
+      : {} as Record<string, unknown>;
+
+    const imageRaw = typeof raw.image === "string" ? raw.image : undefined;
+
+    return {
+      metaUri:  uri,
+      image:    imageRaw ? resolveUri(imageRaw) : null,
+      website:  typeof raw.website  === "string" ? raw.website  : null,
+      twitter:  typeof (socials.twitter  ?? raw.twitter)  === "string" ? String(socials.twitter  ?? raw.twitter)  : null,
+      telegram: typeof (socials.telegram ?? raw.telegram) === "string" ? String(socials.telegram ?? raw.telegram) : null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // ─── Token type from calldata ──────────────────────────────────────────────────
 // The factory has three creation functions, one per token type:
@@ -57,6 +119,8 @@ ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
 
   const tokenType = tokenTypeFromCalldata(event.transaction.input);
 
+  const meta = await fetchTokenMeta(token, context.client);
+
   await context.db.insert(schema.token).values({
     id:                 token,
     tokenType,
@@ -76,6 +140,11 @@ ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
     raisedBNB:          0n,
     migrationTarget,
     creatorTokens:      0n,  // updated by VestingWallet:VestingAdded when schedule is created
+    metaUri:            meta?.metaUri  ?? null,
+    image:              meta?.image    ?? null,
+    website:            meta?.website  ?? null,
+    twitter:            meta?.twitter  ?? null,
+    telegram:           meta?.telegram ?? null,
   });
 });
 
