@@ -155,6 +155,30 @@ ponder.on("BondingCurve:TokenBought", async ({ event, context }) => {
     timestamp:    Number(event.block.timestamp),
   });
 
+  // Read current raisedBNB (pre-trade) for the opening price of this block.
+  const tokenRow = await context.db.find(schema.token, { id: token });
+  const preRaisedBNB = tokenRow?.raisedBNB ?? 0n;
+
+  const snapshotId = `${token}-${event.block.number}`;
+  await context.db
+    .insert(schema.tokenSnapshot)
+    .values({
+      id:             snapshotId,
+      token,
+      blockNumber:    event.block.number,
+      timestamp:      Number(event.block.timestamp),
+      openRaisedBNB:  preRaisedBNB,
+      closeRaisedBNB: raisedBNB,
+      volumeBNB:      bnbIn,
+      buyCount:       1,
+      sellCount:      0,
+    })
+    .onConflictDoUpdate((row) => ({
+      closeRaisedBNB: raisedBNB,
+      volumeBNB:      row.volumeBNB + bnbIn,
+      buyCount:       row.buyCount + 1,
+    }));
+
   await context.db
     .update(schema.token, { id: token })
     .set((row) => ({
@@ -188,6 +212,29 @@ ponder.on("BondingCurve:TokenSold", async ({ event, context }) => {
     txHash:       event.transaction.hash,
     timestamp:    Number(event.block.timestamp),
   });
+
+  const tokenRow = await context.db.find(schema.token, { id: token });
+  const preRaisedBNB = tokenRow?.raisedBNB ?? 0n;
+
+  const snapshotId = `${token}-${event.block.number}`;
+  await context.db
+    .insert(schema.tokenSnapshot)
+    .values({
+      id:             snapshotId,
+      token,
+      blockNumber:    event.block.number,
+      timestamp:      Number(event.block.timestamp),
+      openRaisedBNB:  preRaisedBNB,
+      closeRaisedBNB: raisedBNB,
+      volumeBNB:      bnbOut,
+      buyCount:       0,
+      sellCount:      1,
+    })
+    .onConflictDoUpdate((row) => ({
+      closeRaisedBNB: raisedBNB,
+      volumeBNB:      row.volumeBNB + bnbOut,
+      sellCount:      row.sellCount + 1,
+    }));
 
   await context.db
     .update(schema.token, { id: token })

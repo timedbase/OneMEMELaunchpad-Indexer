@@ -78,6 +78,16 @@ export class ChartsService {
 
   /**
    * GET /charts/history — OHLCV bars
+   *
+   * Price is computed from the bonding-curve AMM formula using per-block snapshots:
+   *   price = (virtualBNB + raisedBNB)^2 / (virtualBNB * totalSupply)
+   *
+   * Within each resolution bucket:
+   *   open  = AMM price at openRaisedBNB of the first snapshot in the bucket
+   *   close = AMM price at closeRaisedBNB of the last snapshot in the bucket
+   *   high  = AMM price at max(closeRaisedBNB) in the bucket
+   *   low   = AMM price at min(closeRaisedBNB) in the bucket
+   *   volume= sum of volumeBNB across all snapshots in the bucket
    */
   async history(query: Record<string, string | undefined>) {
     const symbol     = query["symbol"];
@@ -105,35 +115,46 @@ export class ChartsService {
       ? toTs - countback * resSecs
       : (fromTs ?? toTs - 300 * resSecs);
 
-    const rows = await sql`
-      SELECT
-        (floor(timestamp::numeric / ${resSecs}) * ${resSecs})::bigint        AS t,
-        (array_agg(
-          bnb_amount::numeric / NULLIF(token_amount::numeric, 0)
-          ORDER BY timestamp ASC
-        ))[1]                                                                  AS o,
-        MAX(bnb_amount::numeric / NULLIF(token_amount::numeric, 0))            AS h,
-        MIN(bnb_amount::numeric / NULLIF(token_amount::numeric, 0))            AS l,
-        (array_agg(
-          bnb_amount::numeric / NULLIF(token_amount::numeric, 0)
-          ORDER BY timestamp DESC
-        ))[1]                                                                  AS c,
-        SUM(bnb_amount::numeric)                                               AS v
-      FROM trade
-      WHERE
-        token       = ${addr}
-        AND timestamp >= ${effectiveFrom}
-        AND timestamp <= ${toTs}
-      GROUP BY floor(timestamp::numeric / ${resSecs}) * ${resSecs}
-      ORDER BY t ASC
-    `;
-
     const [token] = await sql`
-      SELECT migrated FROM token WHERE id = ${addr} LIMIT 1
+      SELECT migrated, virtual_bnb, total_supply FROM token WHERE id = ${addr} LIMIT 1
     `;
 
     if (!token) return { s: "error", errmsg: "Symbol not found" };
     if (token.migrated) return { s: "no_data" };
+
+    // AMM formula expressed in SQL:
+    //   price = (virtualBNB + raisedBNB)^2 / (virtualBNB * totalSupply)
+    // virtualBNB and totalSupply are constant per token; raisedBNB varies per snapshot.
+    const vBNB        = BigInt(token.virtual_bnb);
+    const totalSupply = BigInt(token.total_supply);
+
+    const rows = await sql`
+      WITH buckets AS (
+        SELECT
+          (floor(timestamp::numeric / ${resSecs}) * ${resSecs})::bigint  AS t,
+          (array_agg(open_raised_bnb::numeric  ORDER BY block_number ASC))[1]   AS open_raised,
+          (array_agg(close_raised_bnb::numeric ORDER BY block_number DESC))[1]  AS close_raised,
+          MAX(close_raised_bnb::numeric)                                         AS high_raised,
+          MIN(close_raised_bnb::numeric)                                         AS low_raised,
+          SUM(volume_bnb::numeric)                                               AS v
+        FROM token_snapshot
+        WHERE
+          token       = ${addr}
+          AND timestamp >= ${effectiveFrom}
+          AND timestamp <= ${toTs}
+        GROUP BY floor(timestamp::numeric / ${resSecs}) * ${resSecs}
+        ORDER BY t ASC
+      )
+      SELECT
+        t,
+        (open_raised  + ${vBNB})^2 / NULLIF(${vBNB} * ${totalSupply}, 0)  AS o,
+        (close_raised + ${vBNB})^2 / NULLIF(${vBNB} * ${totalSupply}, 0)  AS c,
+        (high_raised  + ${vBNB})^2 / NULLIF(${vBNB} * ${totalSupply}, 0)  AS h,
+        (low_raised   + ${vBNB})^2 / NULLIF(${vBNB} * ${totalSupply}, 0)  AS l,
+        v
+      FROM buckets
+    `;
+
     if (rows.length === 0) return { s: "no_data" };
 
     return {

@@ -211,6 +211,57 @@ export class TokensService {
     return paginated(rows, count, page, limit);
   }
 
+  /**
+   * GET /tokens/:address/snapshots
+   *
+   * Returns per-block bonding-curve state with AMM price computed for each block.
+   * Supports ?from=<unix>&to=<unix> time range filtering and standard pagination.
+   * Includes priceBnb (spot price at block close) derived from the AMM formula.
+   */
+  async snapshots(address: string, query: Record<string, string | undefined>) {
+    if (!isAddress(address)) throw new BadRequestException("Invalid token address");
+
+    const { page, limit, offset } = parsePagination(query);
+    const addr = normalizeAddress(address);
+
+    const fromTs = query["from"] ? parseInt(query["from"], 10) : null;
+    const toTs   = query["to"]   ? parseInt(query["to"],   10) : null;
+
+    if (fromTs !== null && isNaN(fromTs)) throw new BadRequestException("from must be a unix timestamp");
+    if (toTs   !== null && isNaN(toTs))   throw new BadRequestException("to must be a unix timestamp");
+
+    const [tokenRow] = await sql`SELECT virtual_bnb, total_supply FROM token WHERE id = ${addr} LIMIT 1`;
+    if (!tokenRow) throw new NotFoundException(`Token ${address} not found`);
+
+    const vBNB        = BigInt(tokenRow.virtual_bnb);
+    const totalSupply = BigInt(tokenRow.total_supply);
+
+    const fromFilter = fromTs !== null ? sql`AND timestamp >= ${fromTs}` : sql``;
+    const toFilter   = toTs   !== null ? sql`AND timestamp <= ${toTs}`   : sql``;
+
+    const [rows, [{ count }]] = await Promise.all([
+      sql`
+        SELECT
+          block_number::text                                                                           AS "blockNumber",
+          timestamp,
+          open_raised_bnb::text                                                                        AS "openRaisedBNB",
+          close_raised_bnb::text                                                                       AS "closeRaisedBNB",
+          volume_bnb::text                                                                             AS "volumeBNB",
+          buy_count                                                                                    AS "buyCount",
+          sell_count                                                                                   AS "sellCount",
+          ((close_raised_bnb::numeric + ${vBNB})^2
+            / NULLIF(${vBNB} * ${totalSupply}, 0))::text                                              AS "priceBnb"
+        FROM token_snapshot
+        WHERE token = ${addr} ${fromFilter} ${toFilter}
+        ORDER BY block_number::numeric DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `,
+      sql`SELECT COUNT(*)::int AS count FROM token_snapshot WHERE token = ${addr} ${fromFilter} ${toFilter}`,
+    ]);
+
+    return paginated(rows, count, page, limit);
+  }
+
   async byCreator(address: string, query: Record<string, string | undefined>) {
     if (!isAddress(address)) throw new BadRequestException("Invalid creator address");
 

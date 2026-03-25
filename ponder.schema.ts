@@ -211,6 +211,63 @@ export const migration = onchainTable(
   })
 );
 
+// ─── Token Snapshot ───────────────────────────────────────────────────────────
+// One row per (token, block) — written/updated on every bonding-curve trade.
+// Captures the exact bonding-curve state after every block that had activity,
+// enabling accurate per-block and per-timestamp historical queries.
+//
+// OHLC price is expressed in raisedBNB terms so the API can apply the full
+// AMM formula (virtualBNB + raisedBNB)^2 / (virtualBNB * totalSupply) using
+// the token's constant virtualBNB and totalSupply without storing them again.
+//
+// openRaisedBNB — raisedBNB BEFORE the first trade of this block (from INSERT)
+// closeRaisedBNB — raisedBNB AFTER the last trade of this block (from UPDATE)
+//
+// volumeBNB and tradeCount are the per-block totals (not cumulative).
+
+export const tokenSnapshot = onchainTable(
+  "token_snapshot",
+  (t) => ({
+    /** "{tokenAddress}-{blockNumber}" — one row per active block per token. */
+    id: t.text().primaryKey(),
+
+    /** Token contract address. */
+    token: t.hex().notNull(),
+
+    /** BSC block number. */
+    blockNumber: t.bigint().notNull(),
+
+    /** Unix timestamp (seconds) of the block. */
+    timestamp: t.integer().notNull(),
+
+    /**
+     * Cumulative raisedBNB before the first trade in this block.
+     * Used to derive the opening AMM price for the block.
+     */
+    openRaisedBNB: t.bigint().notNull(),
+
+    /**
+     * Cumulative raisedBNB after the last trade in this block.
+     * Used to derive the closing AMM price for the block.
+     */
+    closeRaisedBNB: t.bigint().notNull(),
+
+    /** Total BNB volume (buys + sells) traded in this block (wei). */
+    volumeBNB: t.bigint().notNull(),
+
+    /** Number of buy trades in this block. */
+    buyCount: t.integer().notNull(),
+
+    /** Number of sell trades in this block. */
+    sellCount: t.integer().notNull(),
+  }),
+  (table) => ({
+    tokenIdx:     index().on(table.token),
+    timestampIdx: index().on(table.timestamp),
+    tokenTsIdx:   index().on(table.token, table.timestamp),
+  })
+);
+
 // ─── Vesting ──────────────────────────────────────────────────────────────────
 // One row per (token, beneficiary) vesting schedule.
 // Created on VestingAdded, updated on Claimed and VestingVoided.

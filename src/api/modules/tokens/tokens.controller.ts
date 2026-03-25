@@ -49,6 +49,15 @@ export class TokensController {
   migration(@Param("address") address: string) {
     return this.tokens.migration(address);
   }
+
+  /** GET /api/v1/tokens/:address/snapshots — per-block bonding-curve history */
+  @Get(":address/snapshots")
+  snapshots(
+    @Param("address") address: string,
+    @Query() query: Record<string, string>,
+  ) {
+    return this.tokens.snapshots(address, query);
+  }
 }
 
 /** Separate controller so /creators/:address/tokens doesn't conflict. */
