@@ -122,26 +122,38 @@ export class ChartsService {
     if (!token) return { s: "error", errmsg: "Symbol not found" };
 
     // AMM formula computed entirely in SQL by joining the token row.
-    // Avoids passing JS bigint values as postgres.js parameters (unsupported type).
+    // Bucket is computed in a subquery first so GROUP BY can reference the alias
+    // without PostgreSQL rejecting the repeated parameterized expression.
     const rows = await sql`
-      WITH buckets AS (
+      WITH raw AS (
         SELECT
-          (floor(s.timestamp::numeric / ${resSecs}) * ${resSecs})::bigint       AS t,
-          (array_agg(s.open_raised_bnb::numeric  ORDER BY s.block_number ASC))[1]  AS open_raised,
-          (array_agg(s.close_raised_bnb::numeric ORDER BY s.block_number DESC))[1] AS close_raised,
-          MAX(s.close_raised_bnb::numeric)                                          AS high_raised,
-          MIN(s.close_raised_bnb::numeric)                                          AS low_raised,
-          SUM(s.volume_bnb::numeric)                                                AS v,
-          MAX(t.virtual_bnb::numeric)                                               AS v_bnb,
-          MAX(t.total_supply::numeric)                                              AS total_supply
+          (floor(s.timestamp::numeric / ${resSecs}) * ${resSecs})::bigint AS bucket,
+          s.open_raised_bnb::numeric   AS open_raised_bnb,
+          s.close_raised_bnb::numeric  AS close_raised_bnb,
+          s.volume_bnb::numeric        AS volume_bnb,
+          s.block_number,
+          t.virtual_bnb::numeric       AS v_bnb,
+          t.total_supply::numeric      AS total_supply
         FROM token_snapshot s
         JOIN token t ON t.id = s.token
         WHERE
           s.token       = ${addr}
           AND s.timestamp >= ${effectiveFrom}
           AND s.timestamp <= ${toTs}
-        GROUP BY floor(s.timestamp::numeric / ${resSecs}) * ${resSecs}
-        ORDER BY t ASC
+      ),
+      buckets AS (
+        SELECT
+          bucket                                                                    AS t,
+          (array_agg(open_raised_bnb  ORDER BY block_number ASC))[1]               AS open_raised,
+          (array_agg(close_raised_bnb ORDER BY block_number DESC))[1]              AS close_raised,
+          MAX(close_raised_bnb)                                                     AS high_raised,
+          MIN(close_raised_bnb)                                                     AS low_raised,
+          SUM(volume_bnb)                                                           AS v,
+          MAX(v_bnb)                                                                AS v_bnb,
+          MAX(total_supply)                                                         AS total_supply
+        FROM raw
+        GROUP BY bucket
+        ORDER BY bucket ASC
       )
       SELECT
         t,
