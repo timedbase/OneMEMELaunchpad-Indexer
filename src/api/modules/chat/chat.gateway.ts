@@ -5,7 +5,7 @@
  * room, then send and receive messages scoped to that token address.
  *
  * Connection URL:
- *   ws://localhost:3001/api/v1/chat/ws
+ *   wss://api.1coin.meme/api/v1/bsc/chat/ws
  *
  * Protocol (JSON frames):
  *
@@ -67,6 +67,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private readonly connections = new Map<WebSocket, ConnState>();
 
+  // Token → set of subscribed clients for O(1) broadcast.
+  private readonly rooms = new Map<string, Set<WebSocket>>();
+
   // Per-IP rate limiting: tracks the timestamp of the last accepted message.
   private readonly lastMsg = new Map<string, number>();
 
@@ -95,7 +98,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const ipConns = [...this.connections.values()].filter(s => s.ip === ip).length;
     if (ipConns >= MAX_CONNS_PER_IP) {
-      (client as any).close(1008, "Too many connections");
+      client.close(1008, "Too many connections");
       return;
     }
 
@@ -114,6 +117,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const state = this.connections.get(client);
     if (state) {
       clearInterval(state.keepalive);
+      if (state.token) {
+        const room = this.rooms.get(state.token);
+        if (room) { room.delete(client); if (room.size === 0) this.rooms.delete(state.token); }
+      }
       this.connections.delete(client);
     }
   }
@@ -129,11 +136,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    switch (frame["type"]) {
-      case "subscribe": return this.onSubscribe(client, frame);
-      case "message":   return this.onMessage(client, ip, frame);
-      default:
-        send(client, { type: "error", message: `Unknown type: ${frame["type"]}` });
+    try {
+      switch (frame["type"]) {
+        case "subscribe": return await this.onSubscribe(client, frame);
+        case "message":   return await this.onMessage(client, ip, frame);
+        default:
+          send(client, { type: "error", message: `Unknown type: ${String(frame["type"])}` });
+      }
+    } catch {
+      send(client, { type: "error", message: "Internal error — please try again" });
     }
   }
 
@@ -148,7 +159,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const state = this.connections.get(client);
-    if (state) state.token = token;
+    if (state) {
+      // Leave previous room if re-subscribing to a different token.
+      if (state.token && state.token !== token) {
+        const prev = this.rooms.get(state.token);
+        if (prev) { prev.delete(client); if (prev.size === 0) this.rooms.delete(state.token); }
+      }
+      state.token = token;
+    }
+
+    // Join room.
+    if (!this.rooms.has(token)) this.rooms.set(token, new Set());
+    this.rooms.get(token)!.add(client);
 
     const messages = await this.chat.history(token);
     send(client, { type: "history", messages });
@@ -176,7 +198,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Rate limit: max 5 messages per minute per IP per token
     const tokenKey   = `${ip}:${state.token}`;
     const timestamps = (this.tokenMsgTimestamps.get(tokenKey) ?? [])
-      .filter(ts => now - ts < MSG_WINDOW_MS); // purge expired entries
+      .filter(ts => now - ts < MSG_WINDOW_MS);
     if (timestamps.length >= MAX_MSGS_PER_WINDOW) {
       send(client, {
         type:    "error",
@@ -208,11 +230,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const msg = await this.chat.save(state.token, sender, text);
     if (!msg) return;
 
-    // Broadcast to all clients subscribed to this token
-    for (const [ws, st] of this.connections) {
-      if (st.token === state.token) {
-        send(ws, { type: "message", ...msg });
-      }
+    // Broadcast to all clients in the room — O(1) lookup via rooms map.
+    const room = this.rooms.get(state.token);
+    if (room) {
+      for (const ws of room) send(ws, { type: "message", ...msg });
     }
   }
 }
