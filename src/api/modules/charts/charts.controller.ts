@@ -2,12 +2,17 @@ import { Controller, Get, Query } from "@nestjs/common";
 import { ChartsService } from "./charts.service";
 
 /**
- * TradingView UDF-compatible chart data endpoint.
+ * Chart data endpoints for TradingView Lightweight Charts.
  *
- * Base path: GET /api/v1/charts/*
+ * Base path: GET /api/v1/{chain}/charts/*
  *
- * All responses follow the TradingView Universal Data Feed (UDF) protocol.
- * Point TradingView's datafeed URL to: https://yourapi.com/api/v1/charts
+ * Primary endpoint for the frontend chart:
+ *   GET /history  — OHLCV bar array, consumed directly by Lightweight Charts
+ *
+ * The /config, /symbols, /search, and /time endpoints implement the TradingView
+ * UDF (Universal Data Feed) protocol used by the full TradingView Advanced
+ * Charts widget. They are NOT called by Lightweight Charts automatically but are
+ * kept for potential future use with the Advanced Charts embed.
  */
 @Controller("charts")
 export class ChartsController {

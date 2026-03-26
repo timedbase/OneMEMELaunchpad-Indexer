@@ -1,9 +1,20 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, BadRequestException } from "@nestjs/common";
 import { sql } from "../../db";
 import { paginated, parsePagination, parseOrderDir, toCamel } from "../../helpers";
+
+const VALID_TOKEN_TYPES = new Set(["Standard", "Tax", "Reflection"]);
+function validateType(type: string | undefined) {
+  if (type && !VALID_TOKEN_TYPES.has(type)) {
+    throw new BadRequestException('type must be "Standard", "Tax", or "Reflection"');
+  }
+}
 import { PriceService } from "../price/price.service";
 
+// virtualLiquidity = virtualBNB (base constant) + raisedBNB (dynamic)
+// price (BNB/token) = virtualLiquidity² / (virtualBNB × totalSupply)
+// marketCap (BNB)   = virtualLiquidity² / (virtualBNB × 1e18)
 const PRICE_COLS = sql`
+  (t.virtual_bnb::numeric + t.raised_bnb::numeric)::text AS virtual_liquidity_bnb,
   CASE
     WHEN t.migrated
       THEN (m.liquidity_bnb::numeric / NULLIF(m.liquidity_tokens::numeric, 0))::text
@@ -41,6 +52,7 @@ export class DiscoverService {
   async trending(query: Record<string, string | undefined>) {
     const { page, limit, offset } = parsePagination(query);
     const type = query["type"];
+    validateType(type);
 
     const typeFilter = type ? sql`AND t.token_type = ${type}` : sql``;
 
@@ -102,6 +114,7 @@ export class DiscoverService {
   async newTokens(query: Record<string, string | undefined>) {
     const { page, limit, offset } = parsePagination(query);
     const type = query["type"];
+    validateType(type);
 
     const typeFilter = type ? sql`AND t.token_type = ${type}` : sql``;
 
@@ -123,6 +136,7 @@ export class DiscoverService {
   async graduating(query: Record<string, string | undefined>) {
     const { page, limit, offset } = parsePagination(query);
     const type  = query["type"];
+    validateType(type);
     const since = Math.floor(Date.now() / 1000) - 86_400;
 
     const typeFilter = type ? sql`AND t.token_type = ${type}` : sql``;
@@ -160,6 +174,7 @@ export class DiscoverService {
   async migrated(query: Record<string, string | undefined>) {
     const { page, limit, offset } = parsePagination(query);
     const type     = query["type"];
+    validateType(type);
     const orderDir = parseOrderDir(query);
 
     const ALLOWED_ORDER = ["migratedAt", "liquidityBNB", "volumeBNB"] as const;

@@ -15,6 +15,7 @@ export class TradesService {
 
     if (tokenFilter  && !isAddress(tokenFilter))  throw new BadRequestException("Invalid token address");
     if (traderFilter && !isAddress(traderFilter)) throw new BadRequestException("Invalid trader address");
+    if (typeFilter   && typeFilter !== "buy" && typeFilter !== "sell") throw new BadRequestException('type must be "buy" or "sell"');
 
     const ALLOWED_ORDER = ["timestamp", "bnb_amount", "token_amount", "block_number"] as const;
     const orderBy  = parseOrderBy(query, ALLOWED_ORDER, "timestamp");
@@ -51,6 +52,7 @@ export class TradesService {
     const from       = query["from"];
     const to         = query["to"];
 
+    if (typeFilter   && typeFilter !== "buy" && typeFilter !== "sell") throw new BadRequestException('type must be "buy" or "sell"');
     const fromInt2 = from ? parseInt(from, 10) : null;
     const toInt2   = to   ? parseInt(to,   10) : null;
     if (fromInt2 !== null && isNaN(fromInt2)) throw new BadRequestException("from must be a unix timestamp");

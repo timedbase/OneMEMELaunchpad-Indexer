@@ -25,8 +25,12 @@ export const token = onchainTable(
     totalSupply: t.bigint().notNull(),
 
     /**
-     * Initial virtual BNB reserve used in the bonding-curve AMM formula.
-     * Price at any point = (virtualBNB + raisedBNB) / tokensAvailable.
+     * Base virtual BNB liquidity — the constant component of the bonding-curve
+     * AMM reserve, set at token creation and never changes.
+     *
+     * Virtual Liquidity at any point = virtualBNB + raisedBNB
+     * Price (BNB/token) = virtualLiquidity² / (virtualBNB × totalSupply)
+     *                   = (virtualBNB + raisedBNB)² / (virtualBNB × totalSupply)
      */
     virtualBNB: t.bigint().notNull(),
 

@@ -182,7 +182,7 @@ export class PriceService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     await this.refresh();
-    this.timer = setInterval(() => { void this.refresh(); }, this.REFRESH_MS);
+    this.timer = setInterval(() => { void this.refresh(); }, this.REFRESH_MS).unref();
     this.logger.log(`BNB price aggregator started (refresh every ${this.REFRESH_MS / 1000}s)`);
   }
 

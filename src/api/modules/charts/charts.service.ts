@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from "@nestjs/common";
+import { Injectable, BadRequestException, NotFoundException } from "@nestjs/common";
 import { sql } from "../../db";
 
 // TradingView resolution → seconds
@@ -22,7 +22,7 @@ const RESOLUTION_MAP: Record<string, number> = {
 @Injectable()
 export class ChartsService {
 
-  /** GET /charts/config — TradingView UDF configuration */
+  /** GET /charts/config — TradingView UDF configuration (Advanced Charts widget only, not used by Lightweight Charts) */
   config() {
     return {
       supported_resolutions: ["1", "5", "15", "30", "60", "240", "D"],
@@ -38,7 +38,7 @@ export class ChartsService {
     return Math.floor(Date.now() / 1000);
   }
 
-  /** GET /charts/symbols?symbol=<tokenAddress> — symbol metadata */
+  /** GET /charts/symbols?symbol=<tokenAddress> — symbol metadata (UDF/Advanced Charts only) */
   async symbols(symbolParam: string | undefined) {
     if (!symbolParam) throw new BadRequestException("symbol is required");
 
@@ -77,17 +77,26 @@ export class ChartsService {
   }
 
   /**
-   * GET /charts/history — OHLCV bars
+   * GET /charts/history — OHLCV bars for TradingView Lightweight Charts
    *
    * Price is computed from the bonding-curve AMM formula using per-block snapshots:
-   *   price = (virtualBNB + raisedBNB)^2 / (virtualBNB * totalSupply)
+   *   virtualLiquidity  = baseVirtualBNB + raisedBNB
+   *   price (BNB/token) = virtualLiquidity² / (baseVirtualBNB × totalSupply)
+   *   (all values in wei; units cancel to produce BNB/token directly)
    *
    * Within each resolution bucket:
-   *   open  = AMM price at openRaisedBNB of the first snapshot in the bucket
-   *   close = AMM price at closeRaisedBNB of the last snapshot in the bucket
-   *   high  = AMM price at max(closeRaisedBNB) in the bucket
-   *   low   = AMM price at min(closeRaisedBNB) in the bucket
-   *   volume= sum of volumeBNB across all snapshots in the bucket
+   *   open   = AMM price at the first snapshot's openRaisedBNB
+   *   close  = AMM price at the last snapshot's closeRaisedBNB
+   *   high   = AMM price at the highest closeRaisedBNB in the bucket
+   *   low    = AMM price at the lowest closeRaisedBNB in the bucket
+   *   volume = sum of volumeBNB across all snapshots in the bucket (in BNB, not wei)
+   *
+   * Response shape:
+   *   { bars: CandleBar[], migrated: boolean, nextTime?: number }
+   *   bars is empty when no data exists in the requested range.
+   *   nextTime is set (to the earliest available snapshot timestamp) when bars
+   *   is empty and the token has not yet migrated, so the caller knows where
+   *   to seek to find the first bar.
    */
   async history(query: Record<string, string | undefined>) {
     const symbol     = query["symbol"];
@@ -119,7 +128,7 @@ export class ChartsService {
       SELECT migrated FROM token WHERE id = ${addr} LIMIT 1
     `;
 
-    if (!token) return { s: "error", errmsg: "Symbol not found" };
+    if (!token) throw new NotFoundException(`Token ${addr} not found`);
 
     // AMM formula computed entirely in SQL by joining the token row.
     // Bucket is computed in a subquery first so GROUP BY can reference the alias
@@ -165,16 +174,32 @@ export class ChartsService {
       FROM buckets
     `;
 
-    if (rows.length === 0) return { s: "no_data" };
+    if (rows.length === 0) {
+      // When no bars fall in the requested range and the token is still on the
+      // bonding curve, tell the caller where the earliest snapshot is so they
+      // can seek to the right start time.
+      let nextTime: number | undefined;
+      if (!token.migrated) {
+        const [earliest] = await sql`
+          SELECT MIN(timestamp)::int AS ts FROM token_snapshot WHERE token = ${addr}
+        `;
+        if (earliest?.ts) nextTime = earliest.ts as number;
+      }
+      return { bars: [], migrated: token.migrated as boolean, ...(nextTime !== undefined ? { nextTime } : {}) };
+    }
 
     return {
-      s: "ok",
-      t: rows.map((r: any) => Number(r.t)),
-      o: rows.map((r: any) => r.o),
-      h: rows.map((r: any) => r.h),
-      l: rows.map((r: any) => r.l),
-      c: rows.map((r: any) => r.c),
-      v: rows.map((r: any) => r.v),
+      bars: rows
+        .filter((r: any) => r.o !== null && r.c !== null && r.h !== null && r.l !== null)
+        .map((r: any) => ({
+          time:   Number(r.t),
+          open:   parseFloat(r.o),
+          high:   parseFloat(r.h),
+          low:    parseFloat(r.l),
+          close:  parseFloat(r.c),
+          volume: parseFloat(r.v) / 1e18,   // wei → BNB
+        })),
+      migrated: token.migrated as boolean,
     };
   }
 
@@ -183,13 +208,14 @@ export class ChartsService {
    */
   async search(query: Record<string, string | undefined>) {
     const q        = (query["query"] ?? "").toLowerCase();
+    const escaped  = q.replace(/[%_\\]/g, "\\$&");
     const limitRaw = parseInt(query["limit"] ?? "10", 10);
     const limit    = isNaN(limitRaw) ? 10 : Math.min(limitRaw, 30);
 
     const rows = await sql`
       SELECT id, token_type
       FROM token
-      WHERE id LIKE ${q} || '%'
+      WHERE id LIKE ${escaped + "%"} ESCAPE '\\'
       ORDER BY created_at_timestamp DESC
       LIMIT ${limit}
     `;

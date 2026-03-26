@@ -276,7 +276,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/tokens/0x7cff...1111/migration'
 
 ## 8. Tokens — Snapshots
 
-Per-block bonding-curve state. One row per block that had trade activity. `priceBnb` is computed from the AMM formula using `closeRaisedBNB`. Useful for building accurate historical price charts or querying the state at a specific block/timestamp.
+Per-block bonding-curve state. One row per block that had trade activity. Each row includes `virtualLiquidityBNB` (= `virtualBNB + closeRaisedBNB`) and `priceBnb` (= `virtualLiquidity² / (virtualBNB × totalSupply)`). Useful for building accurate historical price charts or querying the curve depth at a specific block.
 
 ```bash
 curl 'https://api.1coin.meme/api/v1/bsc/tokens/0x7cff...1111/snapshots?limit=5'
@@ -954,7 +954,9 @@ curl 'https://api.1coin.meme/api/v1/bsc/charts/symbols?symbol=0x7cff...1111'
 
 ### OHLCV History
 
-Price is derived from the bonding-curve AMM formula `(virtualBNB + raisedBNB)² / (virtualBNB × totalSupply)` using per-block snapshot data — not raw trade price ratios.
+Price is derived from the bonding-curve AMM formula using per-block snapshot data — not raw trade price ratios:
+- `virtualLiquidity = virtualBNB + raisedBNB`
+- `price (BNB/token) = virtualLiquidity² / (virtualBNB × totalSupply)`
 
 ```bash
 curl 'https://api.1coin.meme/api/v1/bsc/charts/history?symbol=0x7cff...1111&resolution=15&from=1773990000&to=1774000000'

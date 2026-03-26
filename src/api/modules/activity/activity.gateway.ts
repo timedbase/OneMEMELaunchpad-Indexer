@@ -4,8 +4,8 @@
  * Provides a real-time WSS feed of create/buy/sell events.
  *
  * Connection URL:
- *   ws://localhost:3001/api/v1/activity/ws   (HTTP mode)
- *   wss://localhost:3001/api/v1/activity/ws  (HTTPS/TLS mode)
+ *   ws://localhost:3001/api/v1/bsc/activity/ws   (HTTP mode)
+ *   wss://localhost:3001/api/v1/bsc/activity/ws  (HTTPS/TLS mode)
  *
  * Optional query params on connect:
  *   type   "create" | "buy" | "sell"  — filter by event type
@@ -17,7 +17,7 @@
  *   { event: "keepalive", data: "" }
  *
  * Example (browser):
- *   const ws = new WebSocket("wss://api.1coin.meme/api/v1/activity/ws?type=buy");
+ *   const ws = new WebSocket("wss://api.1coin.meme/api/v1/bsc/activity/ws?type=buy");
  *   ws.onmessage = (e) => console.log(JSON.parse(e.data));
  */
 
@@ -43,7 +43,8 @@ interface ConnState {
   keepalive:    ReturnType<typeof setInterval>;
 }
 
-@WebSocketGateway({ path: "/api/v1/activity/ws" })
+const chainSlug = process.env.CHAIN_SLUG ?? "bsc";
+@WebSocketGateway({ path: `/api/v1/${chainSlug}/activity/ws` })
 export class ActivityGateway
   implements OnGatewayConnection, OnGatewayDisconnect
 {

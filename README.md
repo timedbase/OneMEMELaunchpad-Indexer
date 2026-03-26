@@ -63,7 +63,7 @@ Both processes run in the same Docker container under PM2. The indexer writes to
 | `tokenType` | text | `"Standard"` \| `"Tax"` \| `"Reflection"` |
 | `creator` | hex | Address that called `createToken` |
 | `totalSupply` | bigint | Total supply at launch (wei) |
-| `virtualBNB` | bigint | Initial virtual BNB reserve for AMM pricing (wei) |
+| `virtualBNB` | bigint | Base virtual BNB liquidity — constant set at creation (wei). Virtual liquidity at any point = `virtualBNB + raisedBNB` |
 | `antibotEnabled` | boolean | Whether antibot penalty was enabled at launch |
 | `tradingBlock` | bigint | Block after which normal trading began |
 | `createdAtBlock` | bigint | Block of `TokenCreated` event |
@@ -157,7 +157,11 @@ One row per `(token, block)`. Written on every bonding-curve trade. Stores the A
 | `buyCount` | integer | Buy trades in this block |
 | `sellCount` | integer | Sell trades in this block |
 
-The AMM spot price at any snapshot: `(virtualBNB + raisedBNB)² / (virtualBNB × totalSupply)`
+AMM spot price at any snapshot (BNB/token):
+- `virtualLiquidity = virtualBNB + raisedBNB`
+- `price = virtualLiquidity² / (virtualBNB × totalSupply)`
+
+The API exposes `virtualLiquidityBNB` (= `virtualBNB + raisedBNB`) as a pre-computed field on every token and snapshot response.
 
 ---
 
@@ -227,11 +231,12 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 | `orderBy` | `created_at_block` | `created_at_block` \| `volume_bnb` \| `buy_count` \| `sell_count` \| `raised_bnb` \| `total_supply` |
 | `orderDir` | `desc` | `asc` \| `desc` |
 
-**Computed pricing fields on every token object:**
+**Computed fields on every token object:**
 
 | Field | Description |
 |---|---|
-| `priceBnb` | BNB per token. Bonding curve: AMM formula `(virtualBNB + raisedBNB)² / (virtualBNB × totalSupply)`. Migrated (list): migration-time liquidity ratio. Migrated (single token): live `getReserves()` from PancakeSwap. |
+| `virtualLiquidityBNB` | Current virtual liquidity = `virtualBNB + raisedBNB` (wei string). Represents the effective BNB depth of the bonding curve at this moment. |
+| `priceBnb` | BNB per token. Bonding curve: `virtualLiquidity² / (virtualBNB × totalSupply)`. Migrated (list): migration-time liquidity ratio. Migrated (single token): live `getReserves()` from PancakeSwap. |
 | `priceUsd` | `priceBnb × bnbSpotPrice` (10 decimal string, null if price feed unavailable) |
 | `marketCapBnb` | `priceBnb × totalSupply` in BNB |
 | `marketCapUsd` | `marketCapBnb × bnbSpotPrice` (2 decimal string) |

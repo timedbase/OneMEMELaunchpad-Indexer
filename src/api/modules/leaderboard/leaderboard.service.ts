@@ -59,7 +59,9 @@ export class LeaderboardService {
         ORDER BY ${orderCol}
         LIMIT ${limit} OFFSET ${offset}
       `,
-      sql`SELECT COUNT(*)::int AS count FROM token`,
+      sinceTs !== null
+        ? sql`SELECT COUNT(DISTINCT token)::int AS count FROM trade WHERE timestamp >= ${sinceTs}`
+        : sql`SELECT COUNT(*)::int AS count FROM token`,
     ]);
 
     return {

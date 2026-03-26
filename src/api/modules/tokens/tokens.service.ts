@@ -7,11 +7,17 @@ import { PriceService } from "../price/price.service";
 /**
  * Computed price columns — requires token alias `t` and migration LEFT JOIN alias `m`.
  *
- * Bonding curve tokens: constant-product AMM formula from virtualBNB/raisedBNB/totalSupply.
- * Migrated tokens:      migration-time liquidity (liquidity_bnb / liquidity_tokens).
- *                       findOne() overrides this with a live PancakeSwap getReserves() call.
+ * virtualLiquidity = virtualBNB (base, constant) + raisedBNB (dynamic)
+ *
+ * Bonding curve price (BNB/token) = virtualLiquidity² / (virtualBNB × totalSupply)
+ * Bonding curve market cap (BNB)  = virtualLiquidity² / (virtualBNB × 1e18)
+ *   (totalSupply cancels when converting from wei/token → full token units)
+ *
+ * Migrated tokens use migration-time liquidity snapshot for list endpoints.
+ * findOne() overrides price/mcap with a live PancakeSwap getReserves() call.
  */
 const PRICE_COLS = sql`
+  (t.virtual_bnb::numeric + t.raised_bnb::numeric)::text AS virtual_liquidity_bnb,
   CASE
     WHEN t.migrated
       THEN (m.liquidity_bnb::numeric / NULLIF(m.liquidity_tokens::numeric, 0))::text
@@ -247,6 +253,7 @@ export class TokensService {
           s.timestamp,
           s.open_raised_bnb::text                                                                           AS "openRaisedBNB",
           s.close_raised_bnb::text                                                                          AS "closeRaisedBNB",
+          (s.close_raised_bnb::numeric + t.virtual_bnb::numeric)::text                                     AS "virtualLiquidityBNB",
           s.volume_bnb::text                                                                                AS "volumeBNB",
           s.buy_count                                                                                       AS "buyCount",
           s.sell_count                                                                                      AS "sellCount",
