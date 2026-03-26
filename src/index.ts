@@ -31,6 +31,8 @@ function resolveUri(uri: string): string {
 
 interface TokenMeta {
   metaUri:  string;
+  name:     string | null;
+  symbol:   string | null;
   image:    string | null;
   website:  string | null;
   twitter:  string | null;
@@ -56,7 +58,7 @@ async function fetchTokenMeta(
       headers: { Accept: "application/json" },
     });
 
-    if (!res.ok) return { metaUri: uri, image: null, website: null, twitter: null, telegram: null };
+    if (!res.ok) return { metaUri: uri, name: null, symbol: null, image: null, website: null, twitter: null, telegram: null };
 
     const raw = await res.json() as Record<string, unknown>;
 
@@ -69,6 +71,8 @@ async function fetchTokenMeta(
 
     return {
       metaUri:  uri,
+      name:     typeof raw.name   === "string" ? raw.name   : null,
+      symbol:   typeof raw.symbol === "string" ? raw.symbol : null,
       image:    imageRaw ? resolveUri(imageRaw) : null,
       website:  typeof raw.website  === "string" ? raw.website  : null,
       twitter:  typeof (socials.twitter  ?? raw.twitter)  === "string" ? String(socials.twitter  ?? raw.twitter)  : null,
@@ -141,6 +145,8 @@ ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
     migrationTarget,
     creatorTokens:      0n,  // updated by VestingWallet:VestingAdded when schedule is created
     metaUri:            meta?.metaUri  ?? null,
+    name:               meta?.name     ?? null,
+    symbol:             meta?.symbol   ?? null,
     image:              meta?.image    ?? null,
     website:            meta?.website  ?? null,
     twitter:            meta?.twitter  ?? null,

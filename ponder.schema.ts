@@ -90,6 +90,12 @@ export const token = onchainTable(
     /** Raw metaURI string as stored on the token contract. */
     metaUri:  t.text(),
 
+    /** Token display name from metadata JSON. */
+    name:     t.text(),
+
+    /** Token symbol from metadata JSON. */
+    symbol:   t.text(),
+
     /** Resolved image URL (IPFS gateway substituted if original was ipfs://). */
     image:    t.text(),
 

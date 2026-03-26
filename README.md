@@ -78,6 +78,8 @@ Both processes run in the same Docker container under PM2. The indexer writes to
 | `migrationTarget` | bigint | BNB required to trigger migration (wei) |
 | `creatorTokens` | bigint | Creator vesting allocation (wei, 5% of supply if enabled) |
 | `metaUri` | text | Raw `metaURI` string from the token contract (nullable) |
+| `name` | text | Token display name from metadata JSON (nullable) |
+| `symbol` | text | Token symbol from metadata JSON (nullable) |
 | `image` | text | Resolved image URL (IPFS gateway substituted, nullable) |
 | `website` | text | Token website URL (nullable) |
 | `twitter` | text | Twitter / X link (nullable) |

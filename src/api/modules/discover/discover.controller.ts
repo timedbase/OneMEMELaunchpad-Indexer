@@ -17,10 +17,16 @@ export class DiscoverController {
     return this.discover.newTokens(query);
   }
 
-  /** GET /api/v1/discover/bonding */
+  /** GET /api/v1/discover/graduating — tokens closest to migration target */
+  @Get("graduating")
+  graduating(@Query() query: Record<string, string>) {
+    return this.discover.graduating(query);
+  }
+
+  /** GET /api/v1/discover/bonding — alias for /graduating */
   @Get("bonding")
   bonding(@Query() query: Record<string, string>) {
-    return this.discover.bonding(query);
+    return this.discover.graduating(query);
   }
 
   /** GET /api/v1/discover/migrated */

@@ -94,7 +94,7 @@ export class DiscoverService {
     return paginated(rows.map(r => this.withUsd(toCamel(r))), count, page, limit);
   }
 
-  async bonding(query: Record<string, string | undefined>) {
+  async graduating(query: Record<string, string | undefined>) {
     const { page, limit, offset } = parsePagination(query);
     const type  = query["type"];
     const since = Math.floor(Date.now() / 1000) - 86_400;
@@ -107,7 +107,11 @@ export class DiscoverService {
           t.*,
           ${PRICE_COLS},
           COALESCE(a."recentTrades",    0)    AS "recentTrades",
-          COALESCE(a."recentVolumeBNB", '0')  AS "recentVolumeBNB"
+          COALESCE(a."recentVolumeBNB", '0')  AS "recentVolumeBNB",
+          ROUND(
+            t.raised_bnb::numeric * 100.0
+            / NULLIF(t.migration_target::numeric, 0),
+          2)::text                            AS "graduatingProgress"
         FROM token t
         LEFT JOIN migration m ON m.id = t.id
         LEFT JOIN LATERAL (

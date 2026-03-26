@@ -28,7 +28,7 @@ The chain slug (`bsc`) reflects the `CHAIN_SLUG` environment variable. Swap it f
 16. [Activity — WebSocket](#16-activity--websocket)
 17. [Discover — Trending](#17-discover--trending)
 18. [Discover — New](#18-discover--new)
-19. [Discover — Bonding](#19-discover--bonding)
+19. [Discover — Graduating](#19-discover--graduating)
 20. [Discover — Migrated](#20-discover--migrated)
 21. [Stats](#21-stats)
 22. [Leaderboard — Tokens](#22-leaderboard--tokens)
@@ -92,6 +92,8 @@ curl 'https://api.1coin.meme/api/v1/bsc/tokens?limit=2'
       "marketCapBnb":       "1.241",
       "marketCapUsd":       "724.18",
       "metaUri":            "ipfs://QmXyz...",
+      "name":               "PEPE2",
+      "symbol":             "PEPE2",
       "image":              "https://gateway.pinata.cloud/ipfs/QmImg...",
       "website":            "https://pepe2.io",
       "twitter":            "https://x.com/pepe2bsc",
@@ -145,6 +147,8 @@ curl 'https://api.1coin.meme/api/v1/bsc/tokens/0x7cff1dd19e357e7e0c7b0bef189e415
     "marketCapBnb":       "1.253",
     "marketCapUsd":       "731.18",
     "metaUri":            "ipfs://QmXyz...",
+    "name":               "PEPE2",
+    "symbol":             "PEPE2",
     "image":              "https://gateway.pinata.cloud/ipfs/QmImg...",
     "website":            "https://pepe2.io",
     "twitter":            "https://x.com/pepe2bsc",
@@ -627,7 +631,14 @@ curl 'https://api.1coin.meme/api/v1/bsc/discover/trending?limit=5'
       "recentTrades":       12,
       "recentBuys":         9,
       "recentSells":        3,
-      "recentVolumeBNB":    "3200000000000000000"
+      "recentVolumeBNB":    "3200000000000000000",
+      "metaUri":            "ipfs://QmXyz...",
+      "name":               "PEPE2",
+      "symbol":             "PEPE2",
+      "image":              "https://gateway.pinata.cloud/ipfs/QmImg...",
+      "website":            "https://pepe2.io",
+      "twitter":            "https://x.com/pepe2bsc",
+      "telegram":           "https://t.me/pepe2"
     }
   ],
   "pagination": { "page": 1, "limit": 5, "total": 4, "pages": 1, "hasMore": false }
@@ -646,42 +657,50 @@ Returns newest non-migrated tokens, ordered by `createdAtBlock` descending. Same
 
 ---
 
-## 19. Discover — Bonding
+## 19. Discover — Graduating
+
+Non-migrated tokens sorted by `raisedBNB` descending (closest to migration target first). Includes `graduatingProgress` (0–100%), `recentTrades` and `recentVolumeBNB` for the last 24 hours. Also available at `/discover/bonding`.
 
 ```bash
-curl 'https://api.1coin.meme/api/v1/bsc/discover/bonding?limit=5'
+curl 'https://api.1coin.meme/api/v1/bsc/discover/graduating?limit=5'
 ```
-
-Non-migrated tokens sorted by `raisedBNB` descending. Includes `recentTrades` and `recentVolumeBNB` for the last 24 hours, plus full pricing fields.
 
 ```json
 {
   "data": [
     {
-      "id":                 "0xbe5b...1111",
-      "tokenType":          "Standard",
-      "creator":            "0xcreator...",
-      "totalSupply":        "1000000000000000000000000",
-      "virtualBnb":         "1000000000000000000",
-      "antibotEnabled":     false,
-      "tradingBlock":       "96780000",
-      "createdAtBlock":     "96780000",
-      "createdAtTimestamp": 1773990000,
-      "creationTxHash":     "0xcreationtx...",
-      "migrated":           false,
-      "pairAddress":        null,
-      "buyCount":           14,
-      "sellCount":          3,
-      "volumeBnb":          "4200000000000000000",
-      "raisedBnb":          "3800000000000000000",
-      "migrationTarget":    "5000000000000000000",
-      "creatorTokens":      "0",
-      "priceBnb":           "0.000001198",
-      "priceUsd":           "0.0006984200",
-      "marketCapBnb":       "1.198",
-      "marketCapUsd":       "698.42",
-      "recentTrades":       7,
-      "recentVolumeBNB":    "1200000000000000000"
+      "id":                   "0xbe5b...1111",
+      "tokenType":            "Standard",
+      "creator":              "0xcreator...",
+      "totalSupply":          "1000000000000000000000000",
+      "virtualBnb":           "1000000000000000000",
+      "antibotEnabled":       false,
+      "tradingBlock":         "96780000",
+      "createdAtBlock":       "96780000",
+      "createdAtTimestamp":   1773990000,
+      "creationTxHash":       "0xcreationtx...",
+      "migrated":             false,
+      "pairAddress":          null,
+      "buyCount":             14,
+      "sellCount":            3,
+      "volumeBnb":            "4200000000000000000",
+      "raisedBnb":            "3800000000000000000",
+      "migrationTarget":      "5000000000000000000",
+      "creatorTokens":        "0",
+      "priceBnb":             "0.000001198",
+      "priceUsd":             "0.0006984200",
+      "marketCapBnb":         "1.198",
+      "marketCapUsd":         "698.42",
+      "recentTrades":         7,
+      "recentVolumeBNB":      "1200000000000000000",
+      "graduatingProgress":   "76.00",
+      "metaUri":              "ipfs://QmXyz...",
+      "name":                 "PEPE2",
+      "symbol":               "PEPE2",
+      "image":                "https://gateway.pinata.cloud/ipfs/QmImg...",
+      "website":              "https://pepe2.io",
+      "twitter":              "https://x.com/pepe2bsc",
+      "telegram":             "https://t.me/pepe2"
     }
   ],
   "pagination": { "page": 1, "limit": 5, "total": 2, "pages": 1, "hasMore": false }
