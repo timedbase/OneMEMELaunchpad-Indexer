@@ -596,7 +596,7 @@ Wire format:
 
 ## 17. Discover — Trending
 
-Tokens with the most buy/sell trades in the last 5 minutes, ordered by trade count then volume.
+Tokens with the most buy/sell trades ordered by trade count then volume. Uses a sliding fallback window: `5m` → `1h` → `24h` → `7d` → `30d` — the smallest window with any activity is used. The active window is returned in the `window` field.
 
 ```bash
 curl 'https://api.1coin.meme/api/v1/bsc/discover/trending?limit=5'
@@ -641,7 +641,8 @@ curl 'https://api.1coin.meme/api/v1/bsc/discover/trending?limit=5'
       "telegram":           "https://t.me/pepe2"
     }
   ],
-  "pagination": { "page": 1, "limit": 5, "total": 4, "pages": 1, "hasMore": false }
+  "pagination": { "page": 1, "limit": 5, "total": 4, "pages": 1, "hasMore": false },
+  "window": "5m"
 }
 ```
 

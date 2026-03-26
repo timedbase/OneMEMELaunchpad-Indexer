@@ -40,10 +40,33 @@ export class DiscoverService {
 
   async trending(query: Record<string, string | undefined>) {
     const { page, limit, offset } = parsePagination(query);
-    const type  = query["type"];
-    const since = Math.floor(Date.now() / 1000) - 300;
+    const type = query["type"];
 
     const typeFilter = type ? sql`AND t.token_type = ${type}` : sql``;
+
+    // Window fallback: 5m → 1h → 24h → 7d → 30d
+    const WINDOWS: { secs: number; label: string }[] = [
+      { secs:     300, label: "5m"  },
+      { secs:   3_600, label: "1h"  },
+      { secs:  86_400, label: "24h" },
+      { secs: 604_800, label: "7d"  },
+      { secs: 2_592_000, label: "30d" },
+    ];
+
+    const now = Math.floor(Date.now() / 1000);
+    let since = now - WINDOWS[0].secs;
+    let window = WINDOWS[0].label;
+
+    for (const w of WINDOWS) {
+      const candidate = now - w.secs;
+      const [{ count: c }] = await sql`
+        SELECT COUNT(DISTINCT tr.token)::int AS count
+        FROM trade tr
+        JOIN token t ON t.id = tr.token
+        WHERE tr.timestamp >= ${candidate} ${typeFilter}
+      `;
+      if (c > 0) { since = candidate; window = w.label; break; }
+    }
 
     const [rows, [{ count }]] = await Promise.all([
       sql`
@@ -70,7 +93,10 @@ export class DiscoverService {
       `,
     ]);
 
-    return paginated(rows.map(r => this.withUsd(toCamel(r))), count, page, limit);
+    return {
+      ...paginated(rows.map(r => this.withUsd(toCamel(r))), count, page, limit),
+      window,
+    };
   }
 
   async newTokens(query: Record<string, string | undefined>) {
