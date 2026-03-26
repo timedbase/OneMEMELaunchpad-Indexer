@@ -59,7 +59,8 @@ function send(client: WebSocket, payload: object) {
   }
 }
 
-@WebSocketGateway({ path: "/api/v1/chat/ws" })
+const chainSlug = process.env.CHAIN_SLUG ?? "bsc";
+@WebSocketGateway({ path: `/api/v1/${chainSlug}/chat/ws` })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
@@ -73,7 +74,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Key: `${ip}:${token}`, value: array of accepted message timestamps (ms).
   private readonly tokenMsgTimestamps = new Map<string, number[]>();
 
-  constructor(private readonly chat: ChatService) {}
+  constructor(private readonly chat: ChatService) {
+    // Purge stale rate-limit state every 5 minutes to prevent unbounded map growth.
+    setInterval(() => {
+      const cutoff = Date.now() - MSG_WINDOW_MS;
+      for (const [key, timestamps] of this.tokenMsgTimestamps) {
+        const fresh = timestamps.filter(ts => ts > cutoff);
+        if (fresh.length === 0) this.tokenMsgTimestamps.delete(key);
+        else this.tokenMsgTimestamps.set(key, fresh);
+      }
+      const globalCutoff = Date.now() - RATE_LIMIT_MS;
+      for (const [ip, ts] of this.lastMsg) {
+        if (ts < globalCutoff) this.lastMsg.delete(ip);
+      }
+    }, 5 * 60_000).unref();
+  }
 
   async handleConnection(client: WebSocket, req: IncomingMessage): Promise<void> {
     const ip = clientIp(req);

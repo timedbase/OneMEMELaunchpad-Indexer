@@ -1,9 +1,11 @@
 import { Injectable, OnModuleInit, Logger } from "@nestjs/common";
 import { sql } from "../../db";
+import { isAddress } from "../../helpers";
 
 const MAX_MESSAGES_PER_TOKEN = 200;
 const MAX_TEXT_LENGTH        = 500;
-const HISTORY_LIMIT          = 50;
+const DEFAULT_HISTORY_LIMIT  = 50;
+const MAX_HISTORY_LIMIT      = 200;
 
 export interface ChatMessage {
   id:        string;
@@ -17,8 +19,11 @@ export interface ChatMessage {
 export class ChatService implements OnModuleInit {
   private readonly logger = new Logger(ChatService.name);
 
-  /** Create the chat_message table if it doesn't exist.
-   *  This table is off-chain user content — not part of Ponder's schema. */
+  /**
+   * Create the chat_message table if it doesn't exist.
+   * This table is off-chain user content — not part of Ponder's schema
+   * and is NOT wiped when Ponder re-indexes.
+   */
   async onModuleInit() {
     try {
       await sql`
@@ -41,14 +46,23 @@ export class ChatService implements OnModuleInit {
   }
 
   /** Fetch the most recent messages for a token (oldest-first for display). */
-  async history(token: string): Promise<ChatMessage[]> {
+  async history(token: string, limitRaw?: number): Promise<ChatMessage[]> {
+    if (!isAddress(token)) return [];
+
+    const limit = Math.min(
+      isFinite(limitRaw as number) && (limitRaw as number) > 0
+        ? Math.floor(limitRaw as number)
+        : DEFAULT_HISTORY_LIMIT,
+      MAX_HISTORY_LIMIT,
+    );
+
     const rows = await sql`
       SELECT id::text, token, sender, text, timestamp::int
       FROM (
         SELECT * FROM chat_message
         WHERE token = ${token.toLowerCase()}
         ORDER BY timestamp DESC
-        LIMIT ${HISTORY_LIMIT}
+        LIMIT ${limit}
       ) sub
       ORDER BY timestamp ASC
     `;
@@ -68,16 +82,18 @@ export class ChatService implements OnModuleInit {
       RETURNING id::text, token, sender, text, timestamp::int
     `;
 
-    // Prune oldest messages beyond the cap
+    // Prune oldest messages beyond the cap — efficient delete using min id of top-N rows.
     try {
       await sql`
         DELETE FROM chat_message
         WHERE token = ${token.toLowerCase()}
-          AND id NOT IN (
-            SELECT id FROM chat_message
-            WHERE token = ${token.toLowerCase()}
-            ORDER BY timestamp DESC
-            LIMIT ${MAX_MESSAGES_PER_TOKEN}
+          AND id < (
+            SELECT MIN(id) FROM (
+              SELECT id FROM chat_message
+              WHERE token = ${token.toLowerCase()}
+              ORDER BY id DESC
+              LIMIT ${MAX_MESSAGES_PER_TOKEN}
+            ) top
           )
       `;
     } catch (err: unknown) {
