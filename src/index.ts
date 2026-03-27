@@ -83,14 +83,16 @@ async function fetchTokenMeta(
   }
 }
 
-// ─── Token type from calldata ──────────────────────────────────────────────────
-// The factory has three creation functions, one per token type:
+// ─── Token type detection ─────────────────────────────────────────────────────
+//
+// Primary:  calldata selector (fast, no RPC).
 //   createToken((string,string,uint8,bool,bool,uint256,string,bytes32)) → Standard
 //   createTT((string,string,string,uint8,bool,bool,uint256,bytes32))    → Tax
 //   createRFL((string,string,string,uint8,bool,bool,uint256,bytes32))   → Reflection
 //
-// The function selector (first 4 bytes of calldata) uniquely identifies which
-// was called — no RPC calls needed.
+// Fallback: EIP-1167 bytecode + factory impl comparison (covers indirect calls
+//   via routers / multicall where event.transaction.input is not the factory
+//   calldata, and protects against future ABI changes to createRFL).
 
 function makeSelector(sig: string): string {
   return keccak256(toBytes(sig)).slice(0, 10).toLowerCase();
@@ -108,6 +110,47 @@ function tokenTypeFromCalldata(input: `0x${string}`): string | null {
   return null;
 }
 
+// EIP-1167 minimal proxy runtime bytecode prefix (10 bytes = 20 hex chars after "0x").
+// The 20-byte implementation address immediately follows.
+const EIP1167_PREFIX = "0x363d3d373d3d3d363d73";
+
+const FACTORY_IMPL_ABI = parseAbi([
+  "function standardImpl() view returns (address)",
+  "function taxImpl() view returns (address)",
+  "function reflectionImpl() view returns (address)",
+]);
+
+const FACTORY_ADDRESS = (process.env.FACTORY_ADDRESS ?? "") as `0x${string}`;
+
+async function tokenTypeFromImpl(
+  token:  `0x${string}`,
+  client: { readContract: (...args: any[]) => Promise<unknown> },
+): Promise<string | null> {
+  try {
+    // viem v2 uses getCode; fall back to getBytecode for older clients
+    const getBytecode = (client as any).getCode ?? (client as any).getBytecode;
+    if (!getBytecode) return null;
+    const bytecode = await getBytecode({ address: token }) as string | undefined;
+    if (!bytecode || !bytecode.toLowerCase().startsWith(EIP1167_PREFIX)) return null;
+
+    // Extract 20-byte impl address (40 hex chars starting at position 22)
+    const implAddr = ("0x" + bytecode.slice(22, 62)).toLowerCase();
+
+    const [stdImpl, taxImpl, rflImpl] = await Promise.all([
+      client.readContract({ address: FACTORY_ADDRESS, abi: FACTORY_IMPL_ABI, functionName: "standardImpl" }),
+      client.readContract({ address: FACTORY_ADDRESS, abi: FACTORY_IMPL_ABI, functionName: "taxImpl" }),
+      client.readContract({ address: FACTORY_ADDRESS, abi: FACTORY_IMPL_ABI, functionName: "reflectionImpl" }),
+    ]) as [`0x${string}`, `0x${string}`, `0x${string}`];
+
+    if (implAddr === stdImpl.toLowerCase()) return "Standard";
+    if (implAddr === taxImpl.toLowerCase()) return "Tax";
+    if (implAddr === rflImpl.toLowerCase()) return "Reflection";
+  } catch {
+    // Non-fatal — tokenType will be null if both strategies fail.
+  }
+  return null;
+}
+
 // ─── Token Created ────────────────────────────────────────────────────────────
 
 /**
@@ -115,13 +158,18 @@ function tokenTypeFromCalldata(input: `0x${string}`): string | null {
  * Initialises the Token row and zeroes out all running aggregates.
  *
  * virtualBNB and migrationTarget are included directly in the event.
- * tokenType is derived from the factory function selector in the creation calldata.
+ * tokenType is derived from the factory function selector in the creation calldata;
+ * if that doesn't match (e.g. indirect call via router), falls back to reading the
+ * EIP-1167 implementation address from the token's bytecode and comparing it with
+ * the factory's standardImpl / taxImpl / reflectionImpl view functions.
  */
 ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
   const { token, creator, totalSupply, virtualBNB, migrationTarget, antibotEnabled, tradingBlock } =
     event.args;
 
-  const tokenType = tokenTypeFromCalldata(event.transaction.input);
+  const tokenType =
+    tokenTypeFromCalldata(event.transaction.input) ??
+    await tokenTypeFromImpl(token, context.client);
 
   const meta = await fetchTokenMeta(token, context.client);
 
@@ -170,6 +218,13 @@ ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
 ponder.on("BondingCurve:TokenBought", async ({ event, context }) => {
   const { token, buyer, bnbIn, tokensOut, tokensToDead, raisedBNB } = event.args;
 
+  // Skip tokens created before START_BLOCK — their row won't be in the DB
+  // and the row-function update below would throw, causing Ponder to retry forever.
+  const tokenRow = await context.db.find(schema.token, { id: token });
+  if (!tokenRow) return;
+
+  const preRaisedBNB = tokenRow.raisedBNB;
+
   await context.db.insert(schema.trade).values({
     id:           `${event.transaction.hash}-${event.log.logIndex}`,
     token,
@@ -183,10 +238,6 @@ ponder.on("BondingCurve:TokenBought", async ({ event, context }) => {
     txHash:       event.transaction.hash,
     timestamp:    Number(event.block.timestamp),
   });
-
-  // Read current raisedBNB (pre-trade) for the opening price of this block.
-  const tokenRow = await context.db.find(schema.token, { id: token });
-  const preRaisedBNB = tokenRow?.raisedBNB ?? 0n;
 
   const snapshotId = `${token}-${event.block.number}`;
   await context.db
@@ -228,6 +279,12 @@ ponder.on("BondingCurve:TokenBought", async ({ event, context }) => {
 ponder.on("BondingCurve:TokenSold", async ({ event, context }) => {
   const { token, seller, tokensIn, bnbOut, raisedBNB } = event.args;
 
+  // Skip tokens created before START_BLOCK — same guard as TokenBought.
+  const tokenRow = await context.db.find(schema.token, { id: token });
+  if (!tokenRow) return;
+
+  const preRaisedBNB = tokenRow.raisedBNB;
+
   await context.db.insert(schema.trade).values({
     id:           `${event.transaction.hash}-${event.log.logIndex}`,
     token,
@@ -241,9 +298,6 @@ ponder.on("BondingCurve:TokenSold", async ({ event, context }) => {
     txHash:       event.transaction.hash,
     timestamp:    Number(event.block.timestamp),
   });
-
-  const tokenRow = await context.db.find(schema.token, { id: token });
-  const preRaisedBNB = tokenRow?.raisedBNB ?? 0n;
 
   const snapshotId = `${token}-${event.block.number}`;
   await context.db
@@ -285,6 +339,10 @@ ponder.on("BondingCurve:TokenSold", async ({ event, context }) => {
  */
 ponder.on("BondingCurve:TokenMigrated", async ({ event, context }) => {
   const { token, pair, liquidityBNB, liquidityTokens } = event.args;
+
+  // Skip tokens not in our DB (created before START_BLOCK).
+  const tokenRow = await context.db.find(schema.token, { id: token });
+  if (!tokenRow) return;
 
   await context.db.insert(schema.migration).values({
     id:              token,

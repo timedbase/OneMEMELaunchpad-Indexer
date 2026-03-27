@@ -1,6 +1,6 @@
 {
   "name": "onememelaunchpad-indexer",
-  "version": "1.0.3.210",
+  "version": "1.0.3.211",
   "description": "Real-time on-chain indexer for the OneMEME Launchpad (BSC) — built with Ponder",
   "license": "MIT",
   "author": "OneMEME Launchpad Contributors",
