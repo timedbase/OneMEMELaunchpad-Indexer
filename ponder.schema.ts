@@ -92,25 +92,28 @@ export const token = onchainTable(
     // ── Off-chain metadata (fetched from metaURI at index time) ──────────────
 
     /** Raw metaURI string as stored on the token contract. */
-    metaUri:  t.text(),
+    metaUri:     t.text(),
 
     /** Token display name from metadata JSON. */
-    name:     t.text(),
+    name:        t.text(),
 
     /** Token symbol from metadata JSON. */
-    symbol:   t.text(),
+    symbol:      t.text(),
 
-    /** Resolved image URL (IPFS gateway substituted if original was ipfs://). */
-    image:    t.text(),
+    /** Token description from metadata JSON. */
+    description: t.text(),
+
+    /** IPFS CID of the token image (e.g. "QmXxx..." or "bafyXxx..."). */
+    image:       t.text(),
 
     /** Token website URL. */
-    website:  t.text(),
+    website:     t.text(),
 
     /** Twitter / X link. */
-    twitter:  t.text(),
+    twitter:     t.text(),
 
     /** Telegram link. */
-    telegram: t.text(),
+    telegram:    t.text(),
   }),
   (table) => ({
     creatorIdx:        index().on(table.creator),

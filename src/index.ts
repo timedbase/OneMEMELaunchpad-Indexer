@@ -29,14 +29,28 @@ function resolveUri(uri: string): string {
   return uri;
 }
 
+// Extract the bare IPFS CID from any IPFS URI form.
+// "ipfs://QmXxx"  → "QmXxx"
+// "ipfs/QmXxx"    → "QmXxx"
+// "https://.../ipfs/QmXxx" → "QmXxx"
+// Non-IPFS URLs are returned as-is.
+function extractIpfsCid(uri: string): string {
+  if (uri.startsWith("ipfs://")) return uri.slice(7).split("?")[0];
+  if (uri.startsWith("ipfs/"))   return uri.slice(5).split("?")[0];
+  const m = uri.match(/\/ipfs\/([A-Za-z0-9]+)/);
+  if (m) return m[1];
+  return uri;
+}
+
 interface TokenMeta {
-  metaUri:  string;
-  name:     string | null;
-  symbol:   string | null;
-  image:    string | null;
-  website:  string | null;
-  twitter:  string | null;
-  telegram: string | null;
+  metaUri:     string;
+  name:        string | null;
+  symbol:      string | null;
+  description: string | null;
+  image:       string | null;
+  website:     string | null;
+  twitter:     string | null;
+  telegram:    string | null;
 }
 
 async function fetchTokenMeta(
@@ -58,7 +72,7 @@ async function fetchTokenMeta(
       headers: { Accept: "application/json" },
     });
 
-    if (!res.ok) return { metaUri: uri, name: null, symbol: null, image: null, website: null, twitter: null, telegram: null };
+    if (!res.ok) return { metaUri: uri, name: null, symbol: null, description: null, image: null, website: null, twitter: null, telegram: null };
 
     const raw = await res.json() as Record<string, unknown>;
 
@@ -67,16 +81,17 @@ async function fetchTokenMeta(
       ? raw.socials as Record<string, unknown>
       : {} as Record<string, unknown>;
 
-    const imageRaw = typeof raw.image === "string" ? raw.image : undefined;
+    const imageRaw = typeof raw.image === "string" ? raw.image.trim() : undefined;
 
     return {
-      metaUri:  uri,
-      name:     typeof raw.name   === "string" ? raw.name   : null,
-      symbol:   typeof raw.symbol === "string" ? raw.symbol : null,
-      image:    imageRaw ? resolveUri(imageRaw) : null,
-      website:  typeof raw.website  === "string" ? raw.website  : null,
-      twitter:  typeof (socials.twitter  ?? raw.twitter)  === "string" ? String(socials.twitter  ?? raw.twitter)  : null,
-      telegram: typeof (socials.telegram ?? raw.telegram) === "string" ? String(socials.telegram ?? raw.telegram) : null,
+      metaUri:     uri,
+      name:        typeof raw.name        === "string" ? raw.name        : null,
+      symbol:      typeof raw.symbol      === "string" ? raw.symbol      : null,
+      description: typeof raw.description === "string" ? raw.description : null,
+      image:       imageRaw ? extractIpfsCid(imageRaw) : null,
+      website:     typeof raw.website  === "string" ? raw.website  : null,
+      twitter:     typeof (socials.twitter  ?? raw.twitter)  === "string" ? String(socials.twitter  ?? raw.twitter)  : null,
+      telegram:    typeof (socials.telegram ?? raw.telegram) === "string" ? String(socials.telegram ?? raw.telegram) : null,
     };
   } catch {
     return null;
@@ -192,10 +207,11 @@ ponder.on("LaunchpadFactory:TokenCreated", async ({ event, context }) => {
     raisedBNB:          0n,
     migrationTarget,
     creatorTokens:      0n,  // updated by VestingWallet:VestingAdded when schedule is created
-    metaUri:            meta?.metaUri  ?? null,
-    name:               meta?.name     ?? null,
-    symbol:             meta?.symbol   ?? null,
-    image:              meta?.image    ?? null,
+    metaUri:            meta?.metaUri      ?? null,
+    name:               meta?.name         ?? null,
+    symbol:             meta?.symbol       ?? null,
+    description:        meta?.description  ?? null,
+    image:              meta?.image        ?? null,
     website:            meta?.website  ?? null,
     twitter:            meta?.twitter  ?? null,
     telegram:           meta?.telegram ?? null,
