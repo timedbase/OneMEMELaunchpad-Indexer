@@ -1315,26 +1315,50 @@ Returns `401` if `ADMIN_SECRET` is not set or the key is wrong.
 
 ## 34. Referrals — Register
 
-Register a referral **before** the referred wallet makes any on-chain action. One-time per wallet — returns `409` if already registered.
+**Flow:**
+1. User A shares their referral link: `https://app.1coin.meme?ref=0xA`
+2. User B clicks the link and connects their wallet
+3. Frontend detects the `?ref=` param and calls this endpoint immediately on connect
+4. From that point on, when User B earns their first points, User A receives the referral bonus
+
+Must be called **before** the referred wallet makes any on-chain action. One-time per wallet — returns `409` if already registered.
 
 ```bash
 curl -X POST 'https://api.1coin.meme/api/v1/bsc/referrals/register' \
   -H 'Content-Type: application/json' \
-  -d '{ "wallet": "0xnewuser...", "referrer": "0xreferrer..." }'
+  -d '{ "referred": "0xUserB...", "referrer": "0xUserA..." }'
 ```
+
+| Field | Description |
+|---|---|
+| `referred` | Wallet of the user who clicked the link (the connected user) |
+| `referrer` | Wallet of the user who shared the link (from `?ref=` URL param) |
 
 ```json
 {
   "data": {
-    "wallet":   "0xnewuser...",
-    "referrer": "0xreferrer..."
+    "wallet":   "0xUserB...",
+    "referrer": "0xUserA..."
   }
+}
+```
+
+**Frontend example:**
+```typescript
+// On wallet connect, check for referral param and register
+const ref = new URLSearchParams(window.location.search).get("ref");
+if (ref && connectedWallet) {
+  await fetch("/api/v1/bsc/referrals/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ referred: connectedWallet, referrer: ref }),
+  }).catch(() => {}); // 409 = already registered, safe to ignore
 }
 ```
 
 Error responses:
 - `400` — invalid address, self-referral, or missing fields
-- `409` — wallet already has a registered referrer
+- `409` — referred wallet already has a registered referrer
 
 ---
 

@@ -9,18 +9,20 @@ export class ReferralsController {
   /**
    * POST /api/v1/:chain/referrals/register
    *
-   * Register a referral before the referred wallet earns its first points.
-   * Body: { "wallet": "0x...", "referrer": "0x..." }
+   * Register a referral relationship.
+   * Call this when the referred user connects their wallet (before any on-chain action).
+   *
+   * Body: { "referred": "0x<connected wallet>", "referrer": "0x<who shared the link>" }
    */
   @Post("register")
   async register(@Body() body: Record<string, unknown>) {
-    const wallet   = typeof body["wallet"]   === "string" ? body["wallet"]   : null;
+    const referred = typeof body["referred"] === "string" ? body["referred"] : null;
     const referrer = typeof body["referrer"] === "string" ? body["referrer"] : null;
 
-    if (!wallet)   throw new BadRequestException("wallet is required");
+    if (!referred) throw new BadRequestException("referred is required");
     if (!referrer) throw new BadRequestException("referrer is required");
 
-    const result = await this.referrals.register(wallet, referrer);
+    const result = await this.referrals.register(referred, referrer);
     return { data: result };
   }
 

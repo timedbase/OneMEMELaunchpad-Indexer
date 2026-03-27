@@ -526,7 +526,7 @@ The export endpoint requires the `X-Admin-Key: <ADMIN_SECRET>` header and return
 
 **`POST /api/v1/{chain}/referrals/register` body:**
 ```json
-{ "wallet": "0x...", "referrer": "0x..." }
+{ "referred": "0xUserWhoClicked...", "referrer": "0xWhoSharedTheLink..." }
 ```
 
 Must be called **before** the referred wallet makes any on-chain action. Self-referral is rejected. Registration is one-time per wallet — attempting to re-register returns 409.

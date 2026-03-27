@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, Logger } from "@nestjs/common";
 import { sql } from "../../db";
 import { paginated, parsePagination, isAddress } from "../../helpers";
+import { PriceService } from "../price/price.service";
 
 // ── Point values ──────────────────────────────────────────────────────────────
 
@@ -31,6 +32,8 @@ const POLL_INTERVAL_MS = 30_000;
 @Injectable()
 export class PointsService implements OnModuleInit {
   private readonly logger = new Logger(PointsService.name);
+
+  constructor(private readonly price: PriceService) {}
 
   async onModuleInit() {
     try {
@@ -99,7 +102,7 @@ export class PointsService implements OnModuleInit {
       await this.awardTokenCreated(startBlock);
       await this.awardTrades(startBlock);
       await this.awardMigrations(startBlock);
-      await this.awardReferralBonuses();
+      await this.awardReferralBonuses(startBlock);
     } catch (err: unknown) {
       this.logger.warn(`Points poll error: ${(err as Error).message}`);
     }
@@ -172,15 +175,47 @@ export class PointsService implements OnModuleInit {
     `;
   }
 
-  private async awardReferralBonuses(): Promise<void> {
+  private async awardReferralBonuses(startBlock: bigint): Promise<void> {
+    // Qualification: referred user must either
+    //   (a) complete ≥5 trades with a combined BNB volume worth ≥$50 USD, OR
+    //   (b) have launched a token (creator of at least one token)
+    // Both checks respect the POINTS_START_BLOCK gate.
+
+    const priceData = this.price.getPrice();
+    if ("error" in priceData) {
+      this.logger.warn("Skipping referral bonus poll — BNB price not yet available");
+      return;
+    }
+    const bnbPrice = priceData.bnbUsdt;
+
+    const blockFilter = startBlock > 0n
+      ? sql`AND tr.block_number::numeric >= ${Number(startBlock)}`
+      : sql``;
+    const tokenBlockFilter = startBlock > 0n
+      ? sql`AND t.created_at_block::numeric >= ${Number(startBlock)}`
+      : sql``;
+
     const pending = await sql`
       SELECT r.wallet AS referred, r.referrer
       FROM referral r
       WHERE r.credited = FALSE
-        AND EXISTS (
-          SELECT 1 FROM point_event pe
-          WHERE pe.wallet = r.wallet
-            AND pe.event_type IN ('TOKEN_CREATED', 'BUY', 'SELL', 'TOKEN_MIGRATED')
+        AND (
+          -- (a) ≥5 trades AND total BNB volume * bnbPrice ≥ $50
+          (
+            SELECT COUNT(*) FROM trade tr
+            WHERE tr.trader = r.wallet ${blockFilter}
+          ) >= 5
+          AND
+          (
+            SELECT COALESCE(SUM(tr.bnb_amount::numeric / 1e18), 0) FROM trade tr
+            WHERE tr.trader = r.wallet ${blockFilter}
+          ) * ${bnbPrice} >= 50
+          OR
+          -- (b) launched at least one token
+          EXISTS (
+            SELECT 1 FROM token t
+            WHERE t.creator = r.wallet ${tokenBlockFilter}
+          )
         )
     `;
 
