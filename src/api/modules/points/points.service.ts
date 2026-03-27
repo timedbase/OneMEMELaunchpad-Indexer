@@ -13,16 +13,17 @@ export const POINTS = {
 } as const;
 
 // ── Season / start-block gate ─────────────────────────────────────────────────
-// Set POINTS_START_BLOCK in .env to only award points for on-chain events at or
-// after that block.  Unset (or 0) means award for all indexed events.
-// Changing this value affects future polls only — already-inserted rows are
-// not retroactively removed.
+// Falls back to START_BLOCK (indexer start) when POINTS_START_BLOCK is unset.
 
 function getStartBlock(): bigint {
-  const raw = process.env.POINTS_START_BLOCK;
+  const raw = process.env.POINTS_START_BLOCK ?? process.env.START_BLOCK;
   if (!raw) return 0n;
-  const n = BigInt(raw);
-  return n > 0n ? n : 0n;
+  try {
+    const n = BigInt(raw);
+    return n > 0n ? n : 0n;
+  } catch {
+    return 0n;
+  }
 }
 
 const POLL_INTERVAL_MS = 30_000;
@@ -33,30 +34,48 @@ export class PointsService implements OnModuleInit {
 
   async onModuleInit() {
     try {
+      // ── Create tables ───────────────────────────────────────────────────────
+      //
+      // point_event columns:
+      //   source_id   — dedup key (trade.id, tx_hash, or "ref:{wallet}")
+      //   tx_hash     — real on-chain tx hash (NULL for referral bonuses)
+      //   block_number — block where the action occurred (NULL for referral bonuses)
       await sql`
         CREATE TABLE IF NOT EXISTS point_event (
-          id          BIGSERIAL PRIMARY KEY,
-          wallet      TEXT          NOT NULL,
-          event_type  TEXT          NOT NULL,
-          points      NUMERIC(10,2) NOT NULL,
-          token       TEXT,
-          tx_hash     TEXT,
+          id           BIGSERIAL     PRIMARY KEY,
+          wallet       TEXT          NOT NULL,
+          event_type   TEXT          NOT NULL,
+          points       NUMERIC(10,2) NOT NULL,
+          token        TEXT,
+          source_id    TEXT,
+          tx_hash      TEXT,
           block_number BIGINT,
-          timestamp   BIGINT        NOT NULL
+          timestamp    BIGINT        NOT NULL
         )
       `;
-      // Unique dedup: one point_event per (event_type, tx_hash).
-      // tx_hash is the on-chain tx hash (or synthetic key for referral bonuses).
+
+      // Migrate existing installs: add columns that may be missing.
+      await sql`ALTER TABLE point_event ADD COLUMN IF NOT EXISTS source_id    TEXT`;
+      await sql`ALTER TABLE point_event ADD COLUMN IF NOT EXISTS block_number BIGINT`;
+
+      // Backfill source_id from tx_hash for rows inserted before this migration.
+      await sql`UPDATE point_event SET source_id = tx_hash WHERE source_id IS NULL AND tx_hash IS NOT NULL`;
+
+      // Dedup index on source_id (not tx_hash — trades share a tx_hash across log indices).
+      // Drop old index first in case it was built on tx_hash.
+      await sql`DROP INDEX IF EXISTS point_event_dedup`;
       await sql`
         CREATE UNIQUE INDEX IF NOT EXISTS point_event_dedup
-          ON point_event (event_type, tx_hash)
-          WHERE tx_hash IS NOT NULL
+          ON point_event (event_type, source_id)
+          WHERE source_id IS NOT NULL
       `;
-      await sql`CREATE INDEX IF NOT EXISTS point_event_wallet_idx    ON point_event (wallet)`;
-      await sql`CREATE INDEX IF NOT EXISTS point_event_ts_idx        ON point_event (timestamp DESC)`;
-      await sql`CREATE INDEX IF NOT EXISTS point_event_block_idx     ON point_event (block_number)`;
 
-      // Referral table — also created here so the poller can safely query it
+      await sql`CREATE INDEX IF NOT EXISTS point_event_wallet_idx ON point_event (wallet)`;
+      await sql`CREATE INDEX IF NOT EXISTS point_event_ts_idx     ON point_event (timestamp DESC)`;
+      await sql`CREATE INDEX IF NOT EXISTS point_event_block_idx  ON point_event (block_number)`;
+      await sql`CREATE INDEX IF NOT EXISTS point_event_tx_idx     ON point_event (tx_hash)`;
+
+      // Referral table — created here too so the poller can safely query it
       // regardless of module initialisation order.
       await sql`
         CREATE TABLE IF NOT EXISTS referral (
@@ -93,79 +112,82 @@ export class PointsService implements OnModuleInit {
 
   private async awardTokenCreated(startBlock: bigint): Promise<void> {
     const blockFilter = startBlock > 0n
-      ? sql`AND t.created_at_block::numeric >= ${startBlock}`
+      ? sql`AND t.created_at_block::numeric >= ${Number(startBlock)}`
       : sql``;
 
     await sql`
-      INSERT INTO point_event (wallet, event_type, points, token, tx_hash, block_number, timestamp)
+      INSERT INTO point_event (wallet, event_type, points, token, source_id, tx_hash, block_number, timestamp)
       SELECT
         t.creator,
         'TOKEN_CREATED',
         ${POINTS.TOKEN_CREATED},
         t.id,
-        t.creation_tx_hash,
+        t.creation_tx_hash,          -- source_id = tx_hash (one TokenCreated per tx)
+        t.creation_tx_hash,          -- real tx hash
         t.created_at_block,
         t.created_at_timestamp::bigint
       FROM token t
       LEFT JOIN point_event pe
-        ON pe.event_type = 'TOKEN_CREATED' AND pe.tx_hash = t.creation_tx_hash
+        ON pe.event_type = 'TOKEN_CREATED' AND pe.source_id = t.creation_tx_hash
       WHERE pe.id IS NULL ${blockFilter}
-      ON CONFLICT (event_type, tx_hash) DO NOTHING
+      ON CONFLICT (event_type, source_id) DO NOTHING
     `;
   }
 
   private async awardTrades(startBlock: bigint): Promise<void> {
-    // Use trade.id ({txHash}-{logIndex}) as the dedup key so each log line
-    // gets exactly one point event even if multiple trades share a tx hash.
+    // source_id = trade.id ({txHash}-{logIndex}) for per-log dedup.
+    // tx_hash   = trade.tx_hash — the real transaction hash recorded for the user.
     const blockFilter = startBlock > 0n
-      ? sql`AND tr.block_number::numeric >= ${startBlock}`
+      ? sql`AND tr.block_number::numeric >= ${Number(startBlock)}`
       : sql``;
 
     await sql`
-      INSERT INTO point_event (wallet, event_type, points, token, tx_hash, block_number, timestamp)
+      INSERT INTO point_event (wallet, event_type, points, token, source_id, tx_hash, block_number, timestamp)
       SELECT
         tr.trader,
         CASE WHEN tr.trade_type = 'buy' THEN 'BUY' ELSE 'SELL' END,
         CASE WHEN tr.trade_type = 'buy' THEN ${POINTS.BUY} ELSE ${POINTS.SELL} END,
         tr.token,
-        tr.id,
+        tr.id,           -- source_id = {txHash}-{logIndex} (dedup per log line)
+        tr.tx_hash,      -- real tx hash stored separately
         tr.block_number,
         tr.timestamp::bigint
       FROM trade tr
       LEFT JOIN point_event pe
-        ON pe.event_type IN ('BUY', 'SELL') AND pe.tx_hash = tr.id
+        ON pe.event_type IN ('BUY', 'SELL') AND pe.source_id = tr.id
       WHERE pe.id IS NULL ${blockFilter}
-      ON CONFLICT (event_type, tx_hash) DO NOTHING
+      ON CONFLICT (event_type, source_id) DO NOTHING
     `;
   }
 
   private async awardMigrations(startBlock: bigint): Promise<void> {
     const blockFilter = startBlock > 0n
-      ? sql`AND m.block_number::numeric >= ${startBlock}`
+      ? sql`AND m.block_number::numeric >= ${Number(startBlock)}`
       : sql``;
 
     await sql`
-      INSERT INTO point_event (wallet, event_type, points, token, tx_hash, block_number, timestamp)
+      INSERT INTO point_event (wallet, event_type, points, token, source_id, tx_hash, block_number, timestamp)
       SELECT
         tk.creator,
         'TOKEN_MIGRATED',
         ${POINTS.TOKEN_MIGRATED},
         m.token,
-        m.tx_hash,
+        m.tx_hash,    -- source_id = tx_hash (one TokenMigrated per tx)
+        m.tx_hash,    -- real tx hash
         m.block_number,
         m.timestamp::bigint
       FROM migration m
       JOIN token tk ON tk.id = m.token
       LEFT JOIN point_event pe
-        ON pe.event_type = 'TOKEN_MIGRATED' AND pe.tx_hash = m.tx_hash
+        ON pe.event_type = 'TOKEN_MIGRATED' AND pe.source_id = m.tx_hash
       WHERE pe.id IS NULL ${blockFilter}
-      ON CONFLICT (event_type, tx_hash) DO NOTHING
+      ON CONFLICT (event_type, source_id) DO NOTHING
     `;
   }
 
   private async awardReferralBonuses(): Promise<void> {
-    // Find referrals where the referred wallet has now earned ≥1 qualifying
-    // point but the referrer hasn't been credited yet.
+    // Referral bonuses have no on-chain tx — tx_hash and block_number are NULL.
+    // source_id is a synthetic key "ref:{referred_wallet}" for dedup.
     const pending = await sql`
       SELECT r.wallet AS referred, r.referrer
       FROM referral r
@@ -178,21 +200,22 @@ export class PointsService implements OnModuleInit {
     `;
 
     for (const row of pending) {
-      const syntheticKey = `ref:${row.referred as string}`;
+      const sourceId = `ref:${row.referred as string}`;
       const now = Math.floor(Date.now() / 1000);
       try {
         await sql`
-          INSERT INTO point_event (wallet, event_type, points, token, tx_hash, block_number, timestamp)
+          INSERT INTO point_event (wallet, event_type, points, token, source_id, tx_hash, block_number, timestamp)
           VALUES (
-            ${row.referrer as string},
+            ${row.referrer  as string},
             'REFERRAL_BONUS',
             ${POINTS.REFERRAL_BONUS},
             NULL,
-            ${syntheticKey},
+            ${sourceId},
+            NULL,
             NULL,
             ${now}
           )
-          ON CONFLICT (event_type, tx_hash) DO NOTHING
+          ON CONFLICT (event_type, source_id) DO NOTHING
         `;
         await sql`UPDATE referral SET credited = TRUE WHERE wallet = ${row.referred as string}`;
       } catch (err: unknown) {
@@ -231,7 +254,7 @@ export class PointsService implements OnModuleInit {
       wallet:      addr,
       totalPoints: summary.totalPoints as string,
       eventCount:  summary.eventCount  as number,
-      breakdown:   breakdown as { eventType: string; count: number; points: string }[],
+      breakdown:   breakdown as unknown as { eventType: string; count: number; points: string }[],
     };
   }
 
@@ -280,10 +303,10 @@ export class PointsService implements OnModuleInit {
     `;
 
     return {
-      exportedAt:  Math.floor(Date.now() / 1000),
-      startBlock:  blockInfo,
+      exportedAt:   Math.floor(Date.now() / 1000),
+      startBlock:   blockInfo,
       totalWallets: rows.length,
-      pointValues: POINTS,
+      pointValues:  POINTS,
       data: rows,
     };
   }
