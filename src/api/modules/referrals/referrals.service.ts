@@ -38,6 +38,19 @@ export class ReferralsService implements OnModuleInit {
 
     if (w === r) throw new BadRequestException("Cannot refer yourself");
 
+    // Reject if the wallet already has on-chain activity — they are an existing
+    // user and cannot be attributed to a referrer after the fact.
+    const [activity] = await sql`
+      SELECT 1 AS hit
+      FROM (
+        SELECT 1 FROM trade  WHERE trader  = ${w} LIMIT 1
+        UNION ALL
+        SELECT 1 FROM token  WHERE creator = ${w} LIMIT 1
+      ) AS acts
+      LIMIT 1
+    `;
+    if (activity) throw new BadRequestException("Wallet already has on-chain activity and cannot be referred");
+
     const now = Math.floor(Date.now() / 1000);
 
     const result = await sql`
