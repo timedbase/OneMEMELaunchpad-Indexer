@@ -20,11 +20,14 @@ import { ChartsModule }        from "./modules/charts/charts.module";
 import { PriceModule }         from "./modules/price/price.module";
 import { ChatModule }          from "./modules/chat/chat.module";
 import { VestingModule }       from "./modules/vesting/vesting.module";
+import { PointsModule }        from "./modules/points/points.module";
+import { ReferralsModule }     from "./modules/referrals/referrals.module";
 
 import {
   QuoteRateLimitMiddleware,
   StatsRateLimitMiddleware,
   ListRateLimitMiddleware,
+  PostRateLimitMiddleware,
 } from "./common/rate-limit.middleware";
 
 @Module({
@@ -43,6 +46,8 @@ import {
     PriceModule,
     ChatModule,
     VestingModule,
+    PointsModule,
+    ReferralsModule,
   ],
   controllers: [HealthController],
 })
@@ -63,5 +68,10 @@ export class AppModule implements NestModule {
     consumer
       .apply(ListRateLimitMiddleware)
       .forRoutes({ path: "*", method: RequestMethod.GET });
+
+    // POST endpoints — 10 req/min per IP (referral registration)
+    consumer
+      .apply(PostRateLimitMiddleware)
+      .forRoutes({ path: "*", method: RequestMethod.POST });
   }
 }

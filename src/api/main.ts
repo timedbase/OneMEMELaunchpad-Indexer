@@ -49,7 +49,7 @@ async function bootstrap() {
   // Origin enforcement is handled by Cloudflare WAF — no in-app allowlist needed.
   app.enableCors({
     origin:         true,
-    methods:        ["GET", "OPTIONS"],
+    methods:        ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type"],
     exposedHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After"],
   });

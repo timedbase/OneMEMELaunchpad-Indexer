@@ -100,3 +100,6 @@ export const StatsRateLimitMiddleware = createRateLimitMiddleware(10);
 
 /** 60 req/min — default for paginated lists, detail lookups, etc. */
 export const ListRateLimitMiddleware  = createRateLimitMiddleware(60);
+
+/** 10 req/min — POST endpoints (referral registration, etc.). */
+export const PostRateLimitMiddleware  = createRateLimitMiddleware(10);
