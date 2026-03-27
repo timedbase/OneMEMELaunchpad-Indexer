@@ -55,13 +55,17 @@ export class PointsService implements OnModuleInit {
       `;
 
       // Migrate existing installs: add source_id if it doesn't exist yet,
-      // then backfill from the old tx_hash column.
+      // then attempt to backfill from the old tx_hash column (may not exist).
       await sql`ALTER TABLE point_event ADD COLUMN IF NOT EXISTS source_id TEXT`;
-      await sql`
-        UPDATE point_event
-        SET source_id = tx_hash
-        WHERE source_id IS NULL AND tx_hash IS NOT NULL
-      `;
+      try {
+        await sql`
+          UPDATE point_event
+          SET source_id = tx_hash
+          WHERE source_id IS NULL AND tx_hash IS NOT NULL
+        `;
+      } catch {
+        // tx_hash column never existed on this install — nothing to backfill.
+      }
 
       // Dedup index on (event_type, source_id).
       // Drop old index in case it was created on tx_hash.
