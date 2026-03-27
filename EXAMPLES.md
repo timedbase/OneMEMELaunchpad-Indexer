@@ -40,6 +40,11 @@ The chain slug (`bsc`) reflects the `CHAIN_SLUG` environment variable. Swap it f
 28. [Vesting](#28-vesting)
 29. [Chat](#29-chat)
 30. [Metadata Upload](#30-metadata-upload)
+31. [Points — Leaderboard](#31-points--leaderboard)
+32. [Points — Wallet](#32-points--wallet)
+33. [Points — Export (admin)](#33-points--export-admin)
+34. [Referrals — Register](#34-referrals--register)
+35. [Referrals — Stats](#35-referrals--stats)
 
 ---
 
@@ -94,7 +99,8 @@ curl 'https://api.1coin.meme/api/v1/bsc/tokens?limit=2'
       "metaUri":            "ipfs://QmXyz...",
       "name":               "PEPE2",
       "symbol":             "PEPE2",
-      "image":              "https://gateway.pinata.cloud/ipfs/QmImg...",
+      "description":        "The next pepe on BSC",
+      "image":              "QmImg...",
       "website":            "https://pepe2.io",
       "twitter":            "https://x.com/pepe2bsc",
       "telegram":           "https://t.me/pepe2"
@@ -149,7 +155,8 @@ curl 'https://api.1coin.meme/api/v1/bsc/tokens/0x7cff1dd19e357e7e0c7b0bef189e415
     "metaUri":            "ipfs://QmXyz...",
     "name":               "PEPE2",
     "symbol":             "PEPE2",
-    "image":              "https://gateway.pinata.cloud/ipfs/QmImg...",
+    "description":        "The next pepe on BSC",
+    "image":              "QmImg...",
     "website":            "https://pepe2.io",
     "twitter":            "https://x.com/pepe2bsc",
     "telegram":           "https://t.me/pepe2"
@@ -635,7 +642,8 @@ curl 'https://api.1coin.meme/api/v1/bsc/discover/trending?limit=5'
       "metaUri":            "ipfs://QmXyz...",
       "name":               "PEPE2",
       "symbol":             "PEPE2",
-      "image":              "https://gateway.pinata.cloud/ipfs/QmImg...",
+      "description":        "The next pepe on BSC",
+      "image":              "QmImg...",
       "website":            "https://pepe2.io",
       "twitter":            "https://x.com/pepe2bsc",
       "telegram":           "https://t.me/pepe2"
@@ -1090,7 +1098,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/creators/0xcreator.../vesting?limit=5'
 ## 29. Chat
 
 ```bash
-curl 'https://api.1coin.meme/api/v1/bsc/chat/0x7cff...1111/messages'
+curl 'https://api.1coin.meme/api/v1/bsc/chat/0x7cff...1111/messages?limit=50'
 ```
 
 ```json
@@ -1100,12 +1108,51 @@ curl 'https://api.1coin.meme/api/v1/bsc/chat/0x7cff...1111/messages'
       "id":        "1",
       "token":     "0x7cff...1111",
       "sender":    "0xuser...",
-      "text":      "gm, this is going to moon",
+      "text":      "gm, this is going to moon 🚀🔥",
       "timestamp": 1774050000
+    },
+    {
+      "id":        "2",
+      "token":     "0x7cff...1111",
+      "sender":    "0xuser2...",
+      "text":      "wen migration? 👀",
+      "timestamp": 1774050042
     }
   ]
 }
 ```
+
+Messages support full Unicode including emoji. The 500-character limit counts Unicode code points, not UTF-16 units (so emoji count as 1 character each).
+
+**WebSocket (send + receive):**
+
+```typescript
+const ws = new WebSocket("wss://api.1coin.meme/api/v1/bsc/chat/ws");
+
+ws.onopen = () => {
+  // 1. Subscribe to a token room
+  ws.send(JSON.stringify({ type: "subscribe", token: "0x7cff...1111" }));
+};
+
+ws.onmessage = (msg) => {
+  const frame = JSON.parse(msg.data);
+  if (frame.type === "history") {
+    console.log("history:", frame.messages);
+  }
+  if (frame.type === "message") {
+    console.log(frame.sender, ":", frame.text); // supports emoji
+  }
+};
+
+// 2. Send a message (after subscribing)
+ws.send(JSON.stringify({
+  type:   "message",
+  sender: "0xmywallet...",
+  text:   "gm everyone 🌅",
+}));
+```
+
+Rate limits: 1 message per 3 s per IP globally; max 5 messages per minute per IP per token.
 
 ---
 
@@ -1169,6 +1216,155 @@ async function uploadMetadata(imageFile: File, fields: {
   return data;
 }
 ```
+
+---
+
+## 31. Points — Leaderboard
+
+```bash
+curl 'https://api.1coin.meme/api/v1/bsc/points/leaderboard?limit=5'
+```
+
+```json
+{
+  "data": [
+    {
+      "wallet":          "0xcreator...",
+      "totalPoints":     "91.5",
+      "eventCount":      4,
+      "lastActivityAt":  1774060000
+    },
+    {
+      "wallet":          "0xtrader...",
+      "totalPoints":     "12.0",
+      "eventCount":      10,
+      "lastActivityAt":  1774058000
+    }
+  ],
+  "pagination": { "page": 1, "limit": 5, "total": 38, "pages": 8, "hasMore": true }
+}
+```
+
+---
+
+## 32. Points — Wallet
+
+```bash
+curl 'https://api.1coin.meme/api/v1/bsc/points/0xcreator...'
+```
+
+```json
+{
+  "data": {
+    "wallet":      "0xcreator...",
+    "totalPoints": "91.5",
+    "eventCount":  4,
+    "breakdown": [
+      { "eventType": "TOKEN_MIGRATED", "count": 1, "points": "80" },
+      { "eventType": "TOKEN_CREATED",  "count": 1, "points": "5"  },
+      { "eventType": "BUY",            "count": 5, "points": "5"  },
+      { "eventType": "SELL",           "count": 3, "points": "1.5"}
+    ]
+  }
+}
+```
+
+---
+
+## 33. Points — Export (admin)
+
+Requires `X-Admin-Key` header matching `ADMIN_SECRET` env var. Returns all wallets for reward issuance.
+
+```bash
+curl 'https://api.1coin.meme/api/v1/bsc/points/export' \
+  -H 'X-Admin-Key: your-admin-secret'
+```
+
+```json
+{
+  "exportedAt":   1774060000,
+  "startBlock":   "96690026",
+  "totalWallets": 38,
+  "pointValues": {
+    "TOKEN_CREATED":  5,
+    "BUY":            1,
+    "SELL":           0.5,
+    "TOKEN_MIGRATED": 80,
+    "REFERRAL_BONUS": 10
+  },
+  "data": [
+    {
+      "wallet":              "0xcreator...",
+      "totalPoints":         "91.5",
+      "eventCount":          4,
+      "tokenCreatedCount":   1,
+      "buyCount":            5,
+      "sellCount":           3,
+      "tokenMigratedCount":  1,
+      "referralBonusCount":  0,
+      "firstActivityAt":     1773995248,
+      "lastActivityAt":      1774060000
+    }
+  ]
+}
+```
+
+Returns `401` if `ADMIN_SECRET` is not set or the key is wrong.
+
+---
+
+## 34. Referrals — Register
+
+Register a referral **before** the referred wallet makes any on-chain action. One-time per wallet — returns `409` if already registered.
+
+```bash
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/referrals/register' \
+  -H 'Content-Type: application/json' \
+  -d '{ "wallet": "0xnewuser...", "referrer": "0xreferrer..." }'
+```
+
+```json
+{
+  "data": {
+    "wallet":   "0xnewuser...",
+    "referrer": "0xreferrer..."
+  }
+}
+```
+
+Error responses:
+- `400` — invalid address, self-referral, or missing fields
+- `409` — wallet already has a registered referrer
+
+---
+
+## 35. Referrals — Stats
+
+```bash
+curl 'https://api.1coin.meme/api/v1/bsc/referrals/0xreferrer...'
+```
+
+```json
+{
+  "data": {
+    "referrer":       "0xreferrer...",
+    "referredCount":  3,
+    "creditedCount":  2,
+    "pendingCount":   1,
+    "bonusPoints":    "20",
+    "bonusPerCredit": 10,
+    "referred": [
+      { "wallet": "0xuser1...", "credited": true,  "registeredAt": 1774010000 },
+      { "wallet": "0xuser2...", "credited": true,  "registeredAt": 1774020000 },
+      { "wallet": "0xuser3...", "credited": false, "registeredAt": 1774055000 }
+    ]
+  }
+}
+```
+
+`credited` = the referred user has earned at least one point (referral bonus already awarded to referrer). `pending` = registered but not yet active.
+
+---
 
 ### Full Launch Flow (TypeScript)
 
