@@ -222,7 +222,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       send(client, { type: "error", message: "message.text cannot be empty" });
       return;
     }
-    if (text.length > 500) {
+    if ([...text].length > 500) {
       send(client, { type: "error", message: "message.text cannot exceed 500 characters" });
       return;
     }

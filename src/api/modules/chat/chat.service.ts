@@ -71,7 +71,7 @@ export class ChatService implements OnModuleInit {
 
   /** Persist a new message and prune old ones so storage stays bounded. */
   async save(token: string, sender: string, text: string): Promise<ChatMessage | null> {
-    const clean = text.trim().slice(0, MAX_TEXT_LENGTH);
+    const clean = [...text.trim()].slice(0, MAX_TEXT_LENGTH).join("");
     if (!clean) return null;
 
     const now = Math.floor(Date.now() / 1000);
