@@ -1319,7 +1319,7 @@ Returns `401` if `ADMIN_SECRET` is not set or the key is wrong.
 1. User A shares their referral link: `https://app.1coin.meme?ref=0xA`
 2. User B clicks the link and connects their wallet
 3. Frontend detects the `?ref=` param and calls this endpoint immediately on connect
-4. From that point on, when User B earns their first points, User A receives the referral bonus
+4. Once User B completes ≥5 trades worth ≥$50 USD total **or** launches a token, User A automatically receives 10 referral bonus points
 
 Must be called **before** the referred wallet makes any on-chain action. One-time per wallet — returns `409` if already registered.
 
@@ -1357,7 +1357,7 @@ if (ref && connectedWallet) {
 ```
 
 Error responses:
-- `400` — invalid address, self-referral, or missing fields
+- `400` — invalid address, self-referral, mutual referral, referred wallet already has on-chain activity, or missing fields
 - `409` — referred wallet already has a registered referrer
 
 ---
@@ -1386,7 +1386,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/referrals/0xreferrer...'
 }
 ```
 
-`credited` = the referred user has earned at least one point (referral bonus already awarded to referrer). `pending` = registered but not yet active.
+`credited` = referred user qualified (≥5 trades/$50 vol or launched a token) and the referral bonus was awarded to the referrer. `pending` = registered but qualification threshold not yet reached.
 
 ---
 

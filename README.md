@@ -529,7 +529,19 @@ The export endpoint requires the `X-Admin-Key: <ADMIN_SECRET>` header and return
 { "referred": "0xUserWhoClicked...", "referrer": "0xWhoSharedTheLink..." }
 ```
 
-Must be called **before** the referred wallet makes any on-chain action. Self-referral is rejected. Registration is one-time per wallet — attempting to re-register returns 409.
+Must be called **before** the referred wallet makes any on-chain action.
+
+**Registration is rejected if:**
+- Self-referral (`referred === referrer`)
+- Mutual referral (referrer is already registered as referred by this wallet)
+- Referred wallet already has trades or tokens on-chain
+- Referred wallet already has a registered referrer (returns `409`)
+
+**Referral bonus is credited once the referred wallet:**
+- Completes ≥5 trades with combined BNB volume worth ≥$50 USD, **or**
+- Launches at least one token
+
+The bonus (10 pts) is awarded to the **referrer**. The check runs every 30 seconds in the background.
 
 ---
 
