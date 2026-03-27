@@ -186,6 +186,12 @@ export class PointsService implements OnModuleInit {
       this.logger.warn("Skipping referral bonus poll — BNB price not yet available");
       return;
     }
+    // Skip if price data is stale (all exchanges failed) to avoid qualifying
+    // wallets against an outdated BNB/USD rate.
+    if (priceData.stale) {
+      this.logger.warn("Skipping referral bonus poll — BNB price is stale");
+      return;
+    }
     const bnbPrice = priceData.bnbUsdt;
 
     const blockFilter = startBlock > 0n

@@ -38,6 +38,13 @@ export class ReferralsService implements OnModuleInit {
 
     if (w === r) throw new BadRequestException("Cannot refer yourself");
 
+    // Reject mutual referral: if the referrer is already registered as referred
+    // by this wallet, allowing both sides would let them credit each other.
+    const [mutual] = await sql`
+      SELECT 1 FROM referral WHERE wallet = ${r} AND referrer = ${w} LIMIT 1
+    `;
+    if (mutual) throw new BadRequestException("Mutual referral not allowed");
+
     // Reject if the wallet already has on-chain activity — they are an existing
     // user and cannot be attributed to a referrer after the fact.
     const [activity] = await sql`

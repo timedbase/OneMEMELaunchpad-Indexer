@@ -2,6 +2,7 @@ import {
   Controller, Get, Param, Query, Headers,
   NotFoundException, BadRequestException, UnauthorizedException,
 } from "@nestjs/common";
+import { timingSafeEqual } from "node:crypto";
 import { PointsService } from "./points.service";
 import { isAddress } from "../../helpers";
 
@@ -33,7 +34,12 @@ export class PointsController {
     if (!secret) {
       throw new UnauthorizedException("Export endpoint is disabled (ADMIN_SECRET not set)");
     }
-    if (adminKey !== secret) {
+    // Constant-time comparison to prevent timing-based key enumeration.
+    const provided = adminKey ?? "";
+    const valid =
+      provided.length === secret.length &&
+      timingSafeEqual(Buffer.from(provided), Buffer.from(secret));
+    if (!valid) {
       throw new UnauthorizedException("Invalid admin key");
     }
     return this.points.exportAll();
