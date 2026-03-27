@@ -73,7 +73,6 @@ export class PointsService implements OnModuleInit {
       await sql`
         CREATE UNIQUE INDEX IF NOT EXISTS point_event_dedup
           ON point_event (event_type, source_id)
-          WHERE source_id IS NOT NULL
       `;
 
       await sql`CREATE INDEX IF NOT EXISTS point_event_wallet_idx ON point_event (wallet)`;
