@@ -80,7 +80,8 @@ Both processes run in the same Docker container under PM2. The indexer writes to
 | `metaUri` | text | Raw `metaURI` string from the token contract (nullable) |
 | `name` | text | Token display name from metadata JSON (nullable) |
 | `symbol` | text | Token symbol from metadata JSON (nullable) |
-| `image` | text | Resolved image URL (IPFS gateway substituted, nullable) |
+| `description` | text | Token description from metadata JSON (nullable) |
+| `image` | text | IPFS CID of the token image (e.g. `QmXxx...` — resolve via your preferred gateway, nullable) |
 | `website` | text | Token website URL (nullable) |
 | `twitter` | text | Twitter / X link (nullable) |
 | `telegram` | text | Telegram link (nullable) |
@@ -193,7 +194,8 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 |---|---|
 | `/api/v1/{chain}/tokens/*/quote/*` | 20 req / min (live RPC) |
 | `/api/v1/{chain}/stats` | 10 req / min (heavy aggregation) |
-| Everything else | 60 req / min |
+| `POST *` | 10 req / min |
+| Everything else (GET) | 60 req / min |
 
 ---
 
@@ -465,6 +467,70 @@ Sources: Binance, OKX, Bybit, CoinGecko, MEXC, GateIO. Refreshed every 10 second
 |---|---|---|
 | `GET` | `/api/v1/{chain}/chat/:token/messages` | Last 50 messages for a token (oldest-first) |
 
+**`GET /api/v1/{chain}/chat/:token/messages` query params:**
+
+| Param | Default | Description |
+|---|---|---|
+| `limit` | `50` | Number of messages (max 200) |
+
+Messages support full Unicode including emoji. WebSocket connection via `wss://<host>/api/v1/{chain}/chat/ws`.
+
+**WebSocket protocol:**
+
+```jsonc
+// Client → server
+{ "type": "subscribe", "token": "0x..." }           // join token room
+{ "type": "message", "sender": "0x...", "text": "…" } // send message (must subscribe first)
+
+// Server → client
+{ "type": "history", "messages": [...] }             // sent after subscribe
+{ "type": "message", "id": "…", "token": "…", "sender": "…", "text": "…", "timestamp": 0 }
+{ "type": "error", "message": "…" }
+{ "type": "keepalive" }                              // every 15 s
+```
+
+Chat rate limits: 1 message per 3 s per IP (global), 5 messages per minute per IP per token.
+
+---
+
+### Points
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/v1/{chain}/points/leaderboard` | public | Top wallets by total points (paginated) |
+| `GET` | `/api/v1/{chain}/points/:wallet` | public | Wallet total points + per-event breakdown |
+| `GET` | `/api/v1/{chain}/points/export` | `X-Admin-Key` header | Full dump of all wallets for reward issuance |
+
+Points are awarded automatically by a background poller every 30 seconds:
+
+| Action | Points |
+|---|---|
+| Launch a token | 5 |
+| Buy trade | 1 |
+| Sell trade | 0.5 |
+| Token graduates to DEX (migration) | 80 |
+| Referral bonus (one-time to referrer) | 10 |
+
+Set `POINTS_START_BLOCK` to start a new season — only events at or after that block earn points. Falls back to `START_BLOCK` if unset.
+
+The export endpoint requires the `X-Admin-Key: <ADMIN_SECRET>` header and returns every wallet's full breakdown for reward issuance. Disabled when `ADMIN_SECRET` is not set.
+
+---
+
+### Referrals
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/{chain}/referrals/register` | Register a referral relationship |
+| `GET` | `/api/v1/{chain}/referrals/:wallet` | Referrer stats (referred count, credited count, bonus points) |
+
+**`POST /api/v1/{chain}/referrals/register` body:**
+```json
+{ "wallet": "0x...", "referrer": "0x..." }
+```
+
+Must be called **before** the referred wallet makes any on-chain action. Self-referral is rejected. Registration is one-time per wallet — attempting to re-register returns 409.
+
 ---
 
 ### Metadata Upload
@@ -522,6 +588,8 @@ npm run api:dev        # API (separate terminal)
 | `PINATA_JWT` | No | Required for metadata upload |
 | `IPFS_GATEWAY` | No | Custom IPFS gateway URL |
 | `BETTERSTACK_TOKEN` | No | Better Stack log shipping token |
+| `POINTS_START_BLOCK` | No | Only award points for events at/after this block; falls back to `START_BLOCK` |
+| `ADMIN_SECRET` | No | Enables `GET /points/export` when set; pass as `X-Admin-Key` header |
 
 ---
 
@@ -550,8 +618,10 @@ npm run api:dev        # API (separate terminal)
 │           ├── price/           # /api/v1/{chain}/price/bnb
 │           ├── leaderboard/     # /api/v1/{chain}/leaderboard/*
 │           ├── vesting/         # /api/v1/{chain}/vesting/:token, /creators/:addr/vesting
-│           ├── chat/            # /api/v1/{chain}/chat/:token/messages
+│           ├── chat/            # /api/v1/{chain}/chat/:token/messages + WS
 │           ├── upload/          # /api/v1/{chain}/metadata/upload
+│           ├── points/          # /api/v1/{chain}/points/* (background poller + export)
+│           ├── referrals/       # /api/v1/{chain}/referrals/*
 │           └── index/           # GET /api/v1/{chain} — route index
 ├── ponder.config.ts
 ├── ponder.schema.ts
