@@ -149,7 +149,9 @@ async function loadBars(token: string, resolution = "60", countback = 300) {
   ).then(r => r.json());
 
   if (res.bars.length === 0 && res.nextTime) {
-    // No data in default range — re-fetch anchored at the first available bar
+    // No data in the default range — seek to the first available bonding-curve
+    // snapshot. This applies to both active tokens (data not yet in range) and
+    // migrated tokens (all data is in the past).
     return loadBarsFrom(token, resolution, res.nextTime);
   }
 
@@ -202,10 +204,14 @@ clearInterval(poll);
 
 ### Handling Migrated Tokens
 
+Migrated tokens still have all their bonding-curve snapshots. `loadBars` will
+automatically seek to `nextTime` and display the full pre-migration history.
+Show a banner once the data is loaded to indicate no new bars will appear:
+
 ```ts
 const { migrated } = await loadBars(tokenAddress);
 if (migrated) {
-  showBanner("This token has graduated to PancakeSwap — bonding-curve chart is final.");
+  showBanner("This token has graduated to PancakeSwap — chart shows bonding-curve history only.");
 }
 ```
 
@@ -232,6 +238,8 @@ if (migrated) {
       const to  = Math.floor(Date.now() / 1000);
       let data  = await fetch(`${BASE}/charts/history?symbol=${TOKEN}&resolution=60&to=${to}&countback=300`).then(r => r.json());
 
+      // Seek to first available snapshot when range has no data —
+      // handles both new tokens and migrated tokens whose data is in the past.
       if (data.bars.length === 0 && data.nextTime) {
         data = await fetch(`${BASE}/charts/history?symbol=${TOKEN}&resolution=60&from=${data.nextTime}&to=${to}`).then(r => r.json());
       }

@@ -175,16 +175,13 @@ export class ChartsService {
     `;
 
     if (rows.length === 0) {
-      // When no bars fall in the requested range and the token is still on the
-      // bonding curve, tell the caller where the earliest snapshot is so they
-      // can seek to the right start time.
-      let nextTime: number | undefined;
-      if (!token.migrated) {
-        const [earliest] = await sql`
-          SELECT MIN(timestamp)::int AS ts FROM token_snapshot WHERE token = ${addr}
-        `;
-        if (earliest?.ts) nextTime = earliest.ts as number;
-      }
+      // No bars in the requested range — tell the caller where the bonding-curve
+      // data starts so it can seek there. Applies to both active and migrated
+      // tokens: migrated tokens still have all their pre-migration snapshots.
+      const [earliest] = await sql`
+        SELECT MIN(timestamp)::int AS ts FROM token_snapshot WHERE token = ${addr}
+      `;
+      const nextTime: number | undefined = earliest?.ts as number | undefined;
       return { bars: [], migrated: token.migrated as boolean, ...(nextTime !== undefined ? { nextTime } : {}) };
     }
 
