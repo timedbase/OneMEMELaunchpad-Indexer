@@ -49,9 +49,25 @@ NODE_ENV=production
 # IPFS (for metadata upload)
 PINATA_JWT=...
 
+# Points system
+# Isolates Ponder's internal metadata — prevents "Schema 'public' was previously
+# used by a different Ponder app" error on first run or after a rebuild.
+PONDER_SCHEMA=onememe
+
+# Enables GET /points/export when set — pass as X-Admin-Key header
+ADMIN_SECRET=your-strong-random-secret
+
+# Only award points for events at/after this block (optional — falls back to START_BLOCK)
+POINTS_START_BLOCK=
+
 # Monitoring (optional — ships NestJS logs to BetterStack when set)
 BETTERSTACK_TOKEN=
 ```
+
+> **TLS / SSL:** Do **not** set `SSL_CERT_PATH` or `SSL_KEY_PATH` when running behind
+> Cloudflare. TLS is terminated at the Cloudflare edge — the container serves plain HTTP
+> on port 3001. Setting those vars to a path that doesn't exist will crash the API on
+> startup.
 
 ---
 
@@ -93,6 +109,8 @@ docker compose -f docker-compose.prod.yml up -d --build
 Docker rebuilds the image and restarts the container. The `ponder_data` volume is preserved — Ponder resumes from its last checkpoint, no re-index needed.
 
 > **Schema changes** (e.g. adding a column to `ponder.schema.ts`) require a full re-index. Ponder detects schema changes automatically and re-syncs from `START_BLOCK`. Plan for downtime during sync.
+
+> **Ponder schema conflict** — if you see `Schema 'public' was previously used by a different Ponder app`, ensure `PONDER_SCHEMA=onememe` is set in your `.env`. This namespaces Ponder's internal metadata tables and prevents collisions.
 
 ---
 

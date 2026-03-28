@@ -581,6 +581,61 @@ npm run api:dev        # API (separate terminal)
 
 ---
 
+## Production Deployment (Docker / VPS)
+
+Build and run the production image:
+
+```bash
+docker build -t onememe-launchpad .
+
+docker run -d \
+  --name onememe-launchpad \
+  --restart unless-stopped \
+  -p 3001:3001 \
+  -v ponder_cache:/app/.ponder \
+  --env-file .env \
+  onememe-launchpad
+```
+
+### Required env additions for production
+
+```env
+# Isolates Ponder's internal metadata so it doesn't conflict with other
+# Ponder apps sharing the same Postgres schema (required on first run or
+# if you see "Schema 'public' was previously used by a different Ponder app").
+PONDER_SCHEMA=onememe
+
+# Points export — set a strong random secret
+ADMIN_SECRET=your-strong-random-secret
+```
+
+### TLS / SSL
+
+TLS is terminated externally by Cloudflare. Do **not** set `SSL_CERT_PATH` or
+`SSL_KEY_PATH` unless you are running without Cloudflare; setting them to a
+path that doesn't exist will crash the API on startup.
+
+### Updating on VPS
+
+```bash
+git pull
+docker build -t onememe-launchpad .
+docker stop onememe-launchpad && docker rm onememe-launchpad
+docker run -d \
+  --name onememe-launchpad \
+  --restart unless-stopped \
+  -p 3001:3001 \
+  -v ponder_cache:/app/.ponder \
+  --env-file .env \
+  onememe-launchpad
+docker logs -f onememe-launchpad
+```
+
+The named volume `ponder_cache` persists Ponder's checkpoint so the indexer
+resumes from where it left off rather than re-syncing from the start block.
+
+---
+
 ## Environment Variables
 
 | Variable | Required | Description |
@@ -602,6 +657,7 @@ npm run api:dev        # API (separate terminal)
 | `BETTERSTACK_TOKEN` | No | Better Stack log shipping token |
 | `POINTS_START_BLOCK` | No | Only award points for events at/after this block; falls back to `START_BLOCK` |
 | `ADMIN_SECRET` | No | Enables `GET /points/export` when set; pass as `X-Admin-Key` header |
+| `PONDER_SCHEMA` | No | Postgres schema for Ponder's internal tables (recommended: `onememe`) |
 
 ---
 
