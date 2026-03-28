@@ -65,13 +65,16 @@ The orange cloud is required — it routes `api.1coin.meme` through Cloudflare f
 
 ## Step 2 — Set SSL/TLS Mode
 
-**SSL/TLS → Overview** → set encryption mode to **Full**
+**SSL/TLS → Overview** → set encryption mode to **Flexible**
 
 | Mode | Meaning |
 |---|---|
-| Flexible | Cloudflare → server is plain HTTP. Not secure end-to-end. |
-| **Full** | Cloudflare → server may use self-signed cert. Use this. |
-| Full (Strict) | Cloudflare → server must have a valid CA cert. Not needed. |
+| **Flexible** | Cloudflare → server is plain HTTP. **Use this.** TLS is handled entirely by Cloudflare. |
+| Full | Cloudflare → server must serve HTTPS (self-signed OK). Do not use — the API serves plain HTTP. |
+| Full (Strict) | Cloudflare → server must have a valid CA cert. Do not use. |
+
+> The API container serves plain HTTP on port 3001. Cloudflare terminates TLS at the edge and
+> forwards requests to the origin over HTTP. Setting Full or Full (strict) causes a 525 error.
 
 ---
 
