@@ -44,7 +44,7 @@ export class ChartsService {
 
     const addr = symbolParam.toLowerCase();
     const rows = await sql`
-      SELECT token_type, total_supply, created_at_timestamp
+      SELECT name, symbol, token_type, total_supply, created_at_timestamp
       FROM token
       WHERE id = ${addr}
       LIMIT 1
@@ -56,9 +56,9 @@ export class ChartsService {
     }
 
     return {
-      name:                   addr,
-      ticker:                 addr,
-      description:            `OneMEME Token (${row.token_type})`,
+      name:                   row.name as string,
+      ticker:                 row.symbol as string,
+      description:            `${row.name as string} (${row.symbol as string}) — OneMEME ${row.token_type as string}`,
       type:                   "crypto",
       session:                "24x7",
       timezone:               "Etc/UTC",
@@ -213,7 +213,7 @@ export class ChartsService {
     const limit    = isNaN(limitRaw) ? 10 : Math.min(limitRaw, 30);
 
     const rows = await sql`
-      SELECT id, token_type
+      SELECT id, name, symbol, token_type
       FROM token
       WHERE id LIKE ${escaped + "%"} ESCAPE '\\'
       ORDER BY created_at_timestamp DESC
@@ -221,11 +221,11 @@ export class ChartsService {
     `;
 
     return rows.map((r: any) => ({
-      symbol:      r.id,
-      full_name:   r.id,
-      description: `OneMEME Token (${r.token_type})`,
+      symbol:      r.symbol,
+      full_name:   `${r.name} (${r.symbol})`,
+      description: `${r.name} — OneMEME ${r.token_type}`,
       exchange:    "OneMEME",
-      ticker:      r.id,
+      ticker:      r.symbol,
       type:        "crypto",
     }));
   }

@@ -282,9 +282,9 @@ https://api.1coin.meme/api/v1/bsc/charts
 
 ```json
 {
-  "name":                   "0xtoken...",
-  "ticker":                 "0xtoken...",
-  "description":            "OneMEME Token (Standard)",
+  "name":                   "Pepe Coin",
+  "ticker":                 "PEPE",
+  "description":            "Pepe Coin (PEPE) — OneMEME Standard",
   "type":                   "crypto",
   "session":                "24x7",
   "timezone":               "Etc/UTC",
@@ -307,11 +307,11 @@ https://api.1coin.meme/api/v1/bsc/charts
 ```json
 [
   {
-    "symbol":      "0xabcdef...",
-    "full_name":   "0xabcdef...",
-    "description": "OneMEME Token (Standard)",
+    "symbol":      "PEPE",
+    "full_name":   "Pepe Coin (PEPE)",
+    "description": "Pepe Coin — OneMEME Standard",
     "exchange":    "OneMEME",
-    "ticker":      "0xabcdef...",
+    "ticker":      "PEPE",
     "type":        "crypto"
   }
 ]
