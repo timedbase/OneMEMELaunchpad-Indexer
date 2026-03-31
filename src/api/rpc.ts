@@ -129,6 +129,27 @@ export async function getSpotPrice(token: `0x${string}`): Promise<bigint> {
   }) as Promise<bigint>;
 }
 
+// ─── Metadata URI ─────────────────────────────────────────────────────────────
+
+const META_URI_ABI = parseAbi(["function metaURI() view returns (string)"]);
+
+/**
+ * Reads the current metaURI from a token contract on-chain.
+ * Returns null if the call fails or the URI is empty.
+ */
+export async function readMetaURI(token: `0x${string}`): Promise<string | null> {
+  try {
+    const uri = await getClient().readContract({
+      address:      token,
+      abi:          META_URI_ABI,
+      functionName: "metaURI",
+    }) as string;
+    return uri && uri.trim() ? uri.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Math helpers ─────────────────────────────────────────────────────────────
 
 /**

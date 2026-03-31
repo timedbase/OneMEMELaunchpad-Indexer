@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger } from "@nestjs/common";
 import { sql } from "../../db";
 import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir, toCamel } from "../../helpers";
-import { getPairPrice } from "../../rpc";
+import { getPairPrice, readMetaURI } from "../../rpc";
 import { PriceService } from "../price/price.service";
+import { fetchMetadata } from "../../metadata";
 
 /**
  * Computed price columns — requires token alias `t` and migration LEFT JOIN alias `m`.
@@ -34,8 +35,93 @@ const PRICE_COLS = sql`
 `;
 
 @Injectable()
-export class TokensService {
+export class TokensService implements OnModuleInit {
+  private readonly logger = new Logger(TokensService.name);
+
   constructor(private readonly price: PriceService) {}
+
+  onModuleInit() {
+    // Retry metadata for tokens where name OR meta_uri is null.
+    // Runs every 2 minutes — covers both failed IPFS fetches at index time
+    // and tokens whose metaURI was not yet set when TokenCreated was indexed.
+    setInterval(() => this.retryNullMetadata(), 2 * 60_000);
+  }
+
+  private async retryNullMetadata(): Promise<void> {
+    try {
+      const rows = await sql<{ id: string; meta_uri: string | null }[]>`
+        SELECT id, meta_uri FROM token
+        WHERE name IS NULL OR meta_uri IS NULL
+        LIMIT 50
+      `;
+      for (const row of rows) {
+        try {
+          await this.refreshMetadata(row.id as `0x${string}`);
+        } catch {
+          // Non-fatal — skip and retry next cycle
+        }
+      }
+      if (rows.length > 0) {
+        this.logger.log(`Retried metadata for ${rows.length} token(s) with null name or metaURI`);
+      }
+    } catch (err) {
+      this.logger.warn(`Metadata retry poll error: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  /**
+   * Re-reads metaURI() from the chain and re-fetches the IPFS metadata JSON.
+   * Updates the token row in-place. Used by the background poller and the
+   * POST /tokens/:address/metadata/refresh endpoint.
+   */
+  async refreshMetadata(address: `0x${string}`): Promise<Record<string, unknown>> {
+    const [existing] = await sql`SELECT id FROM token WHERE id = ${address} LIMIT 1`;
+    if (!existing) throw new NotFoundException(`Token ${address} not found`);
+
+    const metaUri = await readMetaURI(address);
+    if (!metaUri) {
+      // URI still not set on-chain — update to null and return early
+      await sql`UPDATE token SET meta_uri = NULL, name = NULL, symbol = NULL, description = NULL, image = NULL, website = NULL, twitter = NULL, telegram = NULL WHERE id = ${address}`;
+      return { address, metaUri: null, refreshed: false, reason: "metaURI not set on-chain" };
+    }
+
+    const meta = await fetchMetadata(metaUri);
+
+    // Extract bare IPFS CID from image URI for storage
+    const extractCid = (uri: string): string => {
+      if (uri.startsWith("ipfs://")) return uri.slice(7).split("?")[0];
+      if (uri.startsWith("ipfs/"))   return uri.slice(5).split("?")[0];
+      const m = uri.match(/\/ipfs\/([A-Za-z0-9]+)/);
+      return m ? m[1] : uri;
+    };
+    const imageRaw = meta?.imageRaw ?? null;
+
+    await sql`
+      UPDATE token SET
+        meta_uri    = ${metaUri},
+        name        = ${meta?.name        ?? null},
+        symbol      = ${meta?.symbol      ?? null},
+        description = ${meta?.description ?? null},
+        image       = ${imageRaw ? extractCid(imageRaw) : null},
+        website     = ${meta?.website     ?? null},
+        twitter     = ${meta?.socials?.twitter  ?? null},
+        telegram    = ${meta?.socials?.telegram ?? null}
+      WHERE id = ${address}
+    `;
+
+    return {
+      address,
+      metaUri,
+      name:        meta?.name        ?? null,
+      symbol:      meta?.symbol      ?? null,
+      description: meta?.description ?? null,
+      image:       imageRaw ? extractCid(imageRaw) : null,
+      website:     meta?.website               ?? null,
+      twitter:     meta?.socials?.twitter      ?? null,
+      telegram:    meta?.socials?.telegram     ?? null,
+      refreshed:   true,
+    };
+  }
 
   private withUsd<T extends Record<string, unknown>>(
     row: T,

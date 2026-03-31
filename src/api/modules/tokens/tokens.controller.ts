@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from "@nestjs/common";
+import { Controller, Get, Post, Param, Query } from "@nestjs/common";
 import { TokensService } from "./tokens.service";
 
 @Controller("tokens")
@@ -57,6 +57,17 @@ export class TokensController {
     @Query() query: Record<string, string>,
   ) {
     return this.tokens.snapshots(address, query);
+  }
+
+  /**
+   * POST /api/v1/tokens/:address/metadata/refresh
+   * Re-reads metaURI() from the chain and re-fetches the IPFS metadata JSON,
+   * updating the stored name, symbol, description, image, and socials.
+   * Use when metaURI was null at index time or when the creator calls setMetaURI().
+   */
+  @Post(":address/metadata/refresh")
+  refreshMetadata(@Param("address") address: string) {
+    return this.tokens.refreshMetadata(address as `0x${string}`);
   }
 }
 
