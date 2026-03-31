@@ -121,7 +121,7 @@ export class PointsService implements OnModuleInit {
       SELECT
         t.creator,
         'TOKEN_CREATED',
-        ${POINTS.TOKEN_CREATED},
+        ${POINTS.TOKEN_CREATED}::numeric,
         t.id,
         t.creation_tx_hash,
         t.created_at_timestamp::bigint
@@ -143,7 +143,7 @@ export class PointsService implements OnModuleInit {
       SELECT
         tr.trader,
         CASE WHEN tr.trade_type = 'buy' THEN 'BUY' ELSE 'SELL' END,
-        CASE WHEN tr.trade_type = 'buy' THEN ${POINTS.BUY} ELSE ${POINTS.SELL} END,
+        CASE WHEN tr.trade_type = 'buy' THEN ${POINTS.BUY}::numeric ELSE ${POINTS.SELL}::numeric END,
         tr.token,
         tr.id,
         tr.timestamp::bigint
@@ -165,7 +165,7 @@ export class PointsService implements OnModuleInit {
       SELECT
         tk.creator,
         'TOKEN_MIGRATED',
-        ${POINTS.TOKEN_MIGRATED},
+        ${POINTS.TOKEN_MIGRATED}::numeric,
         m.token,
         m.tx_hash,
         m.timestamp::bigint
@@ -237,7 +237,7 @@ export class PointsService implements OnModuleInit {
           VALUES (
             ${row.referrer as string},
             'REFERRAL_BONUS',
-            ${POINTS.REFERRAL_BONUS},
+            ${POINTS.REFERRAL_BONUS}::numeric,
             NULL,
             ${sourceId},
             ${now}
