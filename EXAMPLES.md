@@ -45,6 +45,7 @@ The chain slug (`bsc`) reflects the `CHAIN_SLUG` environment variable. Swap it f
 33. [Points — Export (admin)](#33-points--export-admin)
 34. [Referrals — Register](#34-referrals--register)
 35. [Referrals — Stats](#35-referrals--stats)
+36. [Tokens — Metadata Refresh](#36-tokens--metadata-refresh)
 
 ---
 
@@ -1421,3 +1422,37 @@ async function launchToken(
   return tx;
 }
 ```
+
+---
+
+## 36. Tokens — Metadata Refresh
+
+Re-reads `metaURI()` from the token contract on-chain and re-fetches the IPFS metadata JSON. Use this when:
+- The indexer recorded `null` for `name` / `metaUri` because `metaURI()` was not set at index time.
+- The creator called `setMetaURI()` after deployment and the indexer has no event to react to.
+
+A background poller runs every 2 minutes and auto-retries tokens where `name IS NULL OR meta_uri IS NULL` — this endpoint lets you trigger an immediate refresh.
+
+```bash
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/tokens/0x7cff1dd19e357e7e0c7b0bef189e415d741d1111/metadata/refresh'
+```
+
+```json
+{
+  "data": {
+    "address":     "0x7cff1dd19e357e7e0c7b0bef189e415d741d1111",
+    "metaUri":     "ipfs://QmXyz123...",
+    "name":        "PEPE2",
+    "symbol":      "PEPE2",
+    "description": "The next pepe on BSC",
+    "image":       "QmImg456...",
+    "website":     "https://pepe2.io",
+    "twitter":     "https://x.com/pepe2bsc",
+    "telegram":    "https://t.me/pepe2bsc"
+  }
+}
+```
+
+Returns `{ data: null }` if `metaURI()` returns empty or the IPFS fetch fails.
+
+**HTTP 404** — token not found in the index.

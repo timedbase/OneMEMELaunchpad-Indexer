@@ -221,6 +221,7 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 | `GET` | `/api/v1/{chain}/tokens/:address/quote/price` | Live bonding-curve spot price (RPC) |
 | `GET` | `/api/v1/{chain}/tokens/:address/quote/buy` | Buy quote with price impact (RPC) |
 | `GET` | `/api/v1/{chain}/tokens/:address/quote/sell` | Sell quote with price impact (RPC) |
+| `POST` | `/api/v1/{chain}/tokens/:address/metadata/refresh` | Re-read `metaURI()` from chain and re-fetch IPFS metadata |
 
 **`GET /api/v1/{chain}/tokens` query params:**
 

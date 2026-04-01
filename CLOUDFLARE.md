@@ -237,7 +237,7 @@ chat.onopen = () => console.log("chat connected");
 |---|---|
 | Frontend DNS | `@` and `www` → Vercel, **DNS only** (grey cloud) |
 | API DNS | `api` → your server IP, **Proxied** (orange cloud) |
-| TLS | Cloudflare Full mode — automatic, auto-renewed |
+| TLS | Cloudflare **Flexible** mode — Cloudflare terminates TLS, origin receives plain HTTP |
 | WebSockets | Enabled in Cloudflare Network settings |
 | Cache | Bypassed for all `/api` routes |
 | WAF | Custom rules block missing Origin + rate limit quote endpoints |
