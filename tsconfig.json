@@ -9,8 +9,7 @@
     "strict":            true,
     "resolveJsonModule": true,
     "skipLibCheck":      true,
-    "outDir":            "dist",
-    "baseUrl":           "."
+    "outDir":            "dist"
   },
   "include": ["src", "ponder.config.ts", "ponder.schema.ts", "ponder-env.d.ts", "abis/**/*.ts"],
   "exclude": ["node_modules", "dist", ".ponder"]
