@@ -42,16 +42,20 @@ export class TokensService implements OnModuleInit {
 
   onModuleInit() {
     // Retry metadata for tokens where name OR meta_uri is null.
-    // Runs every 2 minutes — covers both failed IPFS fetches at index time
-    // and tokens whose metaURI was not yet set when TokenCreated was indexed.
-    setInterval(() => this.retryNullMetadata(), 2 * 60_000);
+    // Only tokens created in the last 60 seconds are eligible — creators set
+    // metaURI at creation time, so a null after ~1 minute means the initial
+    // IPFS fetch failed transiently. Retrying indefinitely would hammer the
+    // RPC for tokens that will never have metadata.
+    setInterval(() => this.retryNullMetadata(), 60_000);
   }
 
   private async retryNullMetadata(): Promise<void> {
     try {
+      const cutoff = Math.floor(Date.now() / 1000) - 60;
       const rows = await sql<{ id: string; meta_uri: string | null }[]>`
         SELECT id, meta_uri FROM token
-        WHERE name IS NULL OR meta_uri IS NULL
+        WHERE (name IS NULL OR meta_uri IS NULL)
+          AND created_at_timestamp >= ${cutoff}
         LIMIT 50
       `;
       for (const row of rows) {

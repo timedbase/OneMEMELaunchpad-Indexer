@@ -254,24 +254,3 @@ function formatBigDecimal(value: bigint, decimals: number): string {
   return `${intPart}.${decPart}`;
 }
 
-// ─── Token contract helpers ────────────────────────────────────────────────────
-
-const TOKEN_ABI = parseAbi([
-  "function metaURI() view returns (string)",
-]);
-
-/**
- * Reads the `metaURI` field from an individual token contract.
- * Returns an empty string if the call fails (e.g. token not yet deployed).
- */
-export async function getMetaURI(tokenAddress: `0x${string}`): Promise<string> {
-  try {
-    return await getClient().readContract({
-      address:      tokenAddress,
-      abi:          TOKEN_ABI,
-      functionName: "metaURI",
-    });
-  } catch {
-    return "";
-  }
-}
