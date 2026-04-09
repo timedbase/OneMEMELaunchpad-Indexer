@@ -179,16 +179,6 @@ export class PointsService implements OnModuleInit {
       await sql`CREATE INDEX IF NOT EXISTS point_event_wallet_idx ON point_event (wallet)`;
       await sql`CREATE INDEX IF NOT EXISTS point_event_ts_idx     ON point_event (timestamp DESC)`;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS referral (
-          wallet        TEXT PRIMARY KEY,
-          referrer      TEXT    NOT NULL,
-          registered_at BIGINT  NOT NULL,
-          credited      BOOLEAN NOT NULL DEFAULT FALSE
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS referral_referrer_idx ON referral (referrer)`;
-
       this.logger.log(`Points tables ready — start block: ${getStartBlock() === "0" ? "all" : getStartBlock()}`);
     } catch (err: unknown) {
       this.logger.error(`Failed to initialise points tables: ${(err as Error).message}`);

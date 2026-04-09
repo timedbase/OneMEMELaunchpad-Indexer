@@ -1,11 +1,9 @@
 /**
  * Thin GraphQL client for The Graph subgraph queries.
  *
- * Used by the points poller to read on-chain event data without depending on
- * the Ponder indexer or its PostgreSQL tables. Configure with SUBGRAPH_URL.
- *
- * All functions throw if SUBGRAPH_URL is not set — the points poller catches
- * this and logs a warning without crashing the API.
+ * Primary data source for all on-chain data: tokens, trades, holders,
+ * migrations, snapshots, vesting, and platform stats.
+ * Configure with SUBGRAPH_URL — all API endpoints require this to be set.
  */
 
 // ─── Client ───────────────────────────────────────────────────────────────────

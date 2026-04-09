@@ -2,11 +2,13 @@
  * PostgreSQL connection for the OneMEME Launchpad REST API.
  *
  * Uses postgres.js — a fast, zero-dependency PostgreSQL client for Node.js.
- * The same DATABASE_URL used by Ponder connects the API to the indexed data.
+ * Stores off-chain data that lives independently of the subgraph:
+ *   - point_event  : points ledger
+ *   - referral     : referral registrations
+ *   - chat_message : per-token chat history
  *
- * NOTE: Ponder stores bigint columns as PostgreSQL `numeric`, which postgres.js
- * returns as strings. This is intentional — it preserves uint256 precision
- * without any loss through JavaScript's Number type.
+ * On-chain data (tokens, trades, holders, etc.) is read from the subgraph
+ * GraphQL endpoint — see src/api/subgraph.ts.
  */
 
 import postgres from "postgres";

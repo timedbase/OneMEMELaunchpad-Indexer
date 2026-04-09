@@ -4,9 +4,15 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { sql } from "../../db";
+import { subgraphFetch } from "../../subgraph";
 import { applySlippage, getSpotPrice, priceImpactBps, quoteBuy, quoteSell } from "../../rpc";
 import { isAddress, normalizeAddress } from "../../helpers";
+
+const TOKEN_STATUS_QUERY = /* GraphQL */ `
+  query TokenStatus($id: ID!) {
+    token(id: $id) { id migrated antibotEnabled tradingBlock }
+  }
+`;
 
 function formatWei(wei: bigint): string {
   const s       = wei.toString().padStart(19, "0");
@@ -19,13 +25,12 @@ function formatWei(wei: bigint): string {
 export class QuotesService {
 
   private async requireActiveBondingCurve(address: string) {
-    const [row] = await sql`
-      SELECT id, migrated, token_type AS "tokenType", trading_block AS "tradingBlock", antibot_enabled AS "antibotEnabled"
-      FROM token
-      WHERE id = ${normalizeAddress(address)}
-    `;
-    if (!row) throw new NotFoundException(`Token ${address} not found in index`);
-    return row;
+    const addr = normalizeAddress(address);
+    const { token } = await subgraphFetch<{ token: {
+      id: string; migrated: boolean; antibotEnabled: boolean; tradingBlock: string;
+    } | null }>(TOKEN_STATUS_QUERY, { id: addr });
+    if (!token) throw new NotFoundException(`Token ${address} not found`);
+    return token;
   }
 
   async spotPrice(address: string) {

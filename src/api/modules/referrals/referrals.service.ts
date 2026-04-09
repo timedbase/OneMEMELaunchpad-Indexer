@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, Logger, BadRequestException, ConflictException } from "@nestjs/common";
 import { sql } from "../../db";
+import { subgraphFetch } from "../../subgraph";
 import { isAddress } from "../../helpers";
 import { POINTS } from "../points/points.service";
 
@@ -47,16 +48,16 @@ export class ReferralsService implements OnModuleInit {
 
     // Reject if the wallet already has on-chain activity — they are an existing
     // user and cannot be attributed to a referrer after the fact.
-    const [activity] = await sql`
-      SELECT 1 AS hit
-      FROM (
-        SELECT 1 FROM trade  WHERE trader  = ${w} LIMIT 1
-        UNION ALL
-        SELECT 1 FROM token  WHERE creator = ${w} LIMIT 1
-      ) AS acts
-      LIMIT 1
-    `;
-    if (activity) throw new BadRequestException("Wallet already has on-chain activity and cannot be referred");
+    const { trades, tokens: created } = await subgraphFetch<{
+      trades:  { id: string }[];
+      tokens:  { id: string }[];
+    }>(`query WalletActivity($w: String!) {
+      trades(first: 1, where: { trader: $w }) { id }
+      tokens(first: 1, where: { creator: $w }) { id }
+    }`, { w });
+    if (trades.length > 0 || created.length > 0) {
+      throw new BadRequestException("Wallet already has on-chain activity and cannot be referred");
+    }
 
     const now = Math.floor(Date.now() / 1000);
 
@@ -112,7 +113,7 @@ export class ReferralsService implements OnModuleInit {
       referredCount: row.referredCount  as number,
       creditedCount: row.creditedCount  as number,
       pendingCount:  row.pendingCount   as number,
-      bonusPoints:   bonusRow.bonusPoints as number,
+      bonusPoints:   bonusRow.bonusPoints as string,
       bonusPerCredit: POINTS.REFERRAL_BONUS,
       referred,
     };

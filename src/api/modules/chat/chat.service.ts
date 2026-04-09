@@ -21,8 +21,7 @@ export class ChatService implements OnModuleInit {
 
   /**
    * Create the chat_message table if it doesn't exist.
-   * This table is off-chain user content — not part of Ponder's schema
-   * and is NOT wiped when Ponder re-indexes.
+   * Off-chain user content — stored in PostgreSQL independently of the subgraph.
    */
   async onModuleInit() {
     try {

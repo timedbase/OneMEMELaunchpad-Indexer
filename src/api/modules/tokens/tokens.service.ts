@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from "@nestjs/common";
+import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { subgraphFetch, subgraphFetchAll, subgraphCount, tradeSourceId } from "../../subgraph";
-import { SubgraphToken, TOKEN_FIELDS, FROM_API_TYPE, normalizeToken, computeTokenPrice, SCALE18 } from "../../token-utils";
+import { SubgraphToken, TOKEN_FIELDS, FROM_API_TYPE, normalizeToken, SCALE18 } from "../../token-utils";
 import { formatBigDecimal } from "../../subgraph";
 import { getPairPrice, readMetaURI } from "../../rpc";
 import { fetchMetadata } from "../../metadata";
@@ -207,8 +207,6 @@ function normalizeMigration(m: SubgraphMigration) {
 
 @Injectable()
 export class TokensService {
-  private readonly logger = new Logger(TokensService.name);
-
   constructor(private readonly price: PriceService) {}
 
   private withUsd<T extends Record<string, unknown>>(
@@ -264,6 +262,20 @@ export class TokensService {
     if (!token) throw new NotFoundException(`Token ${address} not found`);
 
     const row = normalizeToken(token) as Record<string, unknown>;
+
+    // Subgraph resolves metadata via ipfs.cat() at index time.
+    // Fall back to a direct IPFS fetch only if the subgraph fields are all null
+    // (e.g. ipfs.cat() failed or timed out during indexing).
+    if (token.metaUri && !token.description && !token.image && !token.website) {
+      const meta = await fetchMetadata(token.metaUri);
+      if (meta) {
+        if (meta.description)          row["description"] = meta.description;
+        if (meta.image)                row["image"]       = meta.image;
+        if (meta.website)              row["website"]     = meta.website;
+        if (meta.socials?.twitter)     row["twitter"]     = meta.socials.twitter;
+        if (meta.socials?.telegram)    row["telegram"]    = meta.socials.telegram;
+      }
+    }
 
     // Override with live PancakeSwap price for migrated tokens.
     if (token.migrated && token.pair) {
@@ -481,21 +493,39 @@ export class TokensService {
   }
 
   /**
-   * Re-reads metaURI from the chain and fetches the IPFS metadata JSON.
-   * Returns the current on-chain metadata without persisting it — the subgraph
-   * is the source of truth and will pick up changes during its next index cycle.
+   * Returns the current metadata for a token.
    *
-   * Still useful as a "force preview" endpoint to inspect what the subgraph
-   * will eventually index, or to verify a newly-set metaURI before it propagates.
+   * If the subgraph has already resolved the metadata via ipfs.cat(), returns
+   * it immediately. Otherwise fetches from IPFS directly using the stored metaUri,
+   * falling back to readMetaURI() RPC for tokens whose metaUri was set after
+   * creation (no event for the subgraph to re-index from).
    */
   async refreshMetadata(address: string): Promise<Record<string, unknown>> {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
 
     const addr = normalizeAddress(address);
-    const { token } = await subgraphFetch<{ token: { id: string } | null }>(TOKEN_EXISTS_QUERY, { id: addr });
+    const { token } = await subgraphFetch<{ token: SubgraphToken | null }>(TOKEN_QUERY, { id: addr });
     if (!token) throw new NotFoundException(`Token ${address} not found`);
 
-    const metaUri = await readMetaURI(addr as `0x${string}`);
+    // Subgraph already resolved via ipfs.cat() — return immediately.
+    if (token.metaUri && (token.description || token.image || token.website || token.twitter || token.telegram)) {
+      return {
+        address,
+        metaUri:     token.metaUri,
+        name:        token.name        ?? null,
+        symbol:      token.symbol      ?? null,
+        description: token.description ?? null,
+        image:       token.image       ?? null,
+        website:     token.website     ?? null,
+        twitter:     token.twitter     ?? null,
+        telegram:    token.telegram    ?? null,
+        source: "subgraph",
+      };
+    }
+
+    // ipfs.cat() failed at index time or metaUri was set post-creation.
+    // Resolve metaUri — prefer subgraph value, fall back to RPC.
+    const metaUri = token.metaUri ?? await readMetaURI(addr as `0x${string}`);
     if (!metaUri) return { address: addr, metaUri: null, refreshed: false, reason: "metaURI not set on-chain" };
 
     const meta = await fetchMetadata(metaUri);
@@ -518,7 +548,7 @@ export class TokensService {
       website:     meta?.website               ?? null,
       twitter:     meta?.socials?.twitter      ?? null,
       telegram:    meta?.socials?.telegram     ?? null,
-      refreshed:   true,
+      source:      token.metaUri ? "ipfs" : "rpc+ipfs",
     };
   }
 }

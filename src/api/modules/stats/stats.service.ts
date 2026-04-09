@@ -48,7 +48,8 @@ const ALL_TRADERS_QUERY = /* GraphQL */ `
 @Injectable()
 export class StatsService {
   async platform() {
-    const factoryId = process.env.FACTORY_ADDRESS?.toLowerCase() ?? "";
+    // Subgraph uses Bytes.fromUTF8("factory") as the singleton Factory ID.
+    const factoryId = "0x666163746f7279";
 
     const [
       { factory },
