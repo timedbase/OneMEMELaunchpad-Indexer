@@ -1,0 +1,95 @@
+/**
+ * Thin GraphQL client for The Graph subgraph queries.
+ *
+ * Used by the points poller to read on-chain event data without depending on
+ * the Ponder indexer or its PostgreSQL tables. Configure with SUBGRAPH_URL.
+ *
+ * All functions throw if SUBGRAPH_URL is not set — the points poller catches
+ * this and logs a warning without crashing the API.
+ */
+
+// ─── Client ───────────────────────────────────────────────────────────────────
+
+function subgraphUrl(): string {
+  if (!process.env.SUBGRAPH_URL) {
+    throw new Error(
+      "SUBGRAPH_URL is not configured. Points polling requires a deployed subgraph."
+    );
+  }
+  return process.env.SUBGRAPH_URL;
+}
+
+/**
+ * Sends a single GraphQL query to the subgraph and returns the `data` object.
+ * Throws on HTTP errors, GraphQL errors, or empty responses.
+ */
+export async function subgraphFetch<T>(
+  query:      string,
+  variables?: Record<string, unknown>,
+): Promise<T> {
+  const res = await fetch(subgraphUrl(), {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ query, variables: variables ?? {} }),
+    signal:  AbortSignal.timeout(15_000),
+  });
+
+  if (!res.ok) throw new Error(`Subgraph HTTP ${res.status}`);
+
+  const body = await res.json() as { data?: T; errors?: { message: string }[] };
+
+  if (body.errors?.length) throw new Error(body.errors[0]!.message);
+  if (!body.data) throw new Error("Subgraph returned no data");
+
+  return body.data;
+}
+
+/**
+ * Fetches all pages of a paginated subgraph list query.
+ *
+ * The query must accept `$first: Int!` and `$skip: Int!` variables and return
+ * results under the given `key`. Pages are fetched until a partial page is
+ * returned (fewer than `pageSize` items).
+ */
+export async function subgraphFetchAll<T>(
+  key:        string,
+  query:      string,
+  variables?: Record<string, unknown>,
+  pageSize  = 1000,
+): Promise<T[]> {
+  const results: T[] = [];
+  let skip = 0;
+
+  for (;;) {
+    const page = await subgraphFetch<Record<string, T[]>>(query, {
+      ...variables,
+      first: pageSize,
+      skip,
+    });
+    const items = page[key] ?? [];
+    results.push(...items);
+    if (items.length < pageSize) break;
+    skip += pageSize;
+  }
+
+  return results;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Derives a Ponder-compatible trade source_id from a subgraph trade id.
+ *
+ * The subgraph encodes trade ids as txHash (32 bytes) + logIndex (4 bytes
+ * int32 BE) concatenated. Ponder uses the format "{txHash}-{logIndex}".
+ * This function converts between the two so existing point_event rows
+ * (created by the Ponder-based poller) are not re-awarded.
+ *
+ * @param id  Subgraph trade id hex string (0x + 64 + 8 chars = 72 chars total)
+ * @returns   "{txHash}-{logIndex}"  e.g. "0xabc...-5"
+ */
+export function tradeSourceId(id: string): string {
+  const txHash   = "0x" + id.slice(2, 66);
+  const logIndex = parseInt(id.slice(66), 16);
+  return `${txHash}-${logIndex}`;
+}
