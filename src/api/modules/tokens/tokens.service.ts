@@ -1,55 +1,17 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from "@nestjs/common";
-import { subgraphFetch, subgraphFetchAll, subgraphCount, formatBigDecimal, tradeSourceId } from "../../subgraph";
+import { subgraphFetch, subgraphFetchAll, subgraphCount, tradeSourceId } from "../../subgraph";
+import { SubgraphToken, TOKEN_FIELDS, FROM_API_TYPE, normalizeToken, computeTokenPrice, SCALE18 } from "../../token-utils";
+import { formatBigDecimal } from "../../subgraph";
 import { getPairPrice, readMetaURI } from "../../rpc";
 import { fetchMetadata } from "../../metadata";
 import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir } from "../../helpers";
 import { PriceService } from "../price/price.service";
 
-// ─── Price computation ────────────────────────────────────────────────────────
-
-const SCALE18 = 10n ** 18n;
-
-function bondingCurvePrice(virtualBNB: bigint, raisedBNB: bigint, totalSupply: bigint) {
-  const vl = virtualBNB + raisedBNB;
-  if (virtualBNB === 0n || totalSupply === 0n) {
-    return { priceBnb: "0.0", marketCapBnb: "0.0", virtualLiquidityBnb: formatBigDecimal(vl, 18) };
-  }
-  return {
-    priceBnb:            formatBigDecimal((vl * vl * SCALE18) / (virtualBNB * totalSupply), 18),
-    marketCapBnb:        formatBigDecimal((vl * vl) / virtualBNB, 18),
-    virtualLiquidityBnb: formatBigDecimal(vl, 18),
-  };
-}
-
-function migrationPrice(liquidityBNB: bigint, liquidityTokens: bigint) {
-  if (liquidityTokens === 0n) {
-    return { priceBnb: "0.0", marketCapBnb: "0.0", virtualLiquidityBnb: formatBigDecimal(liquidityBNB, 18) };
-  }
-  return {
-    priceBnb:            formatBigDecimal((liquidityBNB * SCALE18) / liquidityTokens, 18),
-    marketCapBnb:        formatBigDecimal("0" as unknown as bigint, 18), // filled by caller with totalSupply
-    virtualLiquidityBnb: formatBigDecimal(liquidityBNB, 18),
-  };
-}
-
-// ─── Type mappings ────────────────────────────────────────────────────────────
-
-const TO_API_TYPE: Record<string, string> = {
-  STANDARD:   "Standard",
-  TAX:        "Tax",
-  REFLECTION: "Reflection",
-  UNKNOWN:    "Unknown",
-};
-
-const FROM_API_TYPE: Record<string, string> = {
-  Standard:   "STANDARD",
-  Tax:        "TAX",
-  Reflection: "REFLECTION",
-};
+// ─── Local constants ──────────────────────────────────────────────────────────
 
 const TOKEN_ORDER_MAP: Record<string, string> = {
   created_at_block: "createdAtBlockNumber",
-  volume_bnb:       "raisedBNB",          // no combined-volume field; raisedBNB is the best proxy
+  volume_bnb:       "raisedBNB",
   buy_count:        "buysCount",
   sell_count:       "sellsCount",
   raised_bnb:       "raisedBNB",
@@ -62,41 +24,6 @@ const TRADE_ORDER_MAP: Record<string, string> = {
   token_amount: "tokenAmount",
   block_number: "blockNumber",
 };
-
-// ─── Subgraph types ───────────────────────────────────────────────────────────
-
-interface SubgraphToken {
-  id:                        string;
-  creator:                   string;
-  name:                      string | null;
-  symbol:                    string | null;
-  totalSupply:               string;
-  tokenType:                 string;
-  virtualBNB:                string;
-  migrationTarget:           string;
-  antibotEnabled:            boolean;
-  tradingBlock:              string;
-  raisedBNB:                 string;
-  migrated:                  boolean;
-  pair:                      string | null;
-  migrationBNB:              string | null;
-  migrationLiquidityTokens:  string | null;
-  migratedAtTimestamp:       string | null;
-  migratedAtBlockNumber:     string | null;
-  buysCount:                 string;
-  sellsCount:                string;
-  totalVolumeBNBBuy:         string;
-  totalVolumeBNBSell:        string;
-  createdAtTimestamp:        string;
-  createdAtBlockNumber:      string;
-  txHash:                    string;
-  metaUri:                   string | null;
-  description:               string | null;
-  image:                     string | null;
-  website:                   string | null;
-  twitter:                   string | null;
-  telegram:                  string | null;
-}
 
 interface SubgraphTrade {
   id:           string;
@@ -140,16 +67,6 @@ interface SubgraphSnapshot {
 }
 
 // ─── GraphQL queries ──────────────────────────────────────────────────────────
-
-const TOKEN_FIELDS = `
-  id creator name symbol totalSupply tokenType
-  virtualBNB migrationTarget antibotEnabled tradingBlock
-  raisedBNB migrated pair migrationBNB migrationLiquidityTokens
-  migratedAtTimestamp migratedAtBlockNumber
-  buysCount sellsCount totalVolumeBNBBuy totalVolumeBNBSell
-  createdAtTimestamp createdAtBlockNumber txHash
-  metaUri description image website twitter telegram
-`;
 
 const TOKENS_LIST_QUERY = /* GraphQL */ `
   query TokenList(
@@ -257,54 +174,7 @@ const TOKEN_EXISTS_QUERY = /* GraphQL */ `
   }
 `;
 
-// ─── Normalizers ──────────────────────────────────────────────────────────────
-
-function computeTokenPrice(t: SubgraphToken) {
-  if (t.migrated && t.migrationBNB && t.migrationLiquidityTokens) {
-    const liqBNB    = BigInt(t.migrationBNB);
-    const liqTokens = BigInt(t.migrationLiquidityTokens);
-    const supply    = BigInt(t.totalSupply);
-    if (liqTokens === 0n) return { priceBnb: "0.0", marketCapBnb: "0.0", virtualLiquidityBnb: formatBigDecimal(liqBNB, 18) };
-    return {
-      priceBnb:            formatBigDecimal((liqBNB * SCALE18) / liqTokens, 18),
-      marketCapBnb:        formatBigDecimal((liqBNB * supply) / liqTokens, 18),
-      virtualLiquidityBnb: formatBigDecimal(liqBNB, 18),
-    };
-  }
-  return bondingCurvePrice(BigInt(t.virtualBNB), BigInt(t.raisedBNB), BigInt(t.totalSupply));
-}
-
-function normalizeToken(t: SubgraphToken) {
-  const price = computeTokenPrice(t);
-  return {
-    id:              t.id,
-    creator:         t.creator,
-    name:            t.name ?? null,
-    symbol:          t.symbol ?? null,
-    totalSupply:     t.totalSupply,
-    tokenType:       TO_API_TYPE[t.tokenType] ?? t.tokenType,
-    virtualBnb:      t.virtualBNB,
-    migrationTarget: t.migrationTarget,
-    antibotEnabled:  t.antibotEnabled,
-    tradingBlock:    t.tradingBlock,
-    raisedBnb:       t.raisedBNB,
-    migrated:        t.migrated,
-    pairAddress:     t.pair ?? null,
-    buyCount:        t.buysCount,
-    sellCount:       t.sellsCount,
-    volumeBnb:       (BigInt(t.totalVolumeBNBBuy) + BigInt(t.totalVolumeBNBSell)).toString(),
-    createdAtBlock:      t.createdAtBlockNumber,
-    createdAtTimestamp:  t.createdAtTimestamp,
-    creationTxHash:      t.txHash,
-    metaUri:     t.metaUri ?? null,
-    description: t.description ?? null,
-    image:       t.image ?? null,
-    website:     t.website ?? null,
-    twitter:     t.twitter ?? null,
-    telegram:    t.telegram ?? null,
-    ...price,
-  };
-}
+// ─── Trade normalizer ─────────────────────────────────────────────────────────
 
 function normalizeTrade(t: SubgraphTrade) {
   return {

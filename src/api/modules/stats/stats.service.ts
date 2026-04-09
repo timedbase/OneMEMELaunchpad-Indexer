@@ -1,63 +1,122 @@
 import { Injectable } from "@nestjs/common";
-import { sql } from "../../db";
-import { toCamel } from "../../helpers";
+import { subgraphFetch, subgraphFetchAll } from "../../subgraph";
+import { TO_API_TYPE } from "../../token-utils";
+
+// ─── Queries ──────────────────────────────────────────────────────────────────
+
+const FACTORY_QUERY = /* GraphQL */ `
+  query Factory($id: ID!) {
+    factory(id: $id) {
+      totalTokensCreated totalStandardTokens totalTaxTokens totalReflectionTokens
+      totalBuys totalSells totalMigrations
+    }
+  }
+`;
+
+const TOP_TOKEN_QUERY = /* GraphQL */ `
+  query TopToken {
+    tokens(first: 1, orderBy: raisedBNB, orderDirection: desc) {
+      id tokenType creator buysCount sellsCount raisedBNB
+      totalVolumeBNBBuy totalVolumeBNBSell migrated
+    }
+  }
+`;
+
+// For totalLiquidityBNB: sum across all migrations
+const MIGRATION_LIQUIDITY_QUERY = /* GraphQL */ `
+  query MigrationLiquidity($first: Int!, $skip: Int!) {
+    migrations(first: $first, skip: $skip) { liquidityBNB }
+  }
+`;
+
+// For totalVolumeBNB: sum across all tokens
+const TOKEN_VOLUME_QUERY = /* GraphQL */ `
+  query TokenVolumes($first: Int!, $skip: Int!) {
+    tokens(first: $first, skip: $skip) { totalVolumeBNBBuy totalVolumeBNBSell }
+  }
+`;
+
+// For uniqueTraders: fetch all trader addresses
+const ALL_TRADERS_QUERY = /* GraphQL */ `
+  query AllTraders($first: Int!, $skip: Int!) {
+    trades(first: $first, skip: $skip) { trader }
+  }
+`;
+
+// ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class StatsService {
   async platform() {
+    const factoryId = process.env.FACTORY_ADDRESS?.toLowerCase() ?? "";
+
     const [
-      tokenStats,
-      tradeStats,
-      traderStats,
-      topTokenRows,
-      migrationStats,
+      { factory },
+      { tokens: [topToken] },
+      migrations,
+      tokenVolumes,
+      allTraders,
     ] = await Promise.all([
-      sql`
-        SELECT
-          COUNT(*)::int                                                        AS "totalTokens",
-          COUNT(*) FILTER (WHERE migrated = TRUE)::int                        AS "migratedTokens",
-          COUNT(*) FILTER (WHERE migrated = FALSE)::int                       AS "activeTokens",
-          COUNT(*) FILTER (WHERE token_type = 'Standard')::int                AS "standardTokens",
-          COUNT(*) FILTER (WHERE token_type = 'Tax')::int                     AS "taxTokens",
-          COUNT(*) FILTER (WHERE token_type = 'Reflection')::int              AS "reflectionTokens",
-          COALESCE(SUM(volume_bnb::numeric), 0)::text                         AS "totalVolumeBNB"
-        FROM token
-      `,
-      sql`
-        SELECT
-          COUNT(*)::int                                             AS "totalTrades",
-          COUNT(*) FILTER (WHERE trade_type = 'buy')::int          AS "totalBuys",
-          COUNT(*) FILTER (WHERE trade_type = 'sell')::int         AS "totalSells"
-        FROM trade
-      `,
-      sql`SELECT COUNT(DISTINCT trader)::int AS "uniqueTraders" FROM trade`,
-      sql`SELECT id, token_type AS "tokenType", creator, volume_bnb AS "volumeBNB", buy_count AS "buyCount", sell_count AS "sellCount", migrated FROM token ORDER BY volume_bnb::numeric DESC LIMIT 1`,
-      sql`SELECT COALESCE(SUM(liquidity_bnb::numeric), 0)::text AS "totalLiquidityBNB" FROM migration`,
+      subgraphFetch<{ factory: {
+        totalTokensCreated: string;
+        totalStandardTokens: string;
+        totalTaxTokens: string;
+        totalReflectionTokens: string;
+        totalBuys: string;
+        totalSells: string;
+        totalMigrations: string;
+      } | null }>(FACTORY_QUERY, { id: factoryId }),
+
+      subgraphFetch<{ tokens: {
+        id: string; tokenType: string; creator: string;
+        buysCount: string; sellsCount: string; raisedBNB: string;
+        totalVolumeBNBBuy: string; totalVolumeBNBSell: string; migrated: boolean;
+      }[] }>(TOP_TOKEN_QUERY),
+
+      subgraphFetchAll<{ liquidityBNB: string }>("migrations", MIGRATION_LIQUIDITY_QUERY),
+      subgraphFetchAll<{ totalVolumeBNBBuy: string; totalVolumeBNBSell: string }>("tokens", TOKEN_VOLUME_QUERY),
+      subgraphFetchAll<{ trader: string }>("trades", ALL_TRADERS_QUERY),
     ]);
 
-    const tokens     = tokenStats[0];
-    const trades     = tradeStats[0];
-    const traders    = traderStats[0];
-    const topToken   = topTokenRows[0]   ?? null;
-    const migration  = migrationStats[0] ?? null;
+    const totalLiquidityBNBWei = migrations.reduce(
+      (sum, m) => sum + BigInt(m.liquidityBNB), 0n,
+    );
+    const totalVolumeBNBWei = tokenVolumes.reduce(
+      (sum, t) => sum + BigInt(t.totalVolumeBNBBuy) + BigInt(t.totalVolumeBNBSell), 0n,
+    );
+    const uniqueTraders = new Set(allTraders.map(t => t.trader)).size;
+
+    const f = factory;
+    const totalTokens    = parseInt(f?.totalTokensCreated  ?? "0");
+    const migratedTokens = parseInt(f?.totalMigrations     ?? "0");
 
     return {
       data: {
-        totalTokens:    tokens?.totalTokens    ?? 0,
-        migratedTokens: tokens?.migratedTokens ?? 0,
-        activeTokens:   tokens?.activeTokens   ?? 0,
+        totalTokens,
+        migratedTokens,
+        activeTokens: totalTokens - migratedTokens,
         tokensByType: {
-          Standard:   tokens?.standardTokens   ?? 0,
-          Tax:        tokens?.taxTokens         ?? 0,
-          Reflection: tokens?.reflectionTokens  ?? 0,
+          Standard:   parseInt(f?.totalStandardTokens   ?? "0"),
+          Tax:        parseInt(f?.totalTaxTokens         ?? "0"),
+          Reflection: parseInt(f?.totalReflectionTokens  ?? "0"),
         },
-        totalTrades:       trades?.totalTrades       ?? 0,
-        totalBuys:         trades?.totalBuys          ?? 0,
-        totalSells:        trades?.totalSells         ?? 0,
-        uniqueTraders:     traders?.uniqueTraders     ?? 0,
-        totalVolumeBNB:    tokens?.totalVolumeBNB     ?? "0",
-        totalLiquidityBNB: migration?.totalLiquidityBNB ?? "0",
-        topTokenByVolume:  topToken,
+        totalTrades:   parseInt(f?.totalBuys ?? "0") + parseInt(f?.totalSells ?? "0"),
+        totalBuys:     parseInt(f?.totalBuys  ?? "0"),
+        totalSells:    parseInt(f?.totalSells ?? "0"),
+        uniqueTraders,
+        totalVolumeBNB:    (totalVolumeBNBWei / BigInt(1e18)).toString(),
+        totalLiquidityBNB: (totalLiquidityBNBWei / BigInt(1e18)).toString(),
+        topTokenByVolume: topToken
+          ? {
+              id:         topToken.id,
+              tokenType:  TO_API_TYPE[topToken.tokenType] ?? topToken.tokenType,
+              creator:    topToken.creator,
+              buyCount:   topToken.buysCount,
+              sellCount:  topToken.sellsCount,
+              volumeBNB:  (BigInt(topToken.totalVolumeBNBBuy) + BigInt(topToken.totalVolumeBNBSell)).toString(),
+              migrated:   topToken.migrated,
+            }
+          : null,
       },
     };
   }

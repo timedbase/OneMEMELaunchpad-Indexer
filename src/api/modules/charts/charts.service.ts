@@ -1,28 +1,62 @@
 import { Injectable, BadRequestException, NotFoundException } from "@nestjs/common";
-import { sql } from "../../db";
+import { subgraphFetch, subgraphFetchAll, formatBigDecimal } from "../../subgraph";
+import { SCALE18 } from "../../token-utils";
 
 // TradingView resolution → seconds
 const RESOLUTION_MAP: Record<string, number> = {
-  "1":    60,
-  "3":    180,
-  "5":    300,
-  "15":   900,
-  "30":   1_800,
-  "60":   3_600,
-  "120":  7_200,
-  "240":  14_400,
-  "360":  21_600,
-  "720":  43_200,
-  "D":    86_400,
-  "1D":   86_400,
-  "W":    604_800,
-  "1W":   604_800,
+  "1":   60,    "3":   180,   "5":   300,
+  "15":  900,   "30":  1_800, "60":  3_600,
+  "120": 7_200, "240": 14_400,"360": 21_600,
+  "720": 43_200,"D":   86_400,"1D":  86_400,
+  "W":   604_800,"1W": 604_800,
 };
+
+// ─── Queries ──────────────────────────────────────────────────────────────────
+
+const TOKEN_SYMBOL_QUERY = /* GraphQL */ `
+  query TokenSymbol($id: ID!) {
+    token(id: $id) { name symbol tokenType totalSupply createdAtTimestamp }
+  }
+`;
+
+const SNAPSHOTS_HISTORY_QUERY = /* GraphQL */ `
+  query SnapshotsHistory($first: Int!, $skip: Int!, $where: TokenSnapshot_filter) {
+    tokenSnapshots(
+      first: $first, skip: $skip
+      orderBy: blockNumber, orderDirection: asc
+      where: $where
+    ) {
+      blockNumber timestamp openRaisedBNB closeRaisedBNB volumeBNB
+      token { virtualBNB totalSupply }
+    }
+  }
+`;
+
+const EARLIEST_SNAPSHOT_QUERY = /* GraphQL */ `
+  query EarliestSnapshot($token: String!) {
+    tokenSnapshots(first: 1, where: { token: $token }, orderBy: timestamp, orderDirection: asc) {
+      timestamp
+    }
+  }
+`;
+
+const TOKEN_EXISTS_QUERY = /* GraphQL */ `
+  query TokenExists($id: ID!) { token(id: $id) { id migrated } }
+`;
+
+const TOKENS_SEARCH_QUERY = /* GraphQL */ `
+  query TokenSearch($first: Int!) {
+    tokens(first: $first, orderBy: createdAtTimestamp, orderDirection: desc) {
+      id name symbol tokenType
+    }
+  }
+`;
+
+// ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class ChartsService {
 
-  /** GET /charts/config — TradingView UDF configuration (Advanced Charts widget only, not used by Lightweight Charts) */
   config() {
     return {
       supported_resolutions: ["1", "5", "15", "30", "60", "240", "D"],
@@ -33,32 +67,25 @@ export class ChartsService {
     };
   }
 
-  /** GET /charts/time — current server unix timestamp */
   time() {
     return Math.floor(Date.now() / 1000);
   }
 
-  /** GET /charts/symbols?symbol=<tokenAddress> — symbol metadata (UDF/Advanced Charts only) */
   async symbols(symbolParam: string | undefined) {
     if (!symbolParam) throw new BadRequestException("symbol is required");
 
     const addr = symbolParam.toLowerCase();
-    const rows = await sql`
-      SELECT name, symbol, token_type, total_supply, created_at_timestamp
-      FROM token
-      WHERE id = ${addr}
-      LIMIT 1
-    `;
-    const row = rows[0];
+    const { token } = await subgraphFetch<{ token: {
+      name: string; symbol: string; tokenType: string;
+      totalSupply: string; createdAtTimestamp: string;
+    } | null }>(TOKEN_SYMBOL_QUERY, { id: addr });
 
-    if (!row) {
-      return { s: "error", errmsg: "Symbol not found" };
-    }
+    if (!token) return { s: "error", errmsg: "Symbol not found" };
 
     return {
-      name:                   row.name as string,
-      ticker:                 row.symbol as string,
-      description:            `${row.name as string} (${row.symbol as string}) — OneMEME ${row.token_type as string}`,
+      name:                   token.name,
+      ticker:                 token.symbol,
+      description:            `${token.name} (${token.symbol}) — OneMEME ${token.tokenType}`,
       type:                   "crypto",
       session:                "24x7",
       timezone:               "Etc/UTC",
@@ -76,28 +103,6 @@ export class ChartsService {
     };
   }
 
-  /**
-   * GET /charts/history — OHLCV bars for TradingView Lightweight Charts
-   *
-   * Price is computed from the bonding-curve AMM formula using per-block snapshots:
-   *   virtualLiquidity  = baseVirtualBNB + raisedBNB
-   *   price (BNB/token) = virtualLiquidity² / (baseVirtualBNB × totalSupply)
-   *   (all values in wei; units cancel to produce BNB/token directly)
-   *
-   * Within each resolution bucket:
-   *   open   = AMM price at the first snapshot's openRaisedBNB
-   *   close  = AMM price at the last snapshot's closeRaisedBNB
-   *   high   = AMM price at the highest closeRaisedBNB in the bucket
-   *   low    = AMM price at the lowest closeRaisedBNB in the bucket
-   *   volume = sum of volumeBNB across all snapshots in the bucket (in BNB, not wei)
-   *
-   * Response shape:
-   *   { bars: CandleBar[], migrated: boolean, nextTime?: number }
-   *   bars is empty when no data exists in the requested range.
-   *   nextTime is set (to the earliest available snapshot timestamp) when bars
-   *   is empty and the token has not yet migrated, so the caller knows where
-   *   to seek to find the first bar.
-   */
   async history(query: Record<string, string | undefined>) {
     const symbol     = query["symbol"];
     const resolution = query["resolution"] ?? "60";
@@ -106,10 +111,8 @@ export class ChartsService {
     const fromRaw      = query["from"]      ? parseInt(query["from"],      10) : null;
 
     if (!symbol) throw new BadRequestException("symbol is required");
-
     const resSecs = RESOLUTION_MAP[resolution];
     if (!resSecs) throw new BadRequestException(`Unsupported resolution: ${resolution}`);
-
     if (toRaw        !== null && isNaN(toRaw))        throw new BadRequestException("to must be a unix timestamp");
     if (countbackRaw !== null && isNaN(countbackRaw)) throw new BadRequestException("countback must be an integer");
     if (fromRaw      !== null && isNaN(fromRaw))      throw new BadRequestException("from must be a unix timestamp");
@@ -117,112 +120,105 @@ export class ChartsService {
     const toTs      = toRaw       ?? Math.floor(Date.now() / 1000);
     const countback = countbackRaw ?? null;
     const fromTs    = fromRaw      ?? null;
-
-    const addr = symbol.toLowerCase();
+    const addr      = symbol.toLowerCase();
 
     const effectiveFrom = countback !== null
       ? toTs - countback * resSecs
       : (fromTs ?? toTs - 300 * resSecs);
 
-    const [token] = await sql`
-      SELECT migrated FROM token WHERE id = ${addr} LIMIT 1
-    `;
-
+    const { token } = await subgraphFetch<{ token: { id: string; migrated: boolean } | null }>(
+      TOKEN_EXISTS_QUERY, { id: addr },
+    );
     if (!token) throw new NotFoundException(`Token ${addr} not found`);
 
-    // AMM formula computed entirely in SQL by joining the token row.
-    // Bucket is computed in a subquery first so GROUP BY can reference the alias
-    // without PostgreSQL rejecting the repeated parameterized expression.
-    const rows = await sql`
-      WITH raw AS (
-        SELECT
-          (floor(s.timestamp::numeric / ${resSecs}) * ${resSecs})::bigint AS bucket,
-          s.open_raised_bnb::numeric   AS open_raised_bnb,
-          s.close_raised_bnb::numeric  AS close_raised_bnb,
-          s.volume_bnb::numeric        AS volume_bnb,
-          s.block_number,
-          t.virtual_bnb::numeric       AS v_bnb,
-          t.total_supply::numeric      AS total_supply
-        FROM token_snapshot s
-        JOIN token t ON t.id = s.token
-        WHERE
-          s.token       = ${addr}
-          AND s.timestamp >= ${effectiveFrom}
-          AND s.timestamp <= ${toTs}
-      ),
-      buckets AS (
-        SELECT
-          bucket                                                                    AS t,
-          (array_agg(open_raised_bnb  ORDER BY block_number ASC))[1]               AS open_raised,
-          (array_agg(close_raised_bnb ORDER BY block_number DESC))[1]              AS close_raised,
-          MAX(close_raised_bnb)                                                     AS high_raised,
-          MIN(close_raised_bnb)                                                     AS low_raised,
-          SUM(volume_bnb)                                                           AS v,
-          MAX(v_bnb)                                                                AS v_bnb,
-          MAX(total_supply)                                                         AS total_supply
-        FROM raw
-        GROUP BY bucket
-        ORDER BY bucket ASC
-      )
-      SELECT
-        t,
-        (open_raised  + v_bnb)^2 / NULLIF(v_bnb * total_supply, 0)  AS o,
-        (close_raised + v_bnb)^2 / NULLIF(v_bnb * total_supply, 0)  AS c,
-        (high_raised  + v_bnb)^2 / NULLIF(v_bnb * total_supply, 0)  AS h,
-        (low_raised   + v_bnb)^2 / NULLIF(v_bnb * total_supply, 0)  AS l,
-        v
-      FROM buckets
-    `;
+    // Fetch all snapshots in the time range (up to 5000 — sufficient for small platforms)
+    const snaps = await subgraphFetchAll<{
+      blockNumber: string; timestamp: string;
+      openRaisedBNB: string; closeRaisedBNB: string; volumeBNB: string;
+      token: { virtualBNB: string; totalSupply: string };
+    }>("tokenSnapshots", SNAPSHOTS_HISTORY_QUERY, {
+      where: {
+        token:          addr,
+        timestamp_gte:  effectiveFrom.toString(),
+        timestamp_lte:  toTs.toString(),
+      },
+    }, 1000);
 
-    if (rows.length === 0) {
-      // No bars in the requested range — tell the caller where the bonding-curve
-      // data starts so it can seek there. Applies to both active and migrated
-      // tokens: migrated tokens still have all their pre-migration snapshots.
-      const [earliest] = await sql`
-        SELECT MIN(timestamp)::int AS ts FROM token_snapshot WHERE token = ${addr}
-      `;
-      const nextTime: number | undefined = earliest?.ts as number | undefined;
-      return { bars: [], migrated: token.migrated as boolean, ...(nextTime !== undefined ? { nextTime } : {}) };
+    if (snaps.length === 0) {
+      const { tokenSnapshots } = await subgraphFetch<{ tokenSnapshots: { timestamp: string }[] }>(
+        EARLIEST_SNAPSHOT_QUERY, { token: addr },
+      );
+      const nextTime = tokenSnapshots[0] ? parseInt(tokenSnapshots[0].timestamp) : undefined;
+      return {
+        bars:     [],
+        migrated: token.migrated,
+        ...(nextTime !== undefined ? { nextTime } : {}),
+      };
     }
 
-    return {
-      bars: rows
-        .filter((r: any) => r.o !== null && r.c !== null && r.h !== null && r.l !== null)
-        .map((r: any) => ({
-          time:   Number(r.t),
-          open:   parseFloat(r.o),
-          high:   parseFloat(r.h),
-          low:    parseFloat(r.l),
-          close:  parseFloat(r.c),
-          volume: parseFloat(r.v) / 1e18,   // wei → BNB
-        })),
-      migrated: token.migrated as boolean,
+    // Time-bucket the snapshots in JS
+    const bucketMap = new Map<number, typeof snaps>();
+    for (const s of snaps) {
+      const bucket = Math.floor(parseInt(s.timestamp) / resSecs) * resSecs;
+      const arr = bucketMap.get(bucket) ?? [];
+      arr.push(s);
+      bucketMap.set(bucket, arr);
+    }
+
+    const priceFromRaised = (raisedBNB: bigint, vBNB: bigint, totalSupply: bigint): number => {
+      if (vBNB === 0n || totalSupply === 0n) return 0;
+      const vl = vBNB + raisedBNB;
+      return parseFloat(formatBigDecimal((vl * vl * SCALE18) / (vBNB * totalSupply), 18));
     };
+
+    const bars = [...bucketMap.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([bucketTime, group]) => {
+        // group is already sorted asc by blockNumber (fetched asc)
+        const vBNB        = BigInt(group[0].token.virtualBNB);
+        const totalSupply = BigInt(group[0].token.totalSupply);
+
+        const openRaised  = BigInt(group[0].openRaisedBNB);
+        const closeRaised = BigInt(group[group.length - 1].closeRaisedBNB);
+        const highRaised  = group.reduce((m, s) => { const v = BigInt(s.closeRaisedBNB); return v > m ? v : m; }, 0n);
+        const lowRaised   = group.reduce((m, s) => { const v = BigInt(s.closeRaisedBNB); return v < m ? v : m; }, BigInt("999999999999999999999999999999999999"));
+        const volumeWei   = group.reduce((s, r) => s + BigInt(r.volumeBNB), 0n);
+
+        return {
+          time:   bucketTime,
+          open:   priceFromRaised(openRaised,  vBNB, totalSupply),
+          close:  priceFromRaised(closeRaised, vBNB, totalSupply),
+          high:   priceFromRaised(highRaised,  vBNB, totalSupply),
+          low:    priceFromRaised(lowRaised,   vBNB, totalSupply),
+          volume: parseFloat(formatBigDecimal(volumeWei, 18)),
+        };
+      })
+      .filter(b => b.open > 0 && b.close > 0);
+
+    return { bars, migrated: token.migrated };
   }
 
-  /**
-   * GET /charts/search?query=<addr>
-   */
   async search(query: Record<string, string | undefined>) {
     const q        = (query["query"] ?? "").toLowerCase();
-    const escaped  = q.replace(/[%_\\]/g, "\\$&");
     const limitRaw = parseInt(query["limit"] ?? "10", 10);
     const limit    = isNaN(limitRaw) ? 10 : Math.min(limitRaw, 30);
 
-    const rows = await sql`
-      SELECT id, name, symbol, token_type
-      FROM token
-      WHERE id LIKE ${escaped + "%"} ESCAPE '\\'
-      ORDER BY created_at_timestamp DESC
-      LIMIT ${limit}
-    `;
+    // Fetch a reasonable number of recent tokens and filter by address prefix in JS.
+    // This is sufficient for small platforms with few tokens.
+    const { tokens } = await subgraphFetch<{ tokens: { id: string; name: string; symbol: string; tokenType: string }[] }>(
+      TOKENS_SEARCH_QUERY, { first: 200 },
+    );
 
-    return rows.map((r: any) => ({
-      symbol:      r.symbol,
-      full_name:   `${r.name} (${r.symbol})`,
-      description: `${r.name} — OneMEME ${r.token_type}`,
+    const matches = q
+      ? tokens.filter(t => t.id.startsWith(q) || t.name?.toLowerCase().includes(q) || t.symbol?.toLowerCase().includes(q))
+      : tokens;
+
+    return matches.slice(0, limit).map(t => ({
+      symbol:      t.symbol,
+      full_name:   `${t.name} (${t.symbol})`,
+      description: `${t.name} — OneMEME ${t.tokenType}`,
       exchange:    "OneMEME",
-      ticker:      r.symbol,
+      ticker:      t.symbol,
       type:        "crypto",
     }));
   }
