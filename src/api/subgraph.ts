@@ -78,6 +78,33 @@ export async function subgraphFetchAll<T>(
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
+ * Counts all results matching a query by fetching all pages of just `id` fields.
+ * Use for paginated endpoints that need an accurate total count.
+ * Caps at 100,000 — return value is `100_000` if the real count exceeds that.
+ */
+export async function subgraphCount(
+  key:        string,
+  query:      string,
+  variables?: Record<string, unknown>,
+): Promise<number> {
+  const all = await subgraphFetchAll<{ id: string }>(key, query, variables, 1000);
+  return all.length;
+}
+
+/**
+ * Formats a BigInt value as a decimal string with the given number of decimal places.
+ * Trailing zeros in the fractional part are removed.
+ *
+ * Example: formatBigDecimal(1_230_000_000_000_000_000n, 18) → "1.23"
+ */
+export function formatBigDecimal(value: bigint, decimals: number): string {
+  const s       = value.toString().padStart(decimals + 1, "0");
+  const intPart = s.slice(0, -decimals) || "0";
+  const decPart = s.slice(-decimals).replace(/0+$/, "") || "0";
+  return `${intPart}.${decPart}`;
+}
+
+/**
  * Derives a Ponder-compatible trade source_id from a subgraph trade id.
  *
  * The subgraph encodes trade ids as txHash (32 bytes) + logIndex (4 bytes

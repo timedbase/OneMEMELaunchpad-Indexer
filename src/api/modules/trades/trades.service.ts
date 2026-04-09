@@ -1,6 +1,64 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
-import { sql } from "../../db";
-import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir, toCamel } from "../../helpers";
+import { subgraphFetch, subgraphCount, tradeSourceId } from "../../subgraph";
+import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir } from "../../helpers";
+
+interface SubgraphTrade {
+  id:           string;
+  token:        { id: string };
+  trader:       string;
+  type:         "BUY" | "SELL";
+  bnbAmount:    string;
+  tokenAmount:  string;
+  tokensToDead: string;
+  blockNumber:  string;
+  timestamp:    string;
+  txHash:       string;
+}
+
+function normalizeTrade(t: SubgraphTrade) {
+  return {
+    id:           tradeSourceId(t.id),
+    token:        t.token.id,
+    trader:       t.trader,
+    tradeType:    t.type === "BUY" ? "buy" : "sell",
+    bnbAmount:    t.bnbAmount,
+    tokenAmount:  t.tokenAmount,
+    tokensToDead: t.tokensToDead,
+    blockNumber:  t.blockNumber,
+    timestamp:    parseInt(t.timestamp),
+    txHash:       t.txHash,
+  };
+}
+
+const TRADE_FIELDS = `
+  id trader type bnbAmount tokenAmount tokensToDead blockNumber timestamp txHash
+  token { id }
+`;
+
+const TRADE_ORDER_MAP: Record<string, string> = {
+  timestamp:    "timestamp",
+  bnb_amount:   "bnbAmount",
+  token_amount: "tokenAmount",
+  block_number: "blockNumber",
+};
+
+const TRADES_QUERY = /* GraphQL */ `
+  query Trades(
+    $first: Int!, $skip: Int!
+    $orderBy: Trade_orderBy!, $orderDirection: OrderDirection!
+    $where: Trade_filter
+  ) {
+    trades(first: $first, skip: $skip, orderBy: $orderBy, orderDirection: $orderDirection, where: $where) {
+      ${TRADE_FIELDS}
+    }
+  }
+`;
+
+const TRADES_COUNT_QUERY = /* GraphQL */ `
+  query TradesCount($where: Trade_filter, $first: Int!, $skip: Int!) {
+    trades(first: $first, skip: $skip, where: $where) { id }
+  }
+`;
 
 @Injectable()
 export class TradesService {
@@ -15,33 +73,37 @@ export class TradesService {
 
     if (tokenFilter  && !isAddress(tokenFilter))  throw new BadRequestException("Invalid token address");
     if (traderFilter && !isAddress(traderFilter)) throw new BadRequestException("Invalid trader address");
-    if (typeFilter   && typeFilter !== "buy" && typeFilter !== "sell") throw new BadRequestException('type must be "buy" or "sell"');
+    if (typeFilter   && typeFilter !== "buy" && typeFilter !== "sell") {
+      throw new BadRequestException('type must be "buy" or "sell"');
+    }
 
     const ALLOWED_ORDER = ["timestamp", "bnb_amount", "token_amount", "block_number"] as const;
-    const orderBy  = parseOrderBy(query, ALLOWED_ORDER, "timestamp");
-    const orderDir = parseOrderDir(query);
+    const orderBy  = TRADE_ORDER_MAP[parseOrderBy(query, ALLOWED_ORDER, "timestamp")] ?? "timestamp";
+    const orderDir = parseOrderDir(query).toLowerCase() as "asc" | "desc";
 
-    const tokenSql  = tokenFilter  ? sql`AND token    = ${normalizeAddress(tokenFilter)}`  : sql``;
-    const traderSql = traderFilter ? sql`AND trader   = ${normalizeAddress(traderFilter)}` : sql``;
-    const typeSql   = typeFilter   ? sql`AND trade_type = ${typeFilter}`                   : sql``;
-    const fromInt   = from ? parseInt(from, 10) : null;
-    const toInt     = to   ? parseInt(to,   10) : null;
+    const fromInt = from ? parseInt(from, 10) : null;
+    const toInt   = to   ? parseInt(to,   10) : null;
     if (fromInt !== null && isNaN(fromInt)) throw new BadRequestException("from must be a unix timestamp");
     if (toInt   !== null && isNaN(toInt))   throw new BadRequestException("to must be a unix timestamp");
-    const fromSql   = fromInt !== null ? sql`AND timestamp >= ${fromInt}` : sql``;
-    const toSql     = toInt   !== null ? sql`AND timestamp <= ${toInt}`   : sql``;
 
-    const numericCols = new Set(["bnb_amount", "token_amount", "block_number"]);
-    const orderExpr   = numericCols.has(orderBy)
-      ? sql`ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
-      : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
+    const where: Record<string, unknown> = {};
+    if (tokenFilter)          where["token"]          = normalizeAddress(tokenFilter);
+    if (traderFilter)         where["trader"]         = normalizeAddress(traderFilter);
+    if (typeFilter)           where["type"]           = typeFilter.toUpperCase();
+    if (fromInt !== null)     where["timestamp_gte"]  = fromInt.toString();
+    if (toInt   !== null)     where["timestamp_lte"]  = toInt.toString();
 
-    const [rows, [{ count }]] = await Promise.all([
-      sql`SELECT * FROM trade WHERE TRUE ${tokenSql} ${traderSql} ${typeSql} ${fromSql} ${toSql} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,
-      sql`SELECT COUNT(*)::int AS count FROM trade WHERE TRUE ${tokenSql} ${traderSql} ${typeSql} ${fromSql} ${toSql}`,
+    const [{ trades }, total] = await Promise.all([
+      subgraphFetch<{ trades: SubgraphTrade[] }>(TRADES_QUERY, {
+        first: limit, skip: offset, orderBy, orderDirection: orderDir,
+        where: Object.keys(where).length ? where : undefined,
+      }),
+      subgraphCount("trades", TRADES_COUNT_QUERY, {
+        where: Object.keys(where).length ? where : undefined,
+      }),
     ]);
 
-    return paginated(rows.map(toCamel), count, page, limit);
+    return paginated(trades.map(normalizeTrade), total, page, limit);
   }
 
   async byTrader(address: string, query: Record<string, string | undefined>) {
@@ -52,22 +114,29 @@ export class TradesService {
     const from       = query["from"];
     const to         = query["to"];
 
-    if (typeFilter   && typeFilter !== "buy" && typeFilter !== "sell") throw new BadRequestException('type must be "buy" or "sell"');
-    const fromInt2 = from ? parseInt(from, 10) : null;
-    const toInt2   = to   ? parseInt(to,   10) : null;
-    if (fromInt2 !== null && isNaN(fromInt2)) throw new BadRequestException("from must be a unix timestamp");
-    if (toInt2   !== null && isNaN(toInt2))   throw new BadRequestException("to must be a unix timestamp");
-    const typeSql = typeFilter        ? sql`AND trade_type = ${typeFilter}`   : sql``;
-    const fromSql = fromInt2 !== null ? sql`AND timestamp >= ${fromInt2}`     : sql``;
-    const toSql   = toInt2   !== null ? sql`AND timestamp <= ${toInt2}`       : sql``;
+    if (typeFilter && typeFilter !== "buy" && typeFilter !== "sell") {
+      throw new BadRequestException('type must be "buy" or "sell"');
+    }
+    const fromInt = from ? parseInt(from, 10) : null;
+    const toInt   = to   ? parseInt(to,   10) : null;
+    if (fromInt !== null && isNaN(fromInt)) throw new BadRequestException("from must be a unix timestamp");
+    if (toInt   !== null && isNaN(toInt))   throw new BadRequestException("to must be a unix timestamp");
 
-    const addr = normalizeAddress(address);
+    const addr  = normalizeAddress(address);
+    const where: Record<string, unknown> = { trader: addr };
+    if (typeFilter)       where["type"]           = typeFilter.toUpperCase();
+    if (fromInt !== null) where["timestamp_gte"]  = fromInt.toString();
+    if (toInt   !== null) where["timestamp_lte"]  = toInt.toString();
 
-    const [rows, [{ count }]] = await Promise.all([
-      sql`SELECT * FROM trade WHERE trader = ${addr} ${typeSql} ${fromSql} ${toSql} ORDER BY timestamp DESC LIMIT ${limit} OFFSET ${offset}`,
-      sql`SELECT COUNT(*)::int AS count FROM trade WHERE trader = ${addr} ${typeSql} ${fromSql} ${toSql}`,
+    const [{ trades }, total] = await Promise.all([
+      subgraphFetch<{ trades: SubgraphTrade[] }>(TRADES_QUERY, {
+        first: limit, skip: offset,
+        orderBy: "timestamp", orderDirection: "desc",
+        where,
+      }),
+      subgraphCount("trades", TRADES_COUNT_QUERY, { where }),
     ]);
 
-    return paginated(rows.map(toCamel), count, page, limit);
+    return paginated(trades.map(normalizeTrade), total, page, limit);
   }
 }

@@ -1,131 +1,345 @@
-import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger } from "@nestjs/common";
-import { sql } from "../../db";
-import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir, toCamel } from "../../helpers";
+import { Injectable, NotFoundException, BadRequestException, Logger } from "@nestjs/common";
+import { subgraphFetch, subgraphFetchAll, subgraphCount, formatBigDecimal, tradeSourceId } from "../../subgraph";
 import { getPairPrice, readMetaURI } from "../../rpc";
-import { PriceService } from "../price/price.service";
 import { fetchMetadata } from "../../metadata";
+import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir } from "../../helpers";
+import { PriceService } from "../price/price.service";
 
-/**
- * Computed price columns — requires token alias `t` and migration LEFT JOIN alias `m`.
- *
- * virtualLiquidity = virtualBNB (base, constant) + raisedBNB (dynamic)
- *
- * Bonding curve price (BNB/token) = virtualLiquidity² / (virtualBNB × totalSupply)
- * Bonding curve market cap (BNB)  = virtualLiquidity² / (virtualBNB × 1e18)
- *   (totalSupply cancels when converting from wei/token → full token units)
- *
- * Migrated tokens use migration-time liquidity snapshot for list endpoints.
- * findOne() overrides price/mcap with a live PancakeSwap getReserves() call.
- */
-const PRICE_COLS = sql`
-  (t.virtual_bnb::numeric + t.raised_bnb::numeric)::text AS virtual_liquidity_bnb,
-  CASE
-    WHEN t.migrated
-      THEN (m.liquidity_bnb::numeric / NULLIF(m.liquidity_tokens::numeric, 0))::text
-    ELSE ((t.virtual_bnb::numeric + t.raised_bnb::numeric)^2
-          / NULLIF(t.virtual_bnb::numeric * t.total_supply::numeric, 0))::text
-  END AS price_bnb,
-  CASE
-    WHEN t.migrated
-      THEN (m.liquidity_bnb::numeric * t.total_supply::numeric
-            / NULLIF(m.liquidity_tokens::numeric, 0) / 1e18)::text
-    ELSE ((t.virtual_bnb::numeric + t.raised_bnb::numeric)^2
-          / NULLIF(t.virtual_bnb::numeric, 0) / 1e18)::text
-  END AS market_cap_bnb
+// ─── Price computation ────────────────────────────────────────────────────────
+
+const SCALE18 = 10n ** 18n;
+
+function bondingCurvePrice(virtualBNB: bigint, raisedBNB: bigint, totalSupply: bigint) {
+  const vl = virtualBNB + raisedBNB;
+  if (virtualBNB === 0n || totalSupply === 0n) {
+    return { priceBnb: "0.0", marketCapBnb: "0.0", virtualLiquidityBnb: formatBigDecimal(vl, 18) };
+  }
+  return {
+    priceBnb:            formatBigDecimal((vl * vl * SCALE18) / (virtualBNB * totalSupply), 18),
+    marketCapBnb:        formatBigDecimal((vl * vl) / virtualBNB, 18),
+    virtualLiquidityBnb: formatBigDecimal(vl, 18),
+  };
+}
+
+function migrationPrice(liquidityBNB: bigint, liquidityTokens: bigint) {
+  if (liquidityTokens === 0n) {
+    return { priceBnb: "0.0", marketCapBnb: "0.0", virtualLiquidityBnb: formatBigDecimal(liquidityBNB, 18) };
+  }
+  return {
+    priceBnb:            formatBigDecimal((liquidityBNB * SCALE18) / liquidityTokens, 18),
+    marketCapBnb:        formatBigDecimal("0" as unknown as bigint, 18), // filled by caller with totalSupply
+    virtualLiquidityBnb: formatBigDecimal(liquidityBNB, 18),
+  };
+}
+
+// ─── Type mappings ────────────────────────────────────────────────────────────
+
+const TO_API_TYPE: Record<string, string> = {
+  STANDARD:   "Standard",
+  TAX:        "Tax",
+  REFLECTION: "Reflection",
+  UNKNOWN:    "Unknown",
+};
+
+const FROM_API_TYPE: Record<string, string> = {
+  Standard:   "STANDARD",
+  Tax:        "TAX",
+  Reflection: "REFLECTION",
+};
+
+const TOKEN_ORDER_MAP: Record<string, string> = {
+  created_at_block: "createdAtBlockNumber",
+  volume_bnb:       "raisedBNB",          // no combined-volume field; raisedBNB is the best proxy
+  buy_count:        "buysCount",
+  sell_count:       "sellsCount",
+  raised_bnb:       "raisedBNB",
+  total_supply:     "totalSupply",
+};
+
+const TRADE_ORDER_MAP: Record<string, string> = {
+  timestamp:    "timestamp",
+  bnb_amount:   "bnbAmount",
+  token_amount: "tokenAmount",
+  block_number: "blockNumber",
+};
+
+// ─── Subgraph types ───────────────────────────────────────────────────────────
+
+interface SubgraphToken {
+  id:                        string;
+  creator:                   string;
+  name:                      string | null;
+  symbol:                    string | null;
+  totalSupply:               string;
+  tokenType:                 string;
+  virtualBNB:                string;
+  migrationTarget:           string;
+  antibotEnabled:            boolean;
+  tradingBlock:              string;
+  raisedBNB:                 string;
+  migrated:                  boolean;
+  pair:                      string | null;
+  migrationBNB:              string | null;
+  migrationLiquidityTokens:  string | null;
+  migratedAtTimestamp:       string | null;
+  migratedAtBlockNumber:     string | null;
+  buysCount:                 string;
+  sellsCount:                string;
+  totalVolumeBNBBuy:         string;
+  totalVolumeBNBSell:        string;
+  createdAtTimestamp:        string;
+  createdAtBlockNumber:      string;
+  txHash:                    string;
+  metaUri:                   string | null;
+  description:               string | null;
+  image:                     string | null;
+  website:                   string | null;
+  twitter:                   string | null;
+  telegram:                  string | null;
+}
+
+interface SubgraphTrade {
+  id:           string;
+  token:        { id: string };
+  trader:       string;
+  type:         "BUY" | "SELL";
+  bnbAmount:    string;
+  tokenAmount:  string;
+  tokensToDead: string;
+  blockNumber:  string;
+  timestamp:    string;
+  txHash:       string;
+}
+
+interface SubgraphMigration {
+  txHash:          string;
+  pair:            string;
+  liquidityBNB:    string;
+  liquidityTokens: string;
+  blockNumber:     string;
+  timestamp:       string;
+  token:           { id: string; creator: string };
+}
+
+interface SubgraphHolder {
+  address:              string;
+  balance:              string;
+  lastUpdatedBlock:     string;
+  lastUpdatedTimestamp: string;
+}
+
+interface SubgraphSnapshot {
+  blockNumber:  string;
+  timestamp:    string;
+  openRaisedBNB:  string;
+  closeRaisedBNB: string;
+  volumeBNB:    string;
+  buyCount:     string;
+  sellCount:    string;
+  token:        { virtualBNB: string; totalSupply: string };
+}
+
+// ─── GraphQL queries ──────────────────────────────────────────────────────────
+
+const TOKEN_FIELDS = `
+  id creator name symbol totalSupply tokenType
+  virtualBNB migrationTarget antibotEnabled tradingBlock
+  raisedBNB migrated pair migrationBNB migrationLiquidityTokens
+  migratedAtTimestamp migratedAtBlockNumber
+  buysCount sellsCount totalVolumeBNBBuy totalVolumeBNBSell
+  createdAtTimestamp createdAtBlockNumber txHash
+  metaUri description image website twitter telegram
 `;
 
+const TOKENS_LIST_QUERY = /* GraphQL */ `
+  query TokenList(
+    $first: Int!, $skip: Int!
+    $orderBy: Token_orderBy!, $orderDirection: OrderDirection!
+    $where: Token_filter
+  ) {
+    tokens(first: $first, skip: $skip, orderBy: $orderBy, orderDirection: $orderDirection, where: $where) {
+      ${TOKEN_FIELDS}
+    }
+  }
+`;
+
+const TOKENS_COUNT_QUERY = /* GraphQL */ `
+  query TokenCount($where: Token_filter, $first: Int!, $skip: Int!) {
+    tokens(first: $first, skip: $skip, where: $where) { id }
+  }
+`;
+
+const TOKEN_QUERY = /* GraphQL */ `
+  query Token($id: ID!) {
+    token(id: $id) { ${TOKEN_FIELDS} }
+  }
+`;
+
+const TRADES_FOR_TOKEN_QUERY = /* GraphQL */ `
+  query TradesForToken(
+    $token: String!, $first: Int!, $skip: Int!
+    $orderBy: Trade_orderBy!, $orderDirection: OrderDirection!
+    $where: Trade_filter
+  ) {
+    trades(first: $first, skip: $skip, orderBy: $orderBy, orderDirection: $orderDirection, where: $where) {
+      id trader type bnbAmount tokenAmount tokensToDead blockNumber timestamp txHash
+      token { id }
+    }
+  }
+`;
+
+const TRADES_COUNT_QUERY = /* GraphQL */ `
+  query TradesCount($where: Trade_filter, $first: Int!, $skip: Int!) {
+    trades(first: $first, skip: $skip, where: $where) { id }
+  }
+`;
+
+const ALL_TRADES_FOR_TOKEN_QUERY = /* GraphQL */ `
+  query AllTradesForToken($where: Trade_filter, $first: Int!, $skip: Int!) {
+    trades(first: $first, skip: $skip, where: $where, orderBy: timestamp, orderDirection: asc) {
+      id trader type bnbAmount token { id }
+    }
+  }
+`;
+
+const MIGRATION_FOR_TOKEN_QUERY = /* GraphQL */ `
+  query MigrationForToken($token: String!) {
+    migrations(first: 1, where: { token: $token }) {
+      txHash pair liquidityBNB liquidityTokens blockNumber timestamp
+      token { id creator }
+    }
+  }
+`;
+
+const HOLDERS_QUERY = /* GraphQL */ `
+  query Holders(
+    $token: String!, $first: Int!, $skip: Int!
+    $orderDirection: OrderDirection!
+  ) {
+    holders(
+      first: $first, skip: $skip
+      orderBy: balance, orderDirection: $orderDirection
+      where: { token: $token, balance_gt: "0" }
+    ) {
+      address balance lastUpdatedBlock lastUpdatedTimestamp
+    }
+  }
+`;
+
+const HOLDERS_COUNT_QUERY = /* GraphQL */ `
+  query HoldersCount($token: String!, $first: Int!, $skip: Int!) {
+    holders(first: $first, skip: $skip, where: { token: $token, balance_gt: "0" }) { id }
+  }
+`;
+
+const SNAPSHOTS_QUERY = /* GraphQL */ `
+  query Snapshots($first: Int!, $skip: Int!, $where: TokenSnapshot_filter) {
+    tokenSnapshots(
+      first: $first, skip: $skip
+      orderBy: blockNumber, orderDirection: desc
+      where: $where
+    ) {
+      blockNumber timestamp openRaisedBNB closeRaisedBNB volumeBNB buyCount sellCount
+      token { virtualBNB totalSupply }
+    }
+  }
+`;
+
+const SNAPSHOTS_COUNT_QUERY = /* GraphQL */ `
+  query SnapshotsCount($where: TokenSnapshot_filter, $first: Int!, $skip: Int!) {
+    tokenSnapshots(first: $first, skip: $skip, where: $where) { id }
+  }
+`;
+
+const TOKEN_EXISTS_QUERY = /* GraphQL */ `
+  query TokenExists($id: ID!) {
+    token(id: $id) { id }
+  }
+`;
+
+// ─── Normalizers ──────────────────────────────────────────────────────────────
+
+function computeTokenPrice(t: SubgraphToken) {
+  if (t.migrated && t.migrationBNB && t.migrationLiquidityTokens) {
+    const liqBNB    = BigInt(t.migrationBNB);
+    const liqTokens = BigInt(t.migrationLiquidityTokens);
+    const supply    = BigInt(t.totalSupply);
+    if (liqTokens === 0n) return { priceBnb: "0.0", marketCapBnb: "0.0", virtualLiquidityBnb: formatBigDecimal(liqBNB, 18) };
+    return {
+      priceBnb:            formatBigDecimal((liqBNB * SCALE18) / liqTokens, 18),
+      marketCapBnb:        formatBigDecimal((liqBNB * supply) / liqTokens, 18),
+      virtualLiquidityBnb: formatBigDecimal(liqBNB, 18),
+    };
+  }
+  return bondingCurvePrice(BigInt(t.virtualBNB), BigInt(t.raisedBNB), BigInt(t.totalSupply));
+}
+
+function normalizeToken(t: SubgraphToken) {
+  const price = computeTokenPrice(t);
+  return {
+    id:              t.id,
+    creator:         t.creator,
+    name:            t.name ?? null,
+    symbol:          t.symbol ?? null,
+    totalSupply:     t.totalSupply,
+    tokenType:       TO_API_TYPE[t.tokenType] ?? t.tokenType,
+    virtualBnb:      t.virtualBNB,
+    migrationTarget: t.migrationTarget,
+    antibotEnabled:  t.antibotEnabled,
+    tradingBlock:    t.tradingBlock,
+    raisedBnb:       t.raisedBNB,
+    migrated:        t.migrated,
+    pairAddress:     t.pair ?? null,
+    buyCount:        t.buysCount,
+    sellCount:       t.sellsCount,
+    volumeBnb:       (BigInt(t.totalVolumeBNBBuy) + BigInt(t.totalVolumeBNBSell)).toString(),
+    createdAtBlock:      t.createdAtBlockNumber,
+    createdAtTimestamp:  t.createdAtTimestamp,
+    creationTxHash:      t.txHash,
+    metaUri:     t.metaUri ?? null,
+    description: t.description ?? null,
+    image:       t.image ?? null,
+    website:     t.website ?? null,
+    twitter:     t.twitter ?? null,
+    telegram:    t.telegram ?? null,
+    ...price,
+  };
+}
+
+function normalizeTrade(t: SubgraphTrade) {
+  return {
+    id:           tradeSourceId(t.id),
+    token:        t.token.id,
+    trader:       t.trader,
+    tradeType:    t.type === "BUY" ? "buy" : "sell",
+    bnbAmount:    t.bnbAmount,
+    tokenAmount:  t.tokenAmount,
+    tokensToDead: t.tokensToDead,
+    blockNumber:  t.blockNumber,
+    timestamp:    parseInt(t.timestamp),
+    txHash:       t.txHash,
+  };
+}
+
+function normalizeMigration(m: SubgraphMigration) {
+  return {
+    id:              m.token.id,   // backward compat: Ponder keyed migration by token address
+    txHash:          m.txHash,
+    pair:            m.pair,
+    liquidityBnb:    m.liquidityBNB,
+    liquidityTokens: m.liquidityTokens,
+    blockNumber:     m.blockNumber,
+    timestamp:       parseInt(m.timestamp),
+  };
+}
+
+// ─── Service ──────────────────────────────────────────────────────────────────
+
 @Injectable()
-export class TokensService implements OnModuleInit {
+export class TokensService {
   private readonly logger = new Logger(TokensService.name);
 
   constructor(private readonly price: PriceService) {}
-
-  onModuleInit() {
-    // Retry metadata for tokens where name OR meta_uri is null.
-    // Only tokens created in the last 60 seconds are eligible — creators set
-    // metaURI at creation time, so a null after ~1 minute means the initial
-    // IPFS fetch failed transiently. Retrying indefinitely would hammer the
-    // RPC for tokens that will never have metadata.
-    setInterval(() => this.retryNullMetadata(), 60_000);
-  }
-
-  private async retryNullMetadata(): Promise<void> {
-    try {
-      const cutoff = Math.floor(Date.now() / 1000) - 60;
-      const rows = await sql<{ id: string; meta_uri: string | null }[]>`
-        SELECT id, meta_uri FROM token
-        WHERE (name IS NULL OR meta_uri IS NULL)
-          AND created_at_timestamp >= ${cutoff}
-        LIMIT 50
-      `;
-      for (const row of rows) {
-        try {
-          await this.refreshMetadata(row.id as `0x${string}`);
-        } catch {
-          // Non-fatal — skip and retry next cycle
-        }
-      }
-      if (rows.length > 0) {
-        this.logger.log(`Retried metadata for ${rows.length} token(s) with null name or metaURI`);
-      }
-    } catch (err) {
-      this.logger.warn(`Metadata retry poll error: ${err instanceof Error ? err.message : err}`);
-    }
-  }
-
-  /**
-   * Re-reads metaURI() from the chain and re-fetches the IPFS metadata JSON.
-   * Updates the token row in-place. Used by the background poller and the
-   * POST /tokens/:address/metadata/refresh endpoint.
-   */
-  async refreshMetadata(address: `0x${string}`): Promise<Record<string, unknown>> {
-    const [existing] = await sql`SELECT id FROM token WHERE id = ${address} LIMIT 1`;
-    if (!existing) throw new NotFoundException(`Token ${address} not found`);
-
-    const metaUri = await readMetaURI(address);
-    if (!metaUri) {
-      // URI still not set on-chain — update to null and return early
-      await sql`UPDATE token SET meta_uri = NULL, name = NULL, symbol = NULL, description = NULL, image = NULL, website = NULL, twitter = NULL, telegram = NULL WHERE id = ${address}`;
-      return { address, metaUri: null, refreshed: false, reason: "metaURI not set on-chain" };
-    }
-
-    const meta = await fetchMetadata(metaUri);
-
-    // Extract bare IPFS CID from image URI for storage
-    const extractCid = (uri: string): string => {
-      if (uri.startsWith("ipfs://")) return uri.slice(7).split("?")[0];
-      if (uri.startsWith("ipfs/"))   return uri.slice(5).split("?")[0];
-      const m = uri.match(/\/ipfs\/([A-Za-z0-9]+)/);
-      return m ? m[1] : uri;
-    };
-    const imageRaw = meta?.imageRaw ?? null;
-
-    await sql`
-      UPDATE token SET
-        meta_uri    = ${metaUri},
-        name        = ${meta?.name        ?? null},
-        symbol      = ${meta?.symbol      ?? null},
-        description = ${meta?.description ?? null},
-        image       = ${imageRaw ? extractCid(imageRaw) : null},
-        website     = ${meta?.website     ?? null},
-        twitter     = ${meta?.socials?.twitter  ?? null},
-        telegram    = ${meta?.socials?.telegram ?? null}
-      WHERE id = ${address}
-    `;
-
-    return {
-      address,
-      metaUri,
-      name:        meta?.name        ?? null,
-      symbol:      meta?.symbol      ?? null,
-      description: meta?.description ?? null,
-      image:       imageRaw ? extractCid(imageRaw) : null,
-      website:     meta?.website               ?? null,
-      twitter:     meta?.socials?.twitter      ?? null,
-      telegram:    meta?.socials?.telegram     ?? null,
-      refreshed:   true,
-    };
-  }
 
   private withUsd<T extends Record<string, unknown>>(
     row: T,
@@ -133,13 +347,11 @@ export class TokensService implements OnModuleInit {
     const bnbPrice = this.price.getPrice()?.bnbUsdt ?? null;
     const priceBnb = row["priceBnb"]     as string | null;
     const mcBnb    = row["marketCapBnb"] as string | null;
-    const priceUsd = (bnbPrice !== null && priceBnb !== null)
-      ? (parseFloat(priceBnb) * bnbPrice).toFixed(10)
-      : null;
-    const mcUsd = (bnbPrice !== null && mcBnb !== null)
-      ? (parseFloat(mcBnb) * bnbPrice).toFixed(2)
-      : null;
-    return { ...row, priceUsd, marketCapUsd: mcUsd };
+    return {
+      ...row,
+      priceUsd:     bnbPrice !== null && priceBnb !== null ? (parseFloat(priceBnb) * bnbPrice).toFixed(10) : null,
+      marketCapUsd: bnbPrice !== null && mcBnb    !== null ? (parseFloat(mcBnb)    * bnbPrice).toFixed(2)  : null,
+    };
   }
 
   async list(query: Record<string, string | undefined>) {
@@ -148,57 +360,55 @@ export class TokensService implements OnModuleInit {
     const migrated = query["migrated"];
 
     const ALLOWED_ORDER = ["created_at_block", "volume_bnb", "buy_count", "sell_count", "raised_bnb", "total_supply"] as const;
-    const orderBy  = parseOrderBy(query, ALLOWED_ORDER, "created_at_block");
-    const orderDir = parseOrderDir(query);
-
-    const migratedFilter =
-      migrated === "true"  ? sql`AND t.migrated = TRUE`  :
-      migrated === "false" ? sql`AND t.migrated = FALSE` :
-      sql``;
-
-    const typeFilter = type ? sql`AND t.token_type = ${type}` : sql``;
+    const orderBy  = TOKEN_ORDER_MAP[parseOrderBy(query, ALLOWED_ORDER, "created_at_block")] ?? "createdAtBlockNumber";
+    const orderDir = parseOrderDir(query).toLowerCase() as "asc" | "desc";
 
     const ALLOWED_TYPES = new Set(["Standard", "Tax", "Reflection"]);
     if (type && !ALLOWED_TYPES.has(type)) {
       throw new BadRequestException(`Invalid type "${type}". Must be Standard, Tax, or Reflection.`);
     }
 
-    const numericCols = new Set(["volume_bnb", "raised_bnb", "created_at_block", "trading_block", "total_supply"]);
-    const orderExpr   = numericCols.has(orderBy)
-      ? sql`ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
-      : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
+    const where: Record<string, unknown> = {};
+    if (type)     where["tokenType"] = FROM_API_TYPE[type] ?? type;
+    if (migrated === "true")  where["migrated"] = true;
+    if (migrated === "false") where["migrated"] = false;
 
-    const [rows, [{ count }]] = await Promise.all([
-      sql`SELECT t.*, ${PRICE_COLS} FROM token t LEFT JOIN migration m ON m.id = t.id WHERE TRUE ${typeFilter} ${migratedFilter} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,
-      sql`SELECT COUNT(*)::int AS count FROM token WHERE TRUE ${typeFilter} ${migratedFilter}`,
+    const [{ tokens }, total] = await Promise.all([
+      subgraphFetch<{ tokens: SubgraphToken[] }>(TOKENS_LIST_QUERY, {
+        first: limit, skip: offset, orderBy, orderDirection: orderDir,
+        where: Object.keys(where).length ? where : undefined,
+      }),
+      subgraphCount("tokens", TOKENS_COUNT_QUERY, {
+        where: Object.keys(where).length ? where : undefined,
+      }),
     ]);
 
-    return paginated(rows.map(r => this.withUsd(toCamel(r))), count, page, limit);
+    return paginated(tokens.map(t => this.withUsd(normalizeToken(t))), total, page, limit);
   }
 
   async findOne(address: string) {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
 
     const addr = normalizeAddress(address);
-    const [row] = await sql`SELECT t.*, ${PRICE_COLS} FROM token t LEFT JOIN migration m ON m.id = t.id WHERE t.id = ${addr}`;
-    if (!row) throw new NotFoundException(`Token ${address} not found`);
+    const { token } = await subgraphFetch<{ token: SubgraphToken | null }>(TOKEN_QUERY, { id: addr });
+    if (!token) throw new NotFoundException(`Token ${address} not found`);
 
-    const camelRow = toCamel(row);
+    const row = normalizeToken(token) as Record<string, unknown>;
 
     // Override with live PancakeSwap price for migrated tokens.
-    if (camelRow.migrated && camelRow.pairAddress) {
+    if (token.migrated && token.pair) {
       const live = await getPairPrice(
-        camelRow.pairAddress  as `0x${string}`,
-        addr                  as `0x${string}`,
-        BigInt(camelRow.totalSupply as string),
+        token.pair as `0x${string}`,
+        addr       as `0x${string}`,
+        BigInt(token.totalSupply),
       );
       if (live) {
-        camelRow.priceBnb     = live.priceBnb;
-        camelRow.marketCapBnb = live.marketCapBnb;
+        row["priceBnb"]     = live.priceBnb;
+        row["marketCapBnb"] = live.marketCapBnb;
       }
     }
 
-    return { data: this.withUsd(camelRow) };
+    return { data: this.withUsd(row) };
   }
 
   async trades(address: string, query: Record<string, string | undefined>) {
@@ -209,40 +419,43 @@ export class TokensService implements OnModuleInit {
     const from = query["from"];
     const to   = query["to"];
 
-    const ALLOWED_ORDER = ["timestamp", "bnb_amount", "token_amount", "block_number"] as const;
-    const orderBy  = parseOrderBy(query, ALLOWED_ORDER, "timestamp");
-    const orderDir = parseOrderDir(query);
-
+    if (type && type !== "buy" && type !== "sell") throw new BadRequestException('type must be "buy" or "sell"');
     const fromInt = from ? parseInt(from, 10) : null;
     const toInt   = to   ? parseInt(to,   10) : null;
     if (fromInt !== null && isNaN(fromInt)) throw new BadRequestException("from must be a unix timestamp");
     if (toInt   !== null && isNaN(toInt))   throw new BadRequestException("to must be a unix timestamp");
-    const typeFilter = type              ? sql`AND trade_type = ${type}`      : sql``;
-    const fromFilter = fromInt !== null  ? sql`AND timestamp >= ${fromInt}`   : sql``;
-    const toFilter   = toInt   !== null  ? sql`AND timestamp <= ${toInt}`     : sql``;
 
-    const numericCols = new Set(["bnb_amount", "token_amount", "block_number"]);
-    const orderExpr   = numericCols.has(orderBy)
-      ? sql`ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`
-      : sql`ORDER BY ${sql([orderBy])} ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}`;
+    const ALLOWED_ORDER = ["timestamp", "bnb_amount", "token_amount", "block_number"] as const;
+    const orderBy  = TRADE_ORDER_MAP[parseOrderBy(query, ALLOWED_ORDER, "timestamp")] ?? "timestamp";
+    const orderDir = parseOrderDir(query).toLowerCase() as "asc" | "desc";
 
-    const addr = normalizeAddress(address);
+    const addr  = normalizeAddress(address);
+    const where: Record<string, unknown> = { token: addr };
+    if (type)              where["type"]              = type.toUpperCase();
+    if (fromInt !== null)  where["timestamp_gte"]     = fromInt.toString();
+    if (toInt   !== null)  where["timestamp_lte"]     = toInt.toString();
 
-    const [rows, [{ count }]] = await Promise.all([
-      sql`SELECT * FROM trade WHERE token = ${addr} ${typeFilter} ${fromFilter} ${toFilter} ${orderExpr} LIMIT ${limit} OFFSET ${offset}`,
-      sql`SELECT COUNT(*)::int AS count FROM trade WHERE token = ${addr} ${typeFilter} ${fromFilter} ${toFilter}`,
+    const [{ trades }, total] = await Promise.all([
+      subgraphFetch<{ trades: SubgraphTrade[] }>(TRADES_FOR_TOKEN_QUERY, {
+        token: addr, first: limit, skip: offset, orderBy, orderDirection: orderDir, where,
+      }),
+      subgraphCount("trades", TRADES_COUNT_QUERY, { where }),
     ]);
 
-    return paginated(rows.map(toCamel), count, page, limit);
+    return paginated(trades.map(normalizeTrade), total, page, limit);
   }
 
   async migration(address: string) {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
 
-    const [row] = await sql`SELECT * FROM migration WHERE id = ${normalizeAddress(address)}`;
-    if (!row) throw new NotFoundException(`Token ${address} has not migrated yet`);
+    const addr = normalizeAddress(address);
+    const { migrations } = await subgraphFetch<{ migrations: SubgraphMigration[] }>(
+      MIGRATION_FOR_TOKEN_QUERY,
+      { token: addr },
+    );
+    if (!migrations.length) throw new NotFoundException(`Token ${address} has not migrated yet`);
 
-    return { data: toCamel(row) };
+    return { data: normalizeMigration(migrations[0]) };
   }
 
   async traders(address: string, query: Record<string, string | undefined>) {
@@ -254,70 +467,79 @@ export class TokensService implements OnModuleInit {
     const orderDir = parseOrderDir(query);
     const addr     = normalizeAddress(address);
 
-    const [rows, [{ count }]] = await Promise.all([
-      sql`
-        SELECT
-          trader,
-          COUNT(*) FILTER (WHERE trade_type = 'buy')::int                                AS "buyCount",
-          COUNT(*) FILTER (WHERE trade_type = 'sell')::int                               AS "sellCount",
-          COUNT(*)::int                                                                    AS "totalTrades",
-          COALESCE(SUM(bnb_amount::numeric) FILTER (WHERE trade_type = 'buy'),  0)::text  AS "totalBNBIn",
-          COALESCE(SUM(bnb_amount::numeric) FILTER (WHERE trade_type = 'sell'), 0)::text  AS "totalBNBOut",
-          COALESCE(SUM(bnb_amount::numeric), 0)::text                                     AS "totalVolumeBNB",
-          (
-            COALESCE(SUM(bnb_amount::numeric) FILTER (WHERE trade_type = 'sell'), 0) -
-            COALESCE(SUM(bnb_amount::numeric) FILTER (WHERE trade_type = 'buy'),  0)
-          )::text                                                                          AS "netBNB"
-        FROM trade
-        WHERE token = ${addr}
-        GROUP BY trader
-        ORDER BY ${sql([orderBy])}::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}
-        LIMIT ${limit} OFFSET ${offset}
-      `,
-      sql`SELECT COUNT(DISTINCT trader)::int AS count FROM trade WHERE token = ${addr}`,
-    ]);
+    // Fetch all trades for this token and aggregate per-trader in JS.
+    const allTrades = await subgraphFetchAll<{ trader: string; type: "BUY" | "SELL"; bnbAmount: string }>(
+      "trades",
+      ALL_TRADES_FOR_TOKEN_QUERY,
+      { where: { token: addr } },
+    );
 
-    return paginated(rows, count, page, limit);
+    // Aggregate
+    const map = new Map<string, { buys: bigint[]; sells: bigint[] }>();
+    for (const t of allTrades) {
+      const entry = map.get(t.trader) ?? { buys: [], sells: [] };
+      if (t.type === "BUY") entry.buys.push(BigInt(t.bnbAmount));
+      else                   entry.sells.push(BigInt(t.bnbAmount));
+      map.set(t.trader, entry);
+    }
+
+    const rows = Array.from(map.entries()).map(([trader, { buys, sells }]) => {
+      const totalBNBIn  = buys.reduce((a, b) => a + b, 0n);
+      const totalBNBOut = sells.reduce((a, b) => a + b, 0n);
+      return {
+        trader,
+        buyCount:       buys.length,
+        sellCount:      sells.length,
+        totalTrades:    buys.length + sells.length,
+        totalBNBIn:     totalBNBIn.toString(),
+        totalBNBOut:    totalBNBOut.toString(),
+        totalVolumeBNB: (totalBNBIn + totalBNBOut).toString(),
+        netBNB:         (totalBNBOut - totalBNBIn).toString(),
+      };
+    });
+
+    // Sort
+    const numericFields = new Set(["totalBNBIn", "totalBNBOut", "totalVolumeBNB", "netBNB"]);
+    rows.sort((a, b) => {
+      const av = numericFields.has(orderBy)
+        ? (BigInt(a[orderBy as keyof typeof a] as string))
+        : BigInt(a[orderBy as keyof typeof a] as number);
+      const bv = numericFields.has(orderBy)
+        ? (BigInt(b[orderBy as keyof typeof b] as string))
+        : BigInt(b[orderBy as keyof typeof b] as number);
+      return orderDir === "ASC" ? (av < bv ? -1 : av > bv ? 1 : 0) : (av > bv ? -1 : av < bv ? 1 : 0);
+    });
+
+    return paginated(rows.slice(offset, offset + limit), rows.length, page, limit);
   }
 
   async holders(address: string, query: Record<string, string | undefined>) {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
 
     const { page, limit, offset } = parsePagination(query);
-    const orderDir = parseOrderDir(query);
+    const orderDir = parseOrderDir(query).toLowerCase() as "asc" | "desc";
     const addr     = normalizeAddress(address);
 
-    const [rows, [{ count }]] = await Promise.all([
-      sql`
-        SELECT
-          address,
-          balance::text              AS balance,
-          last_updated_block::text   AS "lastUpdatedBlock",
-          last_updated_timestamp     AS "lastUpdatedTimestamp"
-        FROM holder
-        WHERE token = ${addr}
-          AND balance::numeric > 0
-        ORDER BY balance::numeric ${orderDir === "ASC" ? sql`ASC` : sql`DESC`}
-        LIMIT ${limit} OFFSET ${offset}
-      `,
-      sql`
-        SELECT COUNT(*)::int AS count
-        FROM holder
-        WHERE token = ${addr}
-          AND balance::numeric > 0
-      `,
+    const [{ holders }, total] = await Promise.all([
+      subgraphFetch<{ holders: SubgraphHolder[] }>(HOLDERS_QUERY, {
+        token: addr, first: limit, skip: offset, orderDirection: orderDir,
+      }),
+      subgraphCount("holders", HOLDERS_COUNT_QUERY, { token: addr }),
     ]);
 
-    return paginated(rows, count, page, limit);
+    return paginated(
+      holders.map(h => ({
+        address:              h.address,
+        balance:              h.balance,
+        lastUpdatedBlock:     h.lastUpdatedBlock,
+        lastUpdatedTimestamp: parseInt(h.lastUpdatedTimestamp),
+      })),
+      total,
+      page,
+      limit,
+    );
   }
 
-  /**
-   * GET /tokens/:address/snapshots
-   *
-   * Returns per-block bonding-curve state with AMM price computed for each block.
-   * Supports ?from=<unix>&to=<unix> time range filtering and standard pagination.
-   * Includes priceBnb (spot price at block close) derived from the AMM formula.
-   */
   async snapshots(address: string, query: Record<string, string | undefined>) {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
 
@@ -326,39 +548,47 @@ export class TokensService implements OnModuleInit {
 
     const fromTs = query["from"] ? parseInt(query["from"], 10) : null;
     const toTs   = query["to"]   ? parseInt(query["to"],   10) : null;
-
     if (fromTs !== null && isNaN(fromTs)) throw new BadRequestException("from must be a unix timestamp");
     if (toTs   !== null && isNaN(toTs))   throw new BadRequestException("to must be a unix timestamp");
 
-    const [tokenRow] = await sql`SELECT id FROM token WHERE id = ${addr} LIMIT 1`;
-    if (!tokenRow) throw new NotFoundException(`Token ${address} not found`);
+    // Verify token exists
+    const { token: exists } = await subgraphFetch<{ token: { id: string } | null }>(TOKEN_EXISTS_QUERY, { id: addr });
+    if (!exists) throw new NotFoundException(`Token ${address} not found`);
 
-    const fromFilter = fromTs !== null ? sql`AND s.timestamp >= ${fromTs}` : sql``;
-    const toFilter   = toTs   !== null ? sql`AND s.timestamp <= ${toTs}`   : sql``;
+    const where: Record<string, unknown> = { token: addr };
+    if (fromTs !== null) where["timestamp_gte"] = fromTs.toString();
+    if (toTs   !== null) where["timestamp_lte"] = toTs.toString();
 
-    const [rows, [{ count }]] = await Promise.all([
-      sql`
-        SELECT
-          s.block_number::text                                                                              AS "blockNumber",
-          s.timestamp,
-          s.open_raised_bnb::text                                                                           AS "openRaisedBNB",
-          s.close_raised_bnb::text                                                                          AS "closeRaisedBNB",
-          (s.close_raised_bnb::numeric + t.virtual_bnb::numeric)::text                                     AS "virtualLiquidityBNB",
-          s.volume_bnb::text                                                                                AS "volumeBNB",
-          s.buy_count                                                                                       AS "buyCount",
-          s.sell_count                                                                                      AS "sellCount",
-          ((s.close_raised_bnb::numeric + t.virtual_bnb::numeric)^2
-            / NULLIF(t.virtual_bnb::numeric * t.total_supply::numeric, 0))::text                           AS "priceBnb"
-        FROM token_snapshot s
-        JOIN token t ON t.id = s.token
-        WHERE s.token = ${addr} ${fromFilter} ${toFilter}
-        ORDER BY s.block_number::numeric DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `,
-      sql`SELECT COUNT(*)::int AS count FROM token_snapshot WHERE token = ${addr} ${fromTs !== null ? sql`AND timestamp >= ${fromTs}` : sql``} ${toTs !== null ? sql`AND timestamp <= ${toTs}` : sql``}`,
+    const [{ tokenSnapshots: snaps }, total] = await Promise.all([
+      subgraphFetch<{ tokenSnapshots: SubgraphSnapshot[] }>(SNAPSHOTS_QUERY, {
+        first: limit, skip: offset, where,
+      }),
+      subgraphCount("tokenSnapshots", SNAPSHOTS_COUNT_QUERY, { where }),
     ]);
 
-    return paginated(rows, count, page, limit);
+    const rows = snaps.map(s => {
+      const vBNB     = BigInt(s.token.virtualBNB);
+      const closeRBN = BigInt(s.closeRaisedBNB);
+      const supply   = BigInt(s.token.totalSupply);
+      const vl       = vBNB + closeRBN;
+      const priceBnb = vBNB === 0n || supply === 0n
+        ? "0.0"
+        : formatBigDecimal((vl * vl * SCALE18) / (vBNB * supply), 18);
+
+      return {
+        blockNumber:        s.blockNumber,
+        timestamp:          parseInt(s.timestamp),
+        openRaisedBNB:      s.openRaisedBNB,
+        closeRaisedBNB:     s.closeRaisedBNB,
+        virtualLiquidityBNB: formatBigDecimal(vl, 18),
+        volumeBNB:          s.volumeBNB,
+        buyCount:           parseInt(s.buyCount),
+        sellCount:          parseInt(s.sellCount),
+        priceBnb,
+      };
+    });
+
+    return paginated(rows, total, page, limit);
   }
 
   async byCreator(address: string, query: Record<string, string | undefined>) {
@@ -367,11 +597,58 @@ export class TokensService implements OnModuleInit {
     const { page, limit, offset } = parsePagination(query);
     const addr = normalizeAddress(address);
 
-    const [rows, [{ count }]] = await Promise.all([
-      sql`SELECT t.*, ${PRICE_COLS} FROM token t LEFT JOIN migration m ON m.id = t.id WHERE t.creator = ${addr} ORDER BY t.created_at_block::numeric DESC LIMIT ${limit} OFFSET ${offset}`,
-      sql`SELECT COUNT(*)::int AS count FROM token WHERE creator = ${addr}`,
+    const where = { creator: addr };
+    const [{ tokens }, total] = await Promise.all([
+      subgraphFetch<{ tokens: SubgraphToken[] }>(TOKENS_LIST_QUERY, {
+        first: limit, skip: offset,
+        orderBy: "createdAtBlockNumber", orderDirection: "desc",
+        where,
+      }),
+      subgraphCount("tokens", TOKENS_COUNT_QUERY, { where }),
     ]);
 
-    return paginated(rows.map(r => this.withUsd(toCamel(r))), count, page, limit);
+    return paginated(tokens.map(t => this.withUsd(normalizeToken(t))), total, page, limit);
+  }
+
+  /**
+   * Re-reads metaURI from the chain and fetches the IPFS metadata JSON.
+   * Returns the current on-chain metadata without persisting it — the subgraph
+   * is the source of truth and will pick up changes during its next index cycle.
+   *
+   * Still useful as a "force preview" endpoint to inspect what the subgraph
+   * will eventually index, or to verify a newly-set metaURI before it propagates.
+   */
+  async refreshMetadata(address: string): Promise<Record<string, unknown>> {
+    if (!isAddress(address)) throw new BadRequestException("Invalid token address");
+
+    const addr = normalizeAddress(address);
+    const { token } = await subgraphFetch<{ token: { id: string } | null }>(TOKEN_EXISTS_QUERY, { id: addr });
+    if (!token) throw new NotFoundException(`Token ${address} not found`);
+
+    const metaUri = await readMetaURI(addr as `0x${string}`);
+    if (!metaUri) return { address: addr, metaUri: null, refreshed: false, reason: "metaURI not set on-chain" };
+
+    const meta = await fetchMetadata(metaUri);
+
+    const extractCid = (uri: string): string => {
+      if (uri.startsWith("ipfs://")) return uri.slice(7).split("?")[0];
+      if (uri.startsWith("ipfs/"))   return uri.slice(5).split("?")[0];
+      const m = uri.match(/\/ipfs\/([A-Za-z0-9]+)/);
+      return m ? m[1] : uri;
+    };
+    const imageRaw = meta?.imageRaw ?? null;
+
+    return {
+      address:     addr,
+      metaUri,
+      name:        meta?.name        ?? null,
+      symbol:      meta?.symbol      ?? null,
+      description: meta?.description ?? null,
+      image:       imageRaw ? extractCid(imageRaw) : null,
+      website:     meta?.website               ?? null,
+      twitter:     meta?.socials?.twitter      ?? null,
+      telegram:    meta?.socials?.telegram     ?? null,
+      refreshed:   true,
+    };
   }
 }
