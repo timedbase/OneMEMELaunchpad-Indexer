@@ -40,7 +40,7 @@ export class ChatService implements OnModuleInit {
       `;
       this.logger.log("Chat table ready");
     } catch (err: unknown) {
-      this.logger.error(`Failed to initialize chat table: ${(err as Error).message}`);
+      this.logger.error(`Failed to initialize chat table: ${String(err)}`);
     }
   }
 

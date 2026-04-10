@@ -21,7 +21,7 @@ export class ReferralsService implements OnModuleInit {
       await sql`CREATE INDEX IF NOT EXISTS referral_referrer_idx ON referral (referrer)`;
       this.logger.log("Referral table ready");
     } catch (err: unknown) {
-      this.logger.error(`Failed to initialise referral table: ${(err as Error).message}`);
+      this.logger.error(`Failed to initialise referral table: ${String(err)}`);
     }
   }
 

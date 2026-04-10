@@ -27,6 +27,12 @@ const loggerTransports: any[] = [
 
 if (process.env.BETTERSTACK_TOKEN) {
   const logtail = new Logtail(process.env.BETTERSTACK_TOKEN);
+  // Wrap sync to swallow transport errors (e.g. invalid/expired token)
+  // so a bad BETTERSTACK_TOKEN never crashes or spams the process.
+  const _sync = logtail["_sync"]?.bind(logtail);
+  if (_sync) {
+    logtail.setSync((logs) => _sync(logs).catch(() => logs));
+  }
   loggerTransports.push(new LogtailTransport(logtail));
 }
 

@@ -181,7 +181,7 @@ export class PointsService implements OnModuleInit {
 
       this.logger.log(`Points tables ready — start block: ${getStartBlock() === "0" ? "all" : getStartBlock()}`);
     } catch (err: unknown) {
-      this.logger.error(`Failed to initialise points tables: ${(err as Error).message}`);
+      this.logger.error(`Failed to initialise points tables: ${String(err)}`);
     }
 
     void this.poll();
