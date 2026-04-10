@@ -12,16 +12,13 @@
  * The quotes route catches these and returns a 503 with a helpful message.
  */
 
-import { createPublicClient, fallback, http, webSocket, parseAbi, defineChain } from "viem";
+import { createPublicClient, http, parseAbi, defineChain } from "viem";
 
 // ─── Client ───────────────────────────────────────────────────────────────────
 
 /**
  * Lazily-initialised public client. Created on first call so that importing
  * this module does not crash if env vars are absent at startup.
- *
- * Transport: BSC_WSS_URL (primary) → BSC_RPC_URL (fallback).
- * viem's fallback() switches on error or timeout and retries primary on next request.
  */
 let _client: ReturnType<typeof createPublicClient> | null = null;
 
@@ -34,13 +31,9 @@ function getClient(): ReturnType<typeof createPublicClient> {
   if (!_client) {
     const chainId = parseInt(process.env.CHAIN_ID ?? "56");
     const chain   = defineChain({ id: chainId, name: "EVM", nativeCurrency: { name: "Native", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [process.env.BSC_RPC_URL] } } });
-    const transports = [
-      ...(process.env.BSC_WSS_URL ? [webSocket(process.env.BSC_WSS_URL)] : []),
-      http(process.env.BSC_RPC_URL, { timeout: 10_000, retryCount: 2, retryDelay: 500 }),
-    ];
     _client = createPublicClient({
       chain,
-      transport: fallback(transports),
+      transport: http(process.env.BSC_RPC_URL, { timeout: 10_000, retryCount: 2, retryDelay: 500 }),
     });
   }
   return _client;
