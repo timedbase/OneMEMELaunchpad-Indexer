@@ -1,12 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # OneMEME Launchpad — Production Dockerfile
 #
-# Single container running both processes under PM2:
-#   • Ponder indexer  (BSC → PostgreSQL)
-#   • NestJS REST API (PostgreSQL → HTTP :3001)
-#
-# Named volume /app/.ponder persists Ponder's checkpoint + cache files so the
-# indexer never re-syncs from scratch on container restart.
+# Single container running the NestJS REST API under PM2.
+# On-chain data is served by The Graph subgraph (SUBGRAPH_URL).
+# Off-chain data (points, referrals, chat) is stored in PostgreSQL (DATABASE_URL).
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Stage 1: deps ─────────────────────────────────────────────────────────────
@@ -16,7 +13,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 
-# ── Stage 2: build (NestJS only — Ponder runs from source via its own compiler) ──
+# ── Stage 2: build ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 WORKDIR /app
 
@@ -42,19 +39,9 @@ COPY --from=deps    /app/node_modules ./node_modules
 # Copy compiled API
 COPY --from=builder /app/dist         ./dist
 
-# Copy everything Ponder needs to run
-COPY abis/            ./abis/
-COPY src/index.ts     ./src/index.ts
-COPY ponder.config.ts ./ponder.config.ts
-COPY ponder.schema.ts ./ponder.schema.ts
-COPY tsconfig.json    ./tsconfig.json
-COPY package.json     ./package.json
-
 # PM2 ecosystem config
 COPY ecosystem.config.js ./ecosystem.config.js
-
-# Ponder checkpoint + cache (mount as named volume in production)
-VOLUME ["/app/.ponder"]
+COPY package.json        ./package.json
 
 EXPOSE 3001
 
