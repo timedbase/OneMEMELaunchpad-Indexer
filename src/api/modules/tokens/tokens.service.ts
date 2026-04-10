@@ -27,7 +27,7 @@ const TRADE_ORDER_MAP: Record<string, string> = {
 
 interface SubgraphTrade {
   id:           string;
-  token:        { id: string };
+  token:        { id: string; name: string | null; symbol: string | null };
   trader:       string;
   type:         "BUY" | "SELL";
   bnbAmount:    string;
@@ -100,7 +100,7 @@ const TRADES_FOR_TOKEN_QUERY = /* GraphQL */ `
   ) {
     trades(first: $first, skip: $skip, orderBy: $orderBy, orderDirection: $orderDirection, where: $where) {
       id trader type bnbAmount tokenAmount tokensToDead blockNumber timestamp txHash
-      token { id }
+      token { id name symbol }
     }
   }
 `;
@@ -180,6 +180,8 @@ function normalizeTrade(t: SubgraphTrade) {
   return {
     id:           tradeSourceId(t.id),
     token:        t.token.id,
+    tokenName:    t.token.name   ?? null,
+    tokenSymbol:  t.token.symbol ?? null,
     trader:       t.trader,
     tradeType:    t.type === "BUY" ? "buy" : "sell",
     bnbAmount:    t.bnbAmount,

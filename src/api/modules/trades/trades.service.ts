@@ -4,7 +4,7 @@ import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, 
 
 interface SubgraphTrade {
   id:           string;
-  token:        { id: string };
+  token:        { id: string; name: string | null; symbol: string | null };
   trader:       string;
   type:         "BUY" | "SELL";
   bnbAmount:    string;
@@ -19,6 +19,8 @@ function normalizeTrade(t: SubgraphTrade) {
   return {
     id:           tradeSourceId(t.id),
     token:        t.token.id,
+    tokenName:    t.token.name   ?? null,
+    tokenSymbol:  t.token.symbol ?? null,
     trader:       t.trader,
     tradeType:    t.type === "BUY" ? "buy" : "sell",
     bnbAmount:    t.bnbAmount,
@@ -32,7 +34,7 @@ function normalizeTrade(t: SubgraphTrade) {
 
 const TRADE_FIELDS = `
   id trader type bnbAmount tokenAmount tokensToDead blockNumber timestamp txHash
-  token { id }
+  token { id name symbol }
 `;
 
 const TRADE_ORDER_MAP: Record<string, string> = {
