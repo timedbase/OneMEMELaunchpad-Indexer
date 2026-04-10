@@ -10,11 +10,17 @@
 
 function subgraphUrl(): string {
   if (!process.env.SUBGRAPH_URL) {
-    throw new Error(
-      "SUBGRAPH_URL is not configured. Points polling requires a deployed subgraph."
-    );
+    throw new Error("SUBGRAPH_URL is not configured.");
   }
   return process.env.SUBGRAPH_URL;
+}
+
+function subgraphHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (process.env.SUBGRAPH_API_KEY) {
+    headers["Authorization"] = `Bearer ${process.env.SUBGRAPH_API_KEY}`;
+  }
+  return headers;
 }
 
 /**
@@ -27,7 +33,7 @@ export async function subgraphFetch<T>(
 ): Promise<T> {
   const res = await fetch(subgraphUrl(), {
     method:  "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: subgraphHeaders(),
     body:    JSON.stringify({ query, variables: variables ?? {} }),
     signal:  AbortSignal.timeout(15_000),
   });

@@ -92,10 +92,15 @@ export class DiscoverService {
     let window = WINDOWS[0].label;
 
     // Find smallest window with at least one token traded
+    const WINDOW_CHECK_QUERY = /* GraphQL */ `
+      query WindowCheck($since: String!) {
+        trades(first: 1, where: { timestamp_gte: $since }) { token { id } }
+      }
+    `;
     for (const w of WINDOWS) {
       const candidate = now - w.secs;
       const { trades } = await subgraphFetch<{ trades: { token: { id: string } }[] }>(
-        `query { trades(first: 1, where: { timestamp_gte: "${candidate}" }) { token { id } } }`,
+        WINDOW_CHECK_QUERY, { since: candidate.toString() },
       );
       if (trades.length > 0) { since = candidate; window = w.label; break; }
     }
