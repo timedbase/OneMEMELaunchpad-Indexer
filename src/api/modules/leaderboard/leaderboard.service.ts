@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
 import { subgraphFetchAll, subgraphCount } from "../../subgraph";
 import { paginated, parsePagination } from "../../helpers";
-import { TO_API_TYPE } from "../../token-utils";
+import { normalizeTokenType } from "../../token-utils";
 
 const PERIODS = {
   "1d":      86_400,
@@ -98,7 +98,7 @@ export class LeaderboardService {
 
       stats = tokens.map(t => ({
         address:    t.id,
-        tokenType:  TO_API_TYPE[t.tokenType] ?? t.tokenType,
+        tokenType:  normalizeTokenType(t.tokenType),
         creator:    t.creator,
         migrated:   t.migrated,
         volumeBNB:  BigInt(t.totalVolumeBNBBuy) + BigInt(t.totalVolumeBNBSell),
@@ -119,7 +119,7 @@ export class LeaderboardService {
       for (const t of trades) {
         const entry = map.get(t.token.id) ?? {
           address:    t.token.id,
-          tokenType:  TO_API_TYPE[t.token.tokenType] ?? t.token.tokenType,
+          tokenType:  normalizeTokenType(t.token.tokenType),
           creator:    t.token.creator,
           migrated:   t.token.migrated,
           volumeBNB:  0n,

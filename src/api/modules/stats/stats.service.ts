@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { subgraphFetch, subgraphFetchAll } from "../../subgraph";
-import { TO_API_TYPE } from "../../token-utils";
+import { normalizeTokenType } from "../../token-utils";
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
@@ -110,7 +110,7 @@ export class StatsService {
         topTokenByVolume: topToken
           ? {
               id:         topToken.id,
-              tokenType:  TO_API_TYPE[topToken.tokenType] ?? topToken.tokenType,
+              tokenType:  normalizeTokenType(topToken.tokenType),
               creator:    topToken.creator,
               buyCount:   topToken.buysCount,
               sellCount:  topToken.sellsCount,

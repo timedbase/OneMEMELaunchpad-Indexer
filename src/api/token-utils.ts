@@ -16,17 +16,21 @@ export const SCALE18 = 10n ** 18n;
 
 // ─── Type maps ────────────────────────────────────────────────────────────────
 
-export const TO_API_TYPE: Record<string, string> = {
-  STANDARD:   "Standard",
-  TAX:        "Tax",
-  REFLECTION: "Reflection",
-  UNKNOWN:    "Unknown",
+// Normalise whatever the subgraph stores (any casing) → canonical API label.
+const TYPE_CANONICAL: Record<string, string> = {
+  standard:   "Standard",
+  tax:        "Tax",
+  reflection: "Reflection",
 };
 
+export function normalizeTokenType(raw: string | null | undefined): string {
+  return TYPE_CANONICAL[(raw ?? "").toLowerCase()] ?? "Unknown";
+}
+
 export const FROM_API_TYPE: Record<string, string> = {
-  Standard:   "STANDARD",
-  Tax:        "TAX",
-  Reflection: "REFLECTION",
+  Standard:   "standard",
+  Tax:        "tax",
+  Reflection: "reflection",
 };
 
 // ─── Subgraph type ────────────────────────────────────────────────────────────
@@ -115,7 +119,7 @@ export function normalizeToken(t: SubgraphToken) {
     name:            t.name ?? null,
     symbol:          t.symbol ?? null,
     totalSupply:     t.totalSupply,
-    tokenType:       TO_API_TYPE[t.tokenType] ?? t.tokenType,
+    tokenType:       normalizeTokenType(t.tokenType),
     virtualBnb:      t.virtualBNB,
     migrationTarget: t.migrationTarget,
     antibotEnabled:  t.antibotEnabled,

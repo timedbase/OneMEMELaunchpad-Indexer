@@ -462,7 +462,7 @@ export class TokensService {
         timestamp:          parseInt(s.timestamp),
         openRaisedBNB:      s.openRaisedBNB,
         closeRaisedBNB:     s.closeRaisedBNB,
-        virtualLiquidityBNB: formatBigDecimal(vl, 18),
+        virtualLiquidityBnb: formatBigDecimal(vl, 18),
         volumeBNB:          s.volumeBNB,
         buyCount:           parseInt(s.buyCount),
         sellCount:          parseInt(s.sellCount),
