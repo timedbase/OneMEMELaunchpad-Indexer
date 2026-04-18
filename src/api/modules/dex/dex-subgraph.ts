@@ -31,12 +31,20 @@ export async function dexFetch<T>(
   query:      string,
   variables?: Record<string, unknown>,
 ): Promise<T> {
-  const res = await fetch(aggregatorUrl(), {
-    method:  "POST",
-    headers: aggregatorHeaders(),
-    body:    JSON.stringify({ query, variables: variables ?? {} }),
-    signal:  AbortSignal.timeout(15_000),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+
+  let res: Response;
+  try {
+    res = await fetch(aggregatorUrl(), {
+      method:  "POST",
+      headers: aggregatorHeaders(),
+      body:    JSON.stringify({ query, variables: variables ?? {} }),
+      signal:  controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) throw new Error(`Aggregator subgraph HTTP ${res.status}`);
 

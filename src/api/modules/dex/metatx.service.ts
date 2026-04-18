@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from "@nestjs/common";
+import { Injectable, BadRequestException, ServiceUnavailableException } from "@nestjs/common";
 import {
   ADAPTER_IDS,
   ADAPTER_NAMES,
@@ -29,6 +29,10 @@ import {
 } from "./dex-rpc";
 import type { Hex } from "viem";
 import { isAddress, normalizeAddress } from "../../helpers";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const WBNB_BSC = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
 
 // ─── Input validation helpers ─────────────────────────────────────────────────
 
@@ -224,7 +228,7 @@ export class MetaTxService {
 
       } else if (adapter === "ONEMEME_BC") {
         // Determine side: if tokenIn is WBNB → buy, else → sell
-        const WBNB = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
+        const WBNB = WBNB_BSC;
         const isBuy = tokenIn.toLowerCase() === WBNB;
         const token = isBuy ? tokenOut : tokenIn;
         if (isBuy) {
@@ -239,7 +243,7 @@ export class MetaTxService {
         quotedBy = "OneMEME BondingCurve";
 
       } else if (adapter === "FOURMEME") {
-        const WBNB = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
+        const WBNB = WBNB_BSC;
         const isBuy = tokenIn.toLowerCase() === WBNB;
         const token = isBuy ? tokenOut : tokenIn;
         if (isBuy) {
@@ -254,7 +258,7 @@ export class MetaTxService {
         quotedBy = "FourMEME TokenManagerHelper3";
 
       } else if (adapter === "FLAPSH") {
-        const WBNB = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
+        const WBNB = WBNB_BSC;
         const isBuy = tokenIn.toLowerCase() === WBNB;
         const token = isBuy ? tokenOut : tokenIn;
         if (isBuy) {
@@ -300,9 +304,17 @@ export class MetaTxService {
         throw new BadRequestException(`On-chain quote is not supported for ${adapter}.`);
       }
     } catch (err: unknown) {
+      if (err instanceof BadRequestException || err instanceof ServiceUnavailableException) throw err;
       const msg = String(err);
-      if (msg.includes("not configured") || msg.includes("BadRequestException")) throw err;
-      // Surface RPC errors clearly
+      // RPC node errors / timeouts are infrastructure failures — surface as 503
+      if (
+        msg.includes("not configured") ||
+        msg.includes("timeout") || msg.includes("TIMEOUT") ||
+        msg.includes("ECONNREFUSED") || msg.includes("ENOTFOUND") ||
+        msg.includes("fetch failed")
+      ) {
+        throw new ServiceUnavailableException(`Quote unavailable: ${msg}`);
+      }
       throw new BadRequestException(`Quote simulation failed: ${msg}`);
     }
 
@@ -559,13 +571,27 @@ export class MetaTxService {
       throw new BadRequestException("Meta-tx deadline has expired");
     }
 
-    const txHash = await relayMetaTx(order, sig as Hex, permit);
+    let txHash: Hex;
+    try {
+      txHash = await relayMetaTx(order, sig as Hex, permit);
+    } catch (err: unknown) {
+      const msg = String(err);
+      // Distinguish on-chain reverts (user error) from infra failures
+      if (
+        msg.includes("timeout") || msg.includes("TIMEOUT") ||
+        msg.includes("ECONNREFUSED") || msg.includes("ENOTFOUND") ||
+        msg.includes("fetch failed")
+      ) {
+        throw new ServiceUnavailableException(`Relay RPC unavailable: ${msg}`);
+      }
+      // Contract reverts and invalid signature errors are user-facing 400s
+      throw new BadRequestException(`Relay failed: ${msg}`);
+    }
 
     return {
       data: {
         txHash,
         status: "submitted",
-        relayer: `${process.env.RELAYER_PRIVATE_KEY ? "configured" : "missing"}`,
       },
     };
   }
