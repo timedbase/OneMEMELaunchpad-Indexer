@@ -165,11 +165,48 @@ function uniswapV3QuoterAddress(): Hex {
   return process.env.UNISWAP_V3_QUOTER_ADDRESS as Hex;
 }
 
+function pancakeV4QuoterAddress(): Hex {
+  if (!process.env.PANCAKE_V4_QUOTER_ADDRESS) {
+    throw new Error("PANCAKE_V4_QUOTER_ADDRESS is not configured.");
+  }
+  return process.env.PANCAKE_V4_QUOTER_ADDRESS as Hex;
+}
+
+function uniswapV4QuoterAddress(): Hex {
+  if (!process.env.UNISWAP_V4_QUOTER_ADDRESS) {
+    throw new Error("UNISWAP_V4_QUOTER_ADDRESS is not configured.");
+  }
+  return process.env.UNISWAP_V4_QUOTER_ADDRESS as Hex;
+}
+
 function bondingCurveQuoteAddress(): Hex {
   if (!process.env.BONDING_CURVE_ADDRESS) {
     throw new Error("BONDING_CURVE_ADDRESS is not configured.");
   }
   return process.env.BONDING_CURVE_ADDRESS as Hex;
+}
+
+// ─── V4 helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * Derives the standard tickSpacing for a given V4 fee tier.
+ * Matches the defaults used by PancakeSwap V4 and Uniswap V4 on BSC.
+ */
+export function defaultTickSpacing(fee: number): number {
+  if (fee <= 100)  return 1;    // 0.01%
+  if (fee <= 500)  return 10;   // 0.05%
+  if (fee <= 2500) return 50;   // 0.25%
+  if (fee <= 3000) return 60;   // 0.30%
+  return 200;                   // 1.00%+
+}
+
+/**
+ * Determines zeroForOne direction for a V4 swap.
+ * In V4, currency0 is always the lower address (big-endian comparison).
+ * zeroForOne = true when tokenIn is currency0 (the lower address).
+ */
+export function v4ZeroForOne(tokenIn: Hex, tokenOut: Hex): boolean {
+  return tokenIn.toLowerCase() < tokenOut.toLowerCase();
 }
 
 // ─── Quote ABIs ───────────────────────────────────────────────────────────────
@@ -186,6 +223,23 @@ const V3_QUOTER_ABI = parseAbi([
 const BC_QUOTE_ABI = parseAbi([
   "function getAmountOut(address token_, uint256 bnbIn) view returns (uint256 tokensOut, uint256 feeBNB)",
   "function getAmountOutSell(address token_, uint256 tokensIn) view returns (uint256 bnbOut, uint256 feeBNB)",
+]);
+
+/**
+ * PancakeSwap V4 Quoter — quoteExactInputSingle.
+ * PoolKey is an inline tuple: (currency0, currency1, fee, tickSpacing, hooks).
+ * Returns deltaAmounts as int128[]; output amount is -deltaAmounts[1] (tokens out of pool).
+ */
+const PANCAKE_V4_QUOTER_ABI = parseAbi([
+  "function quoteExactInputSingle(((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) poolKey, bool zeroForOne, address recipient, uint128 exactAmount, uint160 sqrtPriceLimitX96, bytes hookData) params) external returns (int128[] deltaAmounts, uint160 sqrtPriceX96After, uint32 initializedTicksLoaded)",
+]);
+
+/**
+ * Uniswap V4 Quoter — quoteExactInputSingle.
+ * Same PoolKey shape but different return type: (amountOut, gasEstimate).
+ */
+const UNISWAP_V4_QUOTER_ABI = parseAbi([
+  "function quoteExactInputSingle(((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) poolKey, bool zeroForOne, uint128 exactAmount, bytes hookData) params) external returns (uint256 amountOut, uint256 gasEstimate)",
 ]);
 
 // ─── V3 raw packed path (for quoter — not ABI-wrapped) ────────────────────────
@@ -281,6 +335,62 @@ export async function quoteBcSell(
     args:         [tokenAddress, tokensIn],
   }) as [bigint, bigint];
   return { amountOut: bnbOut, fee: feeBNB };
+}
+
+/**
+ * V4 AMM single-hop quote (PANCAKE_V4 or UNISWAP_V4).
+ *
+ * V4 requires a PoolKey rather than a simple path — supply fee, tickSpacing,
+ * and optionally a hooks address (defaults to zero address for vanilla pools).
+ * Only single-hop is supported; multi-hop V4 requires chaining PoolKeys.
+ *
+ * @param adapter     "PANCAKE_V4" or "UNISWAP_V4"
+ * @param tokenIn     Input token address
+ * @param tokenOut    Output token address
+ * @param amountIn    Input amount in wei
+ * @param fee         Fee tier (e.g. 500 = 0.05%, 3000 = 0.30%)
+ * @param tickSpacing Pool tick spacing — auto-derived from fee if 0
+ * @param hooks       Hooks contract address (zero address for vanilla pools)
+ */
+export async function quoteV4(
+  adapter:     "PANCAKE_V4" | "UNISWAP_V4",
+  tokenIn:     Hex,
+  tokenOut:    Hex,
+  amountIn:    bigint,
+  fee:         number,
+  tickSpacing: number,
+  hooks:       Hex,
+): Promise<bigint> {
+  const ts          = tickSpacing || defaultTickSpacing(fee);
+  const zeroForOne  = v4ZeroForOne(tokenIn, tokenOut);
+  const currency0   = zeroForOne ? tokenIn  : tokenOut;
+  const currency1   = zeroForOne ? tokenOut : tokenIn;
+  const ZERO_ADDR   = "0x0000000000000000000000000000000000000000" as Hex;
+
+  const poolKey = { currency0, currency1, fee, tickSpacing: ts, hooks };
+
+  if (adapter === "PANCAKE_V4") {
+    const result = await getDexPublicClient().readContract({
+      address:      pancakeV4QuoterAddress(),
+      abi:          PANCAKE_V4_QUOTER_ABI,
+      functionName: "quoteExactInputSingle",
+      args:         [{ poolKey, zeroForOne, recipient: ZERO_ADDR, exactAmount: amountIn, sqrtPriceLimitX96: 0n, hookData: "0x" }],
+    }) as unknown as [bigint[], bigint, number];
+
+    // deltaAmounts[1] is negative (tokens leaving pool → user); negate to get positive amount
+    const deltaAmounts = result[0];
+    const rawOut       = deltaAmounts[1] ?? 0n;
+    return rawOut < 0n ? -rawOut : rawOut;
+  } else {
+    const result = await getDexPublicClient().readContract({
+      address:      uniswapV4QuoterAddress(),
+      abi:          UNISWAP_V4_QUOTER_ABI,
+      functionName: "quoteExactInputSingle",
+      args:         [{ poolKey, zeroForOne, exactAmount: amountIn, hookData: "0x" }],
+    }) as unknown as [bigint, bigint];
+
+    return result[0];
+  }
 }
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────

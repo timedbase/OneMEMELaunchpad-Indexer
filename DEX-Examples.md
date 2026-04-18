@@ -473,15 +473,17 @@ Use this to calculate `amountOut` and `minOut` before calling `POST /dex/swap` o
 
 **Query Parameters**
 
-| Parameter  | Type   | Required | Description |
+| Parameter     | Type   | Required | Description |
 |---|---|---|---|
-| `adapter`  | string | Yes | Adapter name |
-| `tokenIn`  | string | Yes | Input token address |
-| `amountIn` | string | Yes | Input amount in wei |
-| `tokenOut` | string | Yes | Output token address |
-| `path`     | string | No  | Comma-separated token addresses for multi-hop (defaults to direct `tokenIn,tokenOut`) |
-| `fees`     | string | No  | Comma-separated fee tiers for V3 hops — **required for V3** (e.g. `500` or `500,3000`) |
-| `slippage` | number | No  | Slippage tolerance in basis points, default `100` (1%) |
+| `adapter`     | string | Yes | Adapter name |
+| `tokenIn`     | string | Yes | Input token address |
+| `amountIn`    | string | Yes | Input amount in wei |
+| `tokenOut`    | string | Yes | Output token address |
+| `path`        | string | No  | Comma-separated token addresses for multi-hop (defaults to direct `tokenIn,tokenOut`; V4 single-hop only) |
+| `fees`        | string | No  | Comma-separated fee tiers — **required for V3 and V4** (e.g. `500` or `500,3000`) |
+| `slippage`    | number | No  | Slippage tolerance in basis points, default `100` (1%) |
+| `tickSpacing` | number | V4 only | Pool tick spacing — auto-derived from fee if omitted (e.g. fee `500` → `10`) |
+| `hooks`       | string | V4 only | Hooks contract address — defaults to zero address (vanilla pool) |
 
 ### V2 single-hop
 
@@ -579,10 +581,52 @@ GET /api/v1/bsc/dex/quote?adapter=ONEMEME_BC&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2
 GET /api/v1/bsc/dex/quote?adapter=ONEMEME_BC&tokenIn=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&amountIn=500000000000000000000000&tokenOut=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c
 ```
 
-**Error — unsupported adapter**
-```json
-{ "statusCode": 400, "message": "On-chain quote is not yet supported for PANCAKE_V4. Supported: PANCAKE_V2, UNISWAP_V2, PANCAKE_V3, UNISWAP_V3, ONEMEME_BC" }
+### V4 single-hop (PANCAKE_V4 / UNISWAP_V4)
+
+V4 uses a singleton `PoolManager` — the quote requires a `PoolKey` (fee + tickSpacing + hooks)
+instead of a path. `tickSpacing` is auto-derived from the fee tier if omitted.
+Only single-hop is supported.
+
 ```
+GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&fees=3000
+```
+
+**Response**
+```json
+{
+  "data": {
+    "adapter":        "PANCAKE_V4",
+    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+    "amountIn":       "1000000000000000000",
+    "amountOut":      "1229081000000000000000000",
+    "minOut":         "1216790190000000000000000",
+    "aggregatorFee":  "10000000000000000",
+    "bondingFee":     null,
+    "slippageBps":    "100",
+    "quotedBy":       "PancakeSwap V4 Quoter",
+    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
+    "fees":           [3000],
+    "tickSpacing":    60,
+    "hooks":          "0x0000000000000000000000000000000000000000"
+  }
+}
+```
+
+V4 with explicit tickSpacing and a custom hooks contract:
+```
+GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xbb4c...&amountIn=1000000000000000000&tokenOut=0xa3f1...&fees=3000&tickSpacing=60&hooks=0x1234...
+```
+
+**Automatic tickSpacing derivation**
+
+| Fee tier | Auto tickSpacing |
+|---|---|
+| 100 (0.01%) | 1 |
+| 500 (0.05%) | 10 |
+| 2500 (0.25%) | 50 |
+| 3000 (0.30%) | 60 |
+| 10000+ (1%+) | 200 |
 
 **Error — V3 missing fees**
 ```json

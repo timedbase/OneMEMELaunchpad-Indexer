@@ -12,8 +12,10 @@ import {
   buildV3PackedPath,
   quoteV2,
   quoteV3,
+  quoteV4,
   quoteBcBuy,
   quoteBcSell,
+  defaultTickSpacing,
   getUserNonce,
   getOrderDigest,
   relayMetaTx,
@@ -182,8 +184,10 @@ export class MetaTxService {
     }
 
     // Parse optional path and fees from comma-separated query params
-    const rawPath = query["path"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
-    const rawFees = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)) ?? [];
+    const rawPath       = query["path"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
+    const rawFees       = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)) ?? [];
+    const rawTickSpacing = query["tickSpacing"] ? parseInt(query["tickSpacing"], 10) : null;
+    const rawHooks       = query["hooks"] ?? null;
 
     const path: Hex[] = rawPath.length >= 2
       ? rawPath.map((p, i) => {
@@ -227,10 +231,31 @@ export class MetaTxService {
         }
         quotedBy = "OneMEME BondingCurve";
 
+      } else if (adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4") {
+        // V4 uses a singleton PoolManager — quotes require a PoolKey (fee + tickSpacing + hooks)
+        // rather than a simple path. Only single-hop supported.
+        const fee = rawFees[0];
+        if (!fee) {
+          throw new BadRequestException(
+            "V4 quote requires ?fees=<feeTier> (e.g. 3000 for 0.3%). " +
+            "Only single-hop V4 quotes are supported.",
+          );
+        }
+        const hooks = (rawHooks ?? "0x0000000000000000000000000000000000000000") as Hex;
+
+        if (rawHooks && !isAddress(rawHooks)) {
+          throw new BadRequestException("hooks must be a valid EVM address");
+        }
+
+        // Auto-derive tickSpacing from fee if not provided
+        const ts = rawTickSpacing || defaultTickSpacing(fee);
+
+        amountOut = await quoteV4(adapter, tokenIn, tokenOut, amountIn, fee, ts, hooks);
+        quotedBy  = adapter === "PANCAKE_V4" ? "PancakeSwap V4 Quoter" : "Uniswap V4 Quoter";
+
       } else {
         throw new BadRequestException(
-          `On-chain quote is not yet supported for ${adapter}. ` +
-          `Supported: PANCAKE_V2, UNISWAP_V2, PANCAKE_V3, UNISWAP_V3, ONEMEME_BC`,
+          `On-chain quote is not supported for ${adapter}.`,
         );
       }
     } catch (err: unknown) {
@@ -246,6 +271,8 @@ export class MetaTxService {
     // Slippage-adjusted minimum output
     const minOut = (amountOut * (10_000n - slippageBps)) / 10_000n;
 
+    const isV4 = adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4";
+
     return {
       data: {
         adapter,
@@ -258,8 +285,11 @@ export class MetaTxService {
         bondingFee:     fee?.toString() ?? null,
         slippageBps:    slippageBps.toString(),
         quotedBy,
-        path:           path,
+        path,
         fees:           rawFees.length ? rawFees : null,
+        // V4-specific fields
+        tickSpacing:    isV4 ? (rawTickSpacing || defaultTickSpacing(rawFees[0] ?? 3000)) : null,
+        hooks:          isV4 ? (rawHooks ?? "0x0000000000000000000000000000000000000000") : null,
       },
     };
   }
