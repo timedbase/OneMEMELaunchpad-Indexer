@@ -186,6 +186,16 @@ function bondingCurveQuoteAddress(): Hex {
   return process.env.BONDING_CURVE_ADDRESS as Hex;
 }
 
+function fourMemeHelperAddress(): Hex {
+  return (process.env.FOURMEME_HELPER_ADDRESS
+    ?? "0xF251F83e40a78868FcfA3FA4599Dad6494E46034") as Hex;
+}
+
+function flapShPortalAddress(): Hex {
+  return (process.env.FLAPSH_PORTAL_ADDRESS
+    ?? "0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0") as Hex;
+}
+
 // ─── V4 helpers ───────────────────────────────────────────────────────────────
 
 /**
@@ -223,6 +233,25 @@ const V3_QUOTER_ABI = parseAbi([
 const BC_QUOTE_ABI = parseAbi([
   "function getAmountOut(address token_, uint256 bnbIn) view returns (uint256 tokensOut, uint256 feeBNB)",
   "function getAmountOutSell(address token_, uint256 tokensIn) view returns (uint256 bnbOut, uint256 feeBNB)",
+]);
+
+/**
+ * FourMEME TokenManagerHelper3 — unified quote interface for V1 + V2 TokenManagers.
+ * tryBuy: pass (token, 0, funds) to simulate a BNB→token buy.
+ * trySell: simulate a token→BNB sell.
+ */
+const FOURMEME_HELPER_ABI = parseAbi([
+  "function tryBuy(address token, uint256 amount, uint256 funds) view returns (address tokenManager, address quote, uint256 estimatedAmount, uint256 estimatedCost, uint256 estimatedFee, uint256 amountMsgValue, uint256 amountApproval, uint256 amountFunds)",
+  "function trySell(address token, uint256 amount) view returns (address tokenManager, address quote, uint256 funds, uint256 fee)",
+]);
+
+/**
+ * Flap.SH Portal — bonding-curve preview (view) functions.
+ * address(0) represents native BNB in both directions.
+ */
+const FLAPSH_ABI = parseAbi([
+  "function previewBuy(address token, uint256 eth) view returns (uint256 amount)",
+  "function previewSell(address token, uint256 amount) view returns (uint256 eth)",
 ]);
 
 /**
@@ -344,6 +373,63 @@ export async function quoteBcSell(
     args:         [tokenAddress, tokensIn],
   }) as [bigint, bigint];
   return { amountOut: bnbOut, fee: feeBNB };
+}
+
+/** FourMEME buy quote (BNB → meme token) via TokenManagerHelper3.tryBuy(). */
+export async function quoteFourMemeBuy(
+  tokenAddress: Hex,
+  bnbIn:        bigint,
+): Promise<{ amountOut: bigint; fee: bigint }> {
+  // tryBuy(token, amount=0, funds=bnbIn) → funds-based purchase simulation
+  const result = await getDexPublicClient().readContract({
+    address:      fourMemeHelperAddress(),
+    abi:          FOURMEME_HELPER_ABI,
+    functionName: "tryBuy",
+    args:         [tokenAddress, 0n, bnbIn],
+  }) as [Hex, Hex, bigint, bigint, bigint, bigint, bigint, bigint];
+  // [tokenManager, quote, estimatedAmount, estimatedCost, estimatedFee, ...]
+  return { amountOut: result[2], fee: result[4] };
+}
+
+/** FourMEME sell quote (meme token → BNB) via TokenManagerHelper3.trySell(). */
+export async function quoteFourMemeSell(
+  tokenAddress: Hex,
+  tokensIn:     bigint,
+): Promise<{ amountOut: bigint; fee: bigint }> {
+  const result = await getDexPublicClient().readContract({
+    address:      fourMemeHelperAddress(),
+    abi:          FOURMEME_HELPER_ABI,
+    functionName: "trySell",
+    args:         [tokenAddress, tokensIn],
+  }) as [Hex, Hex, bigint, bigint];
+  // [tokenManager, quote, funds, fee]
+  return { amountOut: result[2], fee: result[3] };
+}
+
+/** Flap.SH buy quote (BNB → meme token) via Portal.previewBuy(). */
+export async function quoteFlapShBuy(
+  tokenAddress: Hex,
+  bnbIn:        bigint,
+): Promise<bigint> {
+  return getDexPublicClient().readContract({
+    address:      flapShPortalAddress(),
+    abi:          FLAPSH_ABI,
+    functionName: "previewBuy",
+    args:         [tokenAddress, bnbIn],
+  }) as Promise<bigint>;
+}
+
+/** Flap.SH sell quote (meme token → BNB) via Portal.previewSell(). */
+export async function quoteFlapShSell(
+  tokenAddress: Hex,
+  tokensIn:     bigint,
+): Promise<bigint> {
+  return getDexPublicClient().readContract({
+    address:      flapShPortalAddress(),
+    abi:          FLAPSH_ABI,
+    functionName: "previewSell",
+    args:         [tokenAddress, tokensIn],
+  }) as Promise<bigint>;
 }
 
 /**

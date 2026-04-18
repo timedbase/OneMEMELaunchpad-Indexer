@@ -16,6 +16,10 @@ import {
   quoteV4Multi,
   quoteBcBuy,
   quoteBcSell,
+  quoteFourMemeBuy,
+  quoteFourMemeSell,
+  quoteFlapShBuy,
+  quoteFlapShSell,
   defaultTickSpacing,
   getUserNonce,
   getOrderDigest,
@@ -166,8 +170,9 @@ export class MetaTxService {
    *   PANCAKE_V2, UNISWAP_V2  — calls router.getAmountsOut()
    *   PANCAKE_V3, UNISWAP_V3  — calls QuoterV2.quoteExactInput()
    *   ONEMEME_BC              — calls BondingCurve.getAmountOut / getAmountOutSell
-   *   FOURMEME, FLAPSH        — not yet supported (no standard quoter interface)
-   *   PANCAKE_V4, UNISWAP_V4  — not yet supported
+   *   FOURMEME                — calls TokenManagerHelper3.tryBuy / trySell
+   *   FLAPSH                  — calls Portal.previewBuy / previewSell
+   *   PANCAKE_V4, UNISWAP_V4  — calls V4 Quoter (single-hop and multi-hop)
    *
    * Query params: adapter, tokenIn, amountIn, tokenOut, path? (comma-separated), fees? (comma-separated), slippage? (bps, default 100)
    */
@@ -233,6 +238,32 @@ export class MetaTxService {
         }
         quotedBy = "OneMEME BondingCurve";
 
+      } else if (adapter === "FOURMEME") {
+        const WBNB = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
+        const isBuy = tokenIn.toLowerCase() === WBNB;
+        const token = isBuy ? tokenOut : tokenIn;
+        if (isBuy) {
+          const r = await quoteFourMemeBuy(token, amountIn);
+          amountOut = r.amountOut;
+          fee       = r.fee;
+        } else {
+          const r = await quoteFourMemeSell(token, amountIn);
+          amountOut = r.amountOut;
+          fee       = r.fee;
+        }
+        quotedBy = "FourMEME TokenManagerHelper3";
+
+      } else if (adapter === "FLAPSH") {
+        const WBNB = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
+        const isBuy = tokenIn.toLowerCase() === WBNB;
+        const token = isBuy ? tokenOut : tokenIn;
+        if (isBuy) {
+          amountOut = await quoteFlapShBuy(token, amountIn);
+        } else {
+          amountOut = await quoteFlapShSell(token, amountIn);
+        }
+        quotedBy = "Flap.SH Portal";
+
       } else if (adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4") {
         // V4: each hop needs a fee tier; tickSpacing auto-derived, hooks default zero address.
         const hopCount = path.length - 1;
@@ -265,9 +296,8 @@ export class MetaTxService {
         quotedBy = label;
 
       } else {
-        throw new BadRequestException(
-          `On-chain quote is not supported for ${adapter}.`,
-        );
+        // requireAdapter() guards against unknown adapters; this branch is unreachable
+        throw new BadRequestException(`On-chain quote is not supported for ${adapter}.`);
       }
     } catch (err: unknown) {
       const msg = String(err);
