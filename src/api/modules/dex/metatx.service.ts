@@ -8,7 +8,12 @@ import {
   encodeV2Path,
   encodeV3Path,
   encodeBcAdapterData,
-  buildSwapCalldata,  // used by buildSwap()
+  buildSwapCalldata,
+  buildV3PackedPath,
+  quoteV2,
+  quoteV3,
+  quoteBcBuy,
+  quoteBcSell,
   getUserNonce,
   getOrderDigest,
   relayMetaTx,
@@ -149,6 +154,115 @@ function buildAdapterData(
 
 @Injectable()
 export class MetaTxService {
+
+  /**
+   * GET /dex/quote
+   * On-chain quote simulation — returns expected output before building swap calldata.
+   *
+   * Supported adapters:
+   *   PANCAKE_V2, UNISWAP_V2  — calls router.getAmountsOut()
+   *   PANCAKE_V3, UNISWAP_V3  — calls QuoterV2.quoteExactInput()
+   *   ONEMEME_BC              — calls BondingCurve.getAmountOut / getAmountOutSell
+   *   FOURMEME, FLAPSH        — not yet supported (no standard quoter interface)
+   *   PANCAKE_V4, UNISWAP_V4  — not yet supported
+   *
+   * Query params: adapter, tokenIn, amountIn, tokenOut, path? (comma-separated), fees? (comma-separated), slippage? (bps, default 100)
+   */
+  async getQuote(query: Record<string, string | undefined>) {
+    const adapter    = requireAdapter(query["adapter"]);
+    const tokenIn    = requireAddress(query["tokenIn"],  "tokenIn");
+    const tokenOut   = requireAddress(query["tokenOut"], "tokenOut");
+    const amountIn   = requireBigInt(query["amountIn"],  "amountIn");
+
+    if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
+
+    const slippageBps = BigInt(query["slippage"] ?? "100");
+    if (slippageBps < 0n || slippageBps > 5000n) {
+      throw new BadRequestException("slippage must be between 0 and 5000 basis points");
+    }
+
+    // Parse optional path and fees from comma-separated query params
+    const rawPath = query["path"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
+    const rawFees = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)) ?? [];
+
+    const path: Hex[] = rawPath.length >= 2
+      ? rawPath.map((p, i) => {
+          if (!isAddress(p)) throw new BadRequestException(`path[${i}] is not a valid address`);
+          return normalizeAddress(p) as Hex;
+        })
+      : [tokenIn, tokenOut];
+
+    let amountOut: bigint;
+    let fee:       bigint | null = null;
+    let quotedBy:  string;
+
+    try {
+      if (adapter === "PANCAKE_V2" || adapter === "UNISWAP_V2") {
+        amountOut = await quoteV2(adapter, path, amountIn);
+        quotedBy  = adapter === "PANCAKE_V2" ? "PancakeSwap V2 Router" : "Uniswap V2 Router";
+
+      } else if (adapter === "PANCAKE_V3" || adapter === "UNISWAP_V3") {
+        if (rawFees.length !== path.length - 1) {
+          throw new BadRequestException(
+            `V3 quote requires ${path.length - 1} fee tier(s) — provide via ?fees=500 (comma-separated for multi-hop)`,
+          );
+        }
+        const packedPath = buildV3PackedPath(path, rawFees);
+        amountOut = await quoteV3(adapter, packedPath, amountIn);
+        quotedBy  = adapter === "PANCAKE_V3" ? "PancakeSwap V3 QuoterV2" : "Uniswap V3 QuoterV2";
+
+      } else if (adapter === "ONEMEME_BC") {
+        // Determine side: if tokenIn is WBNB → buy, else → sell
+        const WBNB = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
+        const isBuy = tokenIn.toLowerCase() === WBNB;
+        const token = isBuy ? tokenOut : tokenIn;
+        if (isBuy) {
+          const r  = await quoteBcBuy(token, amountIn);
+          amountOut = r.amountOut;
+          fee       = r.fee;
+        } else {
+          const r  = await quoteBcSell(token, amountIn);
+          amountOut = r.amountOut;
+          fee       = r.fee;
+        }
+        quotedBy = "OneMEME BondingCurve";
+
+      } else {
+        throw new BadRequestException(
+          `On-chain quote is not yet supported for ${adapter}. ` +
+          `Supported: PANCAKE_V2, UNISWAP_V2, PANCAKE_V3, UNISWAP_V3, ONEMEME_BC`,
+        );
+      }
+    } catch (err: unknown) {
+      const msg = String(err);
+      if (msg.includes("not configured") || msg.includes("BadRequestException")) throw err;
+      // Surface RPC errors clearly
+      throw new BadRequestException(`Quote simulation failed: ${msg}`);
+    }
+
+    // Aggregator 1% fee (taken from amountIn by the contract — informational)
+    const aggregatorFee = amountIn / 100n;
+
+    // Slippage-adjusted minimum output
+    const minOut = (amountOut * (10_000n - slippageBps)) / 10_000n;
+
+    return {
+      data: {
+        adapter,
+        tokenIn,
+        tokenOut,
+        amountIn:       amountIn.toString(),
+        amountOut:      amountOut.toString(),
+        minOut:         minOut.toString(),
+        aggregatorFee:  aggregatorFee.toString(),
+        bondingFee:     fee?.toString() ?? null,
+        slippageBps:    slippageBps.toString(),
+        quotedBy,
+        path:           path,
+        fees:           rawFees.length ? rawFees : null,
+      },
+    };
+  }
 
   /**
    * POST /dex/swap

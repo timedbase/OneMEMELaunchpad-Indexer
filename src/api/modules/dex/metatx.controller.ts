@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Param,
+  Query,
   Body,
 } from "@nestjs/common";
 import { MetaTxService } from "./metatx.service";
@@ -17,6 +18,27 @@ import { MetaTxService } from "./metatx.service";
 @Controller("dex")
 export class MetaTxController {
   constructor(private readonly metatx: MetaTxService) {}
+
+  /**
+   * GET /dex/quote
+   * Live on-chain quote — simulates expected output before committing to a swap.
+   * Use this to compute amountOut and minOut before calling POST /dex/swap or /dex/metatx/digest.
+   *
+   * Supported adapters: PANCAKE_V2, UNISWAP_V2, PANCAKE_V3, UNISWAP_V3, ONEMEME_BC
+   *
+   * Query params:
+   *   adapter   — adapter name (required)
+   *   tokenIn   — input token address (required)
+   *   amountIn  — input amount in wei (required)
+   *   tokenOut  — output token address (required)
+   *   path      — comma-separated token addresses for multi-hop (optional, defaults to direct)
+   *   fees      — comma-separated fee tiers for V3 hops, e.g. 500,3000 (required for V3)
+   *   slippage  — slippage tolerance in basis points, default 100 (1%)
+   */
+  @Get("quote")
+  getQuote(@Query() query: Record<string, string>) {
+    return this.metatx.getQuote(query);
+  }
 
   /**
    * POST /dex/swap

@@ -140,6 +140,149 @@ export function encodeBcAdapterData(): Hex {
   return "0x";
 }
 
+// ─── Quote contract addresses ─────────────────────────────────────────────────
+// Configurable via env vars; defaults are BSC mainnet well-known addresses.
+
+function pancakeV2RouterAddress(): Hex {
+  return (process.env.PANCAKE_V2_ROUTER_ADDRESS
+    ?? "0x10ED43C718714eb63d5aA57B78B54704E256024E") as Hex;
+}
+
+function uniswapV2RouterAddress(): Hex {
+  return (process.env.UNISWAP_V2_ROUTER_ADDRESS
+    ?? "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24") as Hex;
+}
+
+function pancakeV3QuoterAddress(): Hex {
+  return (process.env.PANCAKE_V3_QUOTER_ADDRESS
+    ?? "0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997") as Hex;
+}
+
+function uniswapV3QuoterAddress(): Hex {
+  if (!process.env.UNISWAP_V3_QUOTER_ADDRESS) {
+    throw new Error("UNISWAP_V3_QUOTER_ADDRESS is not configured.");
+  }
+  return process.env.UNISWAP_V3_QUOTER_ADDRESS as Hex;
+}
+
+function bondingCurveQuoteAddress(): Hex {
+  if (!process.env.BONDING_CURVE_ADDRESS) {
+    throw new Error("BONDING_CURVE_ADDRESS is not configured.");
+  }
+  return process.env.BONDING_CURVE_ADDRESS as Hex;
+}
+
+// ─── Quote ABIs ───────────────────────────────────────────────────────────────
+
+const V2_ROUTER_ABI = parseAbi([
+  "function getAmountsOut(uint256 amountIn, address[] calldata path) view returns (uint256[] amounts)",
+]);
+
+const V3_QUOTER_ABI = parseAbi([
+  // QuoterV2 — returns amountOut as first element
+  "function quoteExactInput(bytes calldata path, uint256 amountIn) view returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)",
+]);
+
+const BC_QUOTE_ABI = parseAbi([
+  "function getAmountOut(address token_, uint256 bnbIn) view returns (uint256 tokensOut, uint256 feeBNB)",
+  "function getAmountOutSell(address token_, uint256 tokensIn) view returns (uint256 bnbOut, uint256 feeBNB)",
+]);
+
+// ─── V3 raw packed path (for quoter — not ABI-wrapped) ────────────────────────
+
+/**
+ * Builds a raw packed path bytes for V3 quoter calls:
+ *   abi.encodePacked(token0, fee0, token1, fee1, token2, ...)
+ * This is different from encodeV3Path() which ABI-wraps for adapterData.
+ */
+export function buildV3PackedPath(tokens: Hex[], fees: number[]): Hex {
+  if (tokens.length < 2 || fees.length !== tokens.length - 1) {
+    throw new Error("V3 path requires tokens.length === fees.length + 1");
+  }
+  const types: ("address" | "uint24")[] = [];
+  const values: (Hex | number)[]        = [];
+  for (let i = 0; i < tokens.length; i++) {
+    types.push("address");  values.push(tokens[i]!);
+    if (i < fees.length) {
+      types.push("uint24"); values.push(fees[i]!);
+    }
+  }
+  return encodePacked(
+    types as Parameters<typeof encodePacked>[0],
+    values as Parameters<typeof encodePacked>[1],
+  );
+}
+
+// ─── On-chain quote functions ─────────────────────────────────────────────────
+
+/** V2 AMM quote: returns estimated output amount for the given path. */
+export async function quoteV2(
+  adapter:  "PANCAKE_V2" | "UNISWAP_V2",
+  path:     Hex[],
+  amountIn: bigint,
+): Promise<bigint> {
+  const router = adapter === "PANCAKE_V2"
+    ? pancakeV2RouterAddress()
+    : uniswapV2RouterAddress();
+
+  const amounts = await getDexPublicClient().readContract({
+    address:      router,
+    abi:          V2_ROUTER_ABI,
+    functionName: "getAmountsOut",
+    args:         [amountIn, path],
+  }) as bigint[];
+
+  return amounts[amounts.length - 1]!;
+}
+
+/** V3 AMM quote: returns estimated output amount for the given packed path. */
+export async function quoteV3(
+  adapter:     "PANCAKE_V3" | "UNISWAP_V3",
+  packedPath:  Hex,
+  amountIn:    bigint,
+): Promise<bigint> {
+  const quoter = adapter === "PANCAKE_V3"
+    ? pancakeV3QuoterAddress()
+    : uniswapV3QuoterAddress();
+
+  const result = await getDexPublicClient().readContract({
+    address:      quoter,
+    abi:          V3_QUOTER_ABI,
+    functionName: "quoteExactInput",
+    args:         [packedPath, amountIn],
+  }) as unknown as [bigint, ...unknown[]];
+
+  return result[0];
+}
+
+/** Bonding-curve buy quote (BNB → token). */
+export async function quoteBcBuy(
+  tokenAddress: Hex,
+  bnbIn:        bigint,
+): Promise<{ amountOut: bigint; fee: bigint }> {
+  const [tokensOut, feeBNB] = await getDexPublicClient().readContract({
+    address:      bondingCurveQuoteAddress(),
+    abi:          BC_QUOTE_ABI,
+    functionName: "getAmountOut",
+    args:         [tokenAddress, bnbIn],
+  }) as [bigint, bigint];
+  return { amountOut: tokensOut, fee: feeBNB };
+}
+
+/** Bonding-curve sell quote (token → BNB). */
+export async function quoteBcSell(
+  tokenAddress: Hex,
+  tokensIn:     bigint,
+): Promise<{ amountOut: bigint; fee: bigint }> {
+  const [bnbOut, feeBNB] = await getDexPublicClient().readContract({
+    address:      bondingCurveQuoteAddress(),
+    abi:          BC_QUOTE_ABI,
+    functionName: "getAmountOutSell",
+    args:         [tokenAddress, tokensIn],
+  }) as [bigint, bigint];
+  return { amountOut: bnbOut, fee: feeBNB };
+}
+
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
 
 export const AGGREGATOR_ABI = parseAbi([

@@ -17,9 +17,10 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 6. [GET /dex/tokens/:address/trades](#get-dextokensaddresstrades)
 7. [GET /dex/swaps](#get-dexswaps)
 8. [GET /dex/metatx/nonce/:user](#get-dexmetatxnonceuser)
-9. [POST /dex/swap](#post-dexswap)
-10. [POST /dex/metatx/digest](#post-dexmetatxdigest)
-11. [POST /dex/metatx/relay](#post-dexmetatxrelay)
+9. [GET /dex/quote](#get-dexquote)
+10. [POST /dex/swap](#post-dexswap)
+11. [POST /dex/metatx/digest](#post-dexmetatxdigest)
+12. [POST /dex/metatx/relay](#post-dexmetatxrelay)
 
 ---
 
@@ -459,6 +460,133 @@ GET /api/v1/bsc/dex/metatx/nonce/0x71be63f3384f5fb98995aa9b7a5b6e1234567890
     "nonce": "3"
   }
 }
+```
+
+---
+
+## GET /dex/quote
+
+Live on-chain quote — simulates expected output before committing to a swap.
+Use this to calculate `amountOut` and `minOut` before calling `POST /dex/swap` or `POST /dex/metatx/digest`.
+
+**Supported adapters:** `PANCAKE_V2`, `UNISWAP_V2`, `PANCAKE_V3`, `UNISWAP_V3`, `ONEMEME_BC`
+
+**Query Parameters**
+
+| Parameter  | Type   | Required | Description |
+|---|---|---|---|
+| `adapter`  | string | Yes | Adapter name |
+| `tokenIn`  | string | Yes | Input token address |
+| `amountIn` | string | Yes | Input amount in wei |
+| `tokenOut` | string | Yes | Output token address |
+| `path`     | string | No  | Comma-separated token addresses for multi-hop (defaults to direct `tokenIn,tokenOut`) |
+| `fees`     | string | No  | Comma-separated fee tiers for V3 hops — **required for V3** (e.g. `500` or `500,3000`) |
+| `slippage` | number | No  | Slippage tolerance in basis points, default `100` (1%) |
+
+### V2 single-hop
+
+```
+GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V2&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100
+```
+
+**Response**
+```json
+{
+  "data": {
+    "adapter":        "PANCAKE_V2",
+    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+    "amountIn":       "1000000000000000000",
+    "amountOut":      "1231847000000000000000000",
+    "minOut":         "1219528530000000000000000",
+    "aggregatorFee":  "10000000000000000",
+    "bondingFee":     null,
+    "slippageBps":    "100",
+    "quotedBy":       "PancakeSwap V2 Router",
+    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
+    "fees":           null
+  }
+}
+```
+
+### V2 multi-hop
+
+```
+GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V2&tokenIn=0xa3f1...&amountIn=500000000000000000000000&tokenOut=0x55d3...&path=0xa3f1...,0xbb4c...,0x55d3...&slippage=200
+```
+
+### V3 single-hop (0.05% fee tier)
+
+```
+GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V3&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=500000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&fees=500&slippage=100
+```
+
+**Response**
+```json
+{
+  "data": {
+    "adapter":        "PANCAKE_V3",
+    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+    "amountIn":       "500000000000000000",
+    "amountOut":      "618204000000000000000000",
+    "minOut":         "611921960000000000000000",
+    "aggregatorFee":  "5000000000000000",
+    "bondingFee":     null,
+    "slippageBps":    "100",
+    "quotedBy":       "PancakeSwap V3 QuoterV2",
+    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
+    "fees":           [500]
+  }
+}
+```
+
+### V3 multi-hop (two hops)
+
+```
+GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V3&tokenIn=0xa3f1...&amountIn=1000000000000000000000000&tokenOut=0x55d3...&path=0xa3f1...,0xbb4c...,0x55d3...&fees=500,100
+```
+
+### Bonding-curve buy (WBNB → meme token)
+
+```
+GET /api/v1/bsc/dex/quote?adapter=ONEMEME_BC&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
+```
+
+**Response**
+```json
+{
+  "data": {
+    "adapter":        "ONEMEME_BC",
+    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+    "amountIn":       "1000000000000000000",
+    "amountOut":      "1218432000000000000000000",
+    "minOut":         "1206247680000000000000000",
+    "aggregatorFee":  "10000000000000000",
+    "bondingFee":     "3000000000000000",
+    "slippageBps":    "100",
+    "quotedBy":       "OneMEME BondingCurve",
+    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
+    "fees":           null
+  }
+}
+```
+
+### Bonding-curve sell (meme token → WBNB)
+
+```
+GET /api/v1/bsc/dex/quote?adapter=ONEMEME_BC&tokenIn=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&amountIn=500000000000000000000000&tokenOut=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c
+```
+
+**Error — unsupported adapter**
+```json
+{ "statusCode": 400, "message": "On-chain quote is not yet supported for PANCAKE_V4. Supported: PANCAKE_V2, UNISWAP_V2, PANCAKE_V3, UNISWAP_V3, ONEMEME_BC" }
+```
+
+**Error — V3 missing fees**
+```json
+{ "statusCode": 400, "message": "V3 quote requires 1 fee tier(s) — provide via ?fees=500 (comma-separated for multi-hop)" }
 ```
 
 ---
