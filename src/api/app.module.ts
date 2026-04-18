@@ -22,6 +22,7 @@ import { ChatModule }          from "./modules/chat/chat.module";
 import { VestingModule }       from "./modules/vesting/vesting.module";
 import { PointsModule }        from "./modules/points/points.module";
 import { ReferralsModule }     from "./modules/referrals/referrals.module";
+import { DexModule }           from "./modules/dex/dex.module";
 
 import {
   QuoteRateLimitMiddleware,
@@ -48,6 +49,7 @@ import {
     VestingModule,
     PointsModule,
     ReferralsModule,
+    DexModule,
   ],
   controllers: [HealthController],
 })
