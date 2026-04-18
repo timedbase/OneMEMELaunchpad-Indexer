@@ -482,8 +482,8 @@ Use this to calculate `amountOut` and `minOut` before calling `POST /dex/swap` o
 | `path`        | string | No  | Comma-separated token addresses for multi-hop (defaults to direct `tokenIn,tokenOut`; V4 single-hop only) |
 | `fees`        | string | No  | Comma-separated fee tiers — **required for V3 and V4** (e.g. `500` or `500,3000`) |
 | `slippage`    | number | No  | Slippage tolerance in basis points, default `100` (1%) |
-| `tickSpacing` | number | V4 only | Pool tick spacing — auto-derived from fee if omitted (e.g. fee `500` → `10`) |
-| `hooks`       | string | V4 only | Hooks contract address — defaults to zero address (vanilla pool) |
+| `tickSpacing` | string | V4 only | Comma-separated tick spacings per hop — auto-derived from fee if omitted (e.g. fee `500` → `10`) |
+| `hooks`       | string | V4 only | Comma-separated hooks addresses per hop — defaults to zero address (vanilla pool) |
 
 ### V2 single-hop
 
@@ -584,8 +584,8 @@ GET /api/v1/bsc/dex/quote?adapter=ONEMEME_BC&tokenIn=0xa3f1e2d4c5b6a7f8e9d0c1b2a
 ### V4 single-hop (PANCAKE_V4 / UNISWAP_V4)
 
 V4 uses a singleton `PoolManager` — the quote requires a `PoolKey` (fee + tickSpacing + hooks)
-instead of a path. `tickSpacing` is auto-derived from the fee tier if omitted.
-Only single-hop is supported.
+instead of path bytes. `tickSpacing` is auto-derived from the fee tier if omitted.
+Both single-hop and multi-hop are supported via `path` + per-hop `fees`/`tickSpacing`/`hooks`.
 
 ```
 GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&fees=3000
@@ -607,8 +607,8 @@ GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2
     "quotedBy":       "PancakeSwap V4 Quoter",
     "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
     "fees":           [3000],
-    "tickSpacing":    60,
-    "hooks":          "0x0000000000000000000000000000000000000000"
+    "tickSpacing":    [60],
+    "hooks":          ["0x0000000000000000000000000000000000000000"]
   }
 }
 ```
@@ -616,6 +616,49 @@ GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2
 V4 with explicit tickSpacing and a custom hooks contract:
 ```
 GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xbb4c...&amountIn=1000000000000000000&tokenOut=0xa3f1...&fees=3000&tickSpacing=60&hooks=0x1234...
+```
+
+### V4 multi-hop (PANCAKE_V4 / UNISWAP_V4)
+
+For multi-hop, provide a comma-separated `path` (all intermediate tokens included), `fees` per hop,
+and optionally `tickSpacing` and `hooks` per hop (comma-separated, one value per hop).
+
+```
+GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&amountIn=1000000000000000000000000&tokenOut=0x55d398326f99059ff775485246999027b3197955&path=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0,0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c,0x55d398326f99059ff775485246999027b3197955&fees=3000,500
+```
+
+**Response**
+```json
+{
+  "data": {
+    "adapter":        "PANCAKE_V4",
+    "tokenIn":        "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+    "tokenOut":       "0x55d398326f99059ff775485246999027b3197955",
+    "amountIn":       "1000000000000000000000000",
+    "amountOut":      "793421000000000000000",
+    "minOut":         "785486790000000000000",
+    "aggregatorFee":  "10000000000000000000000",
+    "bondingFee":     null,
+    "slippageBps":    "100",
+    "quotedBy":       "PancakeSwap V4 Quoter",
+    "path":           [
+      "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+      "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "0x55d398326f99059ff775485246999027b3197955"
+    ],
+    "fees":           [3000, 500],
+    "tickSpacing":    [60, 10],
+    "hooks":          [
+      "0x0000000000000000000000000000000000000000",
+      "0x0000000000000000000000000000000000000000"
+    ]
+  }
+}
+```
+
+With explicit per-hop tickSpacing and hooks:
+```
+GET ...&fees=3000,500&tickSpacing=60,10&hooks=0x0000...,0x1234...
 ```
 
 **Automatic tickSpacing derivation**

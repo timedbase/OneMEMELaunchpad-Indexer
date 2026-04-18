@@ -13,6 +13,7 @@ import {
   quoteV2,
   quoteV3,
   quoteV4,
+  quoteV4Multi,
   quoteBcBuy,
   quoteBcSell,
   defaultTickSpacing,
@@ -184,10 +185,11 @@ export class MetaTxService {
     }
 
     // Parse optional path and fees from comma-separated query params
-    const rawPath       = query["path"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
-    const rawFees       = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)) ?? [];
-    const rawTickSpacing = query["tickSpacing"] ? parseInt(query["tickSpacing"], 10) : null;
-    const rawHooks       = query["hooks"] ?? null;
+    const rawPath        = query["path"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
+    const rawFees        = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)) ?? [];
+    // V4: tickSpacing and hooks are per-hop arrays (comma-separated); 0 = auto-derive from fee
+    const rawTickSpacings = query["tickSpacing"]?.split(",").map(s => parseInt(s.trim(), 10) || 0) ?? [];
+    const rawHooksArr     = query["hooks"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
 
     const path: Hex[] = rawPath.length >= 2
       ? rawPath.map((p, i) => {
@@ -232,26 +234,35 @@ export class MetaTxService {
         quotedBy = "OneMEME BondingCurve";
 
       } else if (adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4") {
-        // V4 uses a singleton PoolManager — quotes require a PoolKey (fee + tickSpacing + hooks)
-        // rather than a simple path. Only single-hop supported.
-        const fee = rawFees[0];
-        if (!fee) {
+        // V4: each hop needs a fee tier; tickSpacing auto-derived, hooks default zero address.
+        const hopCount = path.length - 1;
+        if (rawFees.length !== hopCount) {
           throw new BadRequestException(
-            "V4 quote requires ?fees=<feeTier> (e.g. 3000 for 0.3%). " +
-            "Only single-hop V4 quotes are supported.",
+            `V4 quote requires ${hopCount} fee tier(s) for ${path.length} tokens — ` +
+            `provide via ?fees=3000 (single-hop) or ?fees=500,3000 (multi-hop)`,
           );
         }
-        const hooks = (rawHooks ?? "0x0000000000000000000000000000000000000000") as Hex;
 
-        if (rawHooks && !isAddress(rawHooks)) {
-          throw new BadRequestException("hooks must be a valid EVM address");
+        // Validate any explicitly provided hooks addresses
+        rawHooksArr.forEach((h, i) => {
+          if (!isAddress(h)) throw new BadRequestException(`hooks[${i}] is not a valid EVM address`);
+        });
+
+        const label = adapter === "PANCAKE_V4" ? "PancakeSwap V4 Quoter" : "Uniswap V4 Quoter";
+
+        if (hopCount === 1) {
+          // Single-hop: use quoteExactInputSingle with a PoolKey
+          const fee   = rawFees[0]!;
+          const ts    = rawTickSpacings[0] || defaultTickSpacing(fee);
+          const hooks = (rawHooksArr[0] ?? "0x0000000000000000000000000000000000000000") as Hex;
+          amountOut   = await quoteV4(adapter, tokenIn, tokenOut, amountIn, fee, ts, hooks);
+        } else {
+          // Multi-hop: use quoteExactInput with PathKey[]
+          amountOut = await quoteV4Multi(
+            adapter, path, amountIn, rawFees, rawTickSpacings, rawHooksArr as Hex[],
+          );
         }
-
-        // Auto-derive tickSpacing from fee if not provided
-        const ts = rawTickSpacing || defaultTickSpacing(fee);
-
-        amountOut = await quoteV4(adapter, tokenIn, tokenOut, amountIn, fee, ts, hooks);
-        quotedBy  = adapter === "PANCAKE_V4" ? "PancakeSwap V4 Quoter" : "Uniswap V4 Quoter";
+        quotedBy = label;
 
       } else {
         throw new BadRequestException(
@@ -271,25 +282,31 @@ export class MetaTxService {
     // Slippage-adjusted minimum output
     const minOut = (amountOut * (10_000n - slippageBps)) / 10_000n;
 
-    const isV4 = adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4";
+    const isV4     = adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4";
+    const ZERO     = "0x0000000000000000000000000000000000000000";
+    const hopCount = path.length - 1;
 
     return {
       data: {
         adapter,
         tokenIn,
         tokenOut,
-        amountIn:       amountIn.toString(),
-        amountOut:      amountOut.toString(),
-        minOut:         minOut.toString(),
-        aggregatorFee:  aggregatorFee.toString(),
-        bondingFee:     fee?.toString() ?? null,
-        slippageBps:    slippageBps.toString(),
+        amountIn:      amountIn.toString(),
+        amountOut:     amountOut.toString(),
+        minOut:        minOut.toString(),
+        aggregatorFee: aggregatorFee.toString(),
+        bondingFee:    fee?.toString() ?? null,
+        slippageBps:   slippageBps.toString(),
         quotedBy,
         path,
-        fees:           rawFees.length ? rawFees : null,
-        // V4-specific fields
-        tickSpacing:    isV4 ? (rawTickSpacing || defaultTickSpacing(rawFees[0] ?? 3000)) : null,
-        hooks:          isV4 ? (rawHooks ?? "0x0000000000000000000000000000000000000000") : null,
+        fees:          rawFees.length ? rawFees : null,
+        // V4-specific: per-hop arrays (null for non-V4)
+        tickSpacing:   isV4
+          ? rawFees.map((f, i) => rawTickSpacings[i] || defaultTickSpacing(f))
+          : null,
+        hooks:         isV4
+          ? Array.from({ length: hopCount }, (_, i) => rawHooksArr[i] ?? ZERO)
+          : null,
       },
     };
   }

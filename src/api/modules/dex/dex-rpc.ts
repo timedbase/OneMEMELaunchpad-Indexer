@@ -226,20 +226,29 @@ const BC_QUOTE_ABI = parseAbi([
 ]);
 
 /**
- * PancakeSwap V4 Quoter — quoteExactInputSingle.
- * PoolKey is an inline tuple: (currency0, currency1, fee, tickSpacing, hooks).
- * Returns deltaAmounts as int128[]; output amount is -deltaAmounts[1] (tokens out of pool).
+ * PancakeSwap V4 Quoter.
+ *
+ * Single-hop: quoteExactInputSingle — PoolKey + zeroForOne direction.
+ *   Returns int128[] deltaAmounts; output = -deltaAmounts[1].
+ *
+ * Multi-hop: quoteExactInput — currencyIn + PathKey[].
+ *   PathKey.intermediateCurrency is the OUTPUT token of each hop.
+ *   Returns int128[] deltaAmounts; output = -deltaAmounts[last].
  */
 const PANCAKE_V4_QUOTER_ABI = parseAbi([
   "function quoteExactInputSingle(((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) poolKey, bool zeroForOne, address recipient, uint128 exactAmount, uint160 sqrtPriceLimitX96, bytes hookData) params) external returns (int128[] deltaAmounts, uint160 sqrtPriceX96After, uint32 initializedTicksLoaded)",
+  "function quoteExactInput(address currencyIn, (address intermediateCurrency, uint24 fee, int24 tickSpacing, address hooks, bytes hookData)[] path, uint128 exactAmount) external returns (int128[] deltaAmounts, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList)",
 ]);
 
 /**
- * Uniswap V4 Quoter — quoteExactInputSingle.
- * Same PoolKey shape but different return type: (amountOut, gasEstimate).
+ * Uniswap V4 Quoter.
+ *
+ * Single-hop: quoteExactInputSingle — returns (amountOut, gasEstimate).
+ * Multi-hop:  quoteExactInput      — currencyIn + PathKey[], same return shape.
  */
 const UNISWAP_V4_QUOTER_ABI = parseAbi([
   "function quoteExactInputSingle(((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) poolKey, bool zeroForOne, uint128 exactAmount, bytes hookData) params) external returns (uint256 amountOut, uint256 gasEstimate)",
+  "function quoteExactInput(address currencyIn, (address intermediateCurrency, uint24 fee, int24 tickSpacing, address hooks, bytes hookData)[] path, uint128 exactAmount) external returns (uint256 amountOut, uint256 gasEstimate)",
 ]);
 
 // ─── V3 raw packed path (for quoter — not ABI-wrapped) ────────────────────────
@@ -387,6 +396,61 @@ export async function quoteV4(
       abi:          UNISWAP_V4_QUOTER_ABI,
       functionName: "quoteExactInputSingle",
       args:         [{ poolKey, zeroForOne, exactAmount: amountIn, hookData: "0x" }],
+    }) as unknown as [bigint, bigint];
+
+    return result[0];
+  }
+}
+
+/**
+ * V4 multi-hop quote (PANCAKE_V4 or UNISWAP_V4) via quoteExactInput.
+ *
+ * Each hop is described by a PathKey. The caller provides parallel arrays:
+ *   tokens       — [tokenIn, intermediate1, ..., tokenOut]  (N+1 entries for N hops)
+ *   fees         — fee tier per hop                         (N entries)
+ *   tickSpacings — tick spacing per hop; 0 = auto-derive    (N entries)
+ *   hooksArr     — hooks address per hop                    (N entries, zero = no hooks)
+ */
+export async function quoteV4Multi(
+  adapter:      "PANCAKE_V4" | "UNISWAP_V4",
+  tokens:       Hex[],
+  amountIn:     bigint,
+  fees:         number[],
+  tickSpacings: number[],
+  hooksArr:     Hex[],
+): Promise<bigint> {
+  const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as Hex;
+
+  // PathKey[i] describes hop i: the pool between tokens[i] and tokens[i+1].
+  // intermediateCurrency = the output side of this hop = tokens[i+1].
+  const pathKeys = fees.map((fee, i) => ({
+    intermediateCurrency: tokens[i + 1]!,
+    fee,
+    tickSpacing: tickSpacings[i] || defaultTickSpacing(fee),
+    hooks:       hooksArr[i]     ?? ZERO_ADDR,
+    hookData:    "0x" as Hex,
+  }));
+
+  const currencyIn = tokens[0]!;
+
+  if (adapter === "PANCAKE_V4") {
+    const result = await getDexPublicClient().readContract({
+      address:      pancakeV4QuoterAddress(),
+      abi:          PANCAKE_V4_QUOTER_ABI,
+      functionName: "quoteExactInput",
+      args:         [currencyIn, pathKeys, amountIn],
+    }) as unknown as [bigint[], bigint[], number[]];
+
+    const deltaAmounts = result[0];
+    // Last element is the final currency's delta (negative = leaving pool to user)
+    const rawOut = deltaAmounts[deltaAmounts.length - 1] ?? 0n;
+    return rawOut < 0n ? -rawOut : rawOut;
+  } else {
+    const result = await getDexPublicClient().readContract({
+      address:      uniswapV4QuoterAddress(),
+      abi:          UNISWAP_V4_QUOTER_ABI,
+      functionName: "quoteExactInput",
+      args:         [currencyIn, pathKeys, amountIn],
     }) as unknown as [bigint, bigint];
 
     return result[0];
