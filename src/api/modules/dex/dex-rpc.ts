@@ -100,43 +100,162 @@ export type AdapterName = keyof typeof ADAPTER_IDS;
 export const ADAPTER_NAMES = Object.keys(ADAPTER_IDS) as AdapterName[];
 
 // ─── adapterData encoding ─────────────────────────────────────────────────────
+//
+// Each encoder matches exactly what the on-chain adapter contract abi.decode()s.
+// Source: OneMEMELaunchpad-Core/AggregatorRouter/adapters/
 
 /**
- * V2-style adapters (PANCAKE_V2, UNISWAP_V2).
- * adapterData = abi.encode(address[] path)
- * path: [tokenIn, ...intermediates, tokenOut]
+ * GenericV2Adapter (PANCAKE_V2, UNISWAP_V2).
+ * adapterData = abi.encode(address[] path, uint256 deadline)
  */
-export function encodeV2Path(path: Hex[]): Hex {
-  return encodeAbiParameters(parseAbiParameters("address[]"), [path]);
+export function encodeV2AdapterData(path: Hex[], deadline: bigint): Hex {
+  return encodeAbiParameters(
+    [{ type: "address[]" }, { type: "uint256" }],
+    [path, deadline],
+  );
 }
 
 /**
- * V3-style adapters (PANCAKE_V3, UNISWAP_V3).
- * adapterData = abi.encode(bytes encodedPath)
- * encodedPath = abi.encodePacked(token0, fee0, token1, fee1, token2, ...)
- * fees: fee tiers between hops in bps × 100, e.g. 500 = 0.05%
+ * GenericV3Adapter single-hop (PANCAKE_V3, UNISWAP_V3, one fee tier).
+ * adapterData = abi.encode(bool false, abi.encode(uint24 fee, uint160 sqrtPriceLimitX96))
+ * sqrtPriceLimit = 0 for no price cap.
  */
-export function encodeV3Path(tokens: Hex[], fees: number[]): Hex {
-  if (tokens.length < 2 || fees.length !== tokens.length - 1) {
-    throw new Error("V3 path requires tokens.length === fees.length + 1");
+export function encodeV3SingleHopAdapterData(fee: number, sqrtPriceLimitX96 = 0n): Hex {
+  const inner = encodeAbiParameters(
+    [{ type: "uint24" }, { type: "uint160" }],
+    [fee, sqrtPriceLimitX96],
+  );
+  return encodeAbiParameters(
+    [{ type: "bool" }, { type: "bytes" }],
+    [false, inner],
+  );
+}
+
+/**
+ * GenericV3Adapter multi-hop (PANCAKE_V3, UNISWAP_V3, two or more fee tiers).
+ * adapterData = abi.encode(bool true, abi.encodePacked(token0, fee0, token1, fee1, ...))
+ */
+export function encodeV3MultiHopAdapterData(tokens: Hex[], fees: number[]): Hex {
+  if (tokens.length < 3 || fees.length !== tokens.length - 1) {
+    throw new Error("V3 multi-hop requires at least 3 tokens and matching fee count");
   }
-  const types: ("address" | "uint24")[]  = [];
-  const values: (Hex | number)[]         = [];
+  const types: ("address" | "uint24")[] = [];
+  const values: (Hex | number)[]        = [];
   for (let i = 0; i < tokens.length; i++) {
     types.push("address");  values.push(tokens[i]!);
     if (i < fees.length) {
       types.push("uint24"); values.push(fees[i]!);
     }
   }
-  const packedPath = encodePacked(types as Parameters<typeof encodePacked>[0], values as Parameters<typeof encodePacked>[1]);
-  return encodeAbiParameters(parseAbiParameters("bytes"), [packedPath]);
+  const packed = encodePacked(
+    types as Parameters<typeof encodePacked>[0],
+    values as Parameters<typeof encodePacked>[1],
+  );
+  return encodeAbiParameters(
+    [{ type: "bool" }, { type: "bytes" }],
+    [true, packed],
+  );
 }
 
 /**
- * Bonding-curve adapters (ONEMEME_BC, FOURMEME, FLAPSH).
- * The adapter resolves the curve from tokenIn/tokenOut directly; no extra data needed.
+ * GenericV4Adapter single-hop (PANCAKE_V4, UNISWAP_V4).
+ * adapterData = abi.encode(bool false, PoolKey poolKey, bool zeroForOne, bytes hookData, uint256 deadline)
+ * zeroForOne auto-derived from token address comparison (currency0 < currency1).
  */
-export function encodeBcAdapterData(): Hex {
+export function encodeV4SingleHopAdapterData(
+  tokenIn:     Hex,
+  tokenOut:    Hex,
+  fee:         number,
+  tickSpacing: number,
+  hooks:       Hex,
+  hookData:    Hex,
+  deadline:    bigint,
+): Hex {
+  const zeroForOne = tokenIn.toLowerCase() < tokenOut.toLowerCase();
+  const currency0  = zeroForOne ? tokenIn  : tokenOut;
+  const currency1  = zeroForOne ? tokenOut : tokenIn;
+  return encodeAbiParameters(
+    [
+      { type: "bool" },
+      { type: "tuple", components: [
+        { name: "currency0",   type: "address" },
+        { name: "currency1",   type: "address" },
+        { name: "fee",         type: "uint24"  },
+        { name: "tickSpacing", type: "int24"   },
+        { name: "hooks",       type: "address" },
+      ]},
+      { type: "bool"    },
+      { type: "bytes"   },
+      { type: "uint256" },
+    ],
+    [false, { currency0, currency1, fee, tickSpacing, hooks }, zeroForOne, hookData, deadline],
+  );
+}
+
+/**
+ * GenericV4Adapter multi-hop (PANCAKE_V4, UNISWAP_V4).
+ * adapterData = abi.encode(bool true, PathKey[] pathKeys, uint256 deadline)
+ * pathKeys[i].intermediateCurrency = tokens[i+1] (output side of each hop).
+ */
+export function encodeV4MultiHopAdapterData(
+  tokens:       Hex[],
+  fees:         number[],
+  tickSpacings: number[],
+  hooksArr:     Hex[],
+  deadline:     bigint,
+): Hex {
+  const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as Hex;
+  const pathKeys = fees.map((fee, i) => ({
+    intermediateCurrency: tokens[i + 1]!,
+    fee,
+    tickSpacing: tickSpacings[i] || defaultTickSpacing(fee),
+    hooks:       hooksArr[i]     ?? ZERO_ADDR,
+    hookData:    "0x" as Hex,
+  }));
+  return encodeAbiParameters(
+    [
+      { type: "bool" },
+      { type: "tuple[]", components: [
+        { name: "intermediateCurrency", type: "address" },
+        { name: "fee",                  type: "uint24"  },
+        { name: "tickSpacing",          type: "int24"   },
+        { name: "hooks",                type: "address" },
+        { name: "hookData",             type: "bytes"   },
+      ]},
+      { type: "uint256" },
+    ],
+    [true, pathKeys, deadline],
+  );
+}
+
+/**
+ * OneMEMEAdapter (ONEMEME_BC).
+ * adapterData = abi.encode(address token, uint256 deadline)
+ * token = the meme token address (not WBNB).
+ */
+export function encodeOneMemeAdapterData(token: Hex, deadline: bigint): Hex {
+  return encodeAbiParameters(
+    [{ type: "address" }, { type: "uint256" }],
+    [token, deadline],
+  );
+}
+
+/**
+ * FourMEMEAdapter (FOURMEME).
+ * adapterData = abi.encode(address token)
+ */
+export function encodeFourMemeAdapterData(token: Hex): Hex {
+  return encodeAbiParameters(
+    [{ type: "address" }],
+    [token],
+  );
+}
+
+/**
+ * FlapSHAdapter (FLAPSH).
+ * adapterData is not used — the adapter derives everything from tokenIn/tokenOut.
+ */
+export function encodeFlapShAdapterData(): Hex {
   return "0x";
 }
 

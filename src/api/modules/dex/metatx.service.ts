@@ -5,9 +5,14 @@ import {
   AdapterName,
   MetaTxOrder,
   PermitData,
-  encodeV2Path,
-  encodeV3Path,
-  encodeBcAdapterData,
+  encodeV2AdapterData,
+  encodeV3SingleHopAdapterData,
+  encodeV3MultiHopAdapterData,
+  encodeV4SingleHopAdapterData,
+  encodeV4MultiHopAdapterData,
+  encodeOneMemeAdapterData,
+  encodeFourMemeAdapterData,
+  encodeFlapShAdapterData,
   buildSwapCalldata,
   buildV3PackedPath,
   quoteV2,
@@ -76,36 +81,42 @@ function parsePermitType(val: unknown): 0 | 1 | 2 {
 // ─── adapterData builder ──────────────────────────────────────────────────────
 
 /**
- * Builds the ABI-encoded adapterData bytes from the request body.
+ * Builds the ABI-encoded adapterData bytes matching what each on-chain adapter decodes.
  *
- * Body shape per adapter category:
- *
- *   Bonding-curve (ONEMEME_BC, FOURMEME, FLAPSH):
- *     {} — no extra fields required
- *
- *   V2 (PANCAKE_V2, UNISWAP_V2):
- *     { path: ["0xTokenA", "0xTokenB", ...] }
- *     Omitting path defaults to direct [tokenIn, tokenOut] single-hop.
- *
- *   V3 (PANCAKE_V3, UNISWAP_V3):
- *     { path: ["0xTokenA", "0xTokenB"], fees: [500] }
- *     fees[i] is the fee tier between path[i] and path[i+1] (in hundredths of a bip).
+ * Encoding per adapter (from OneMEMELaunchpad-Core adapter contracts):
+ *   ONEMEME_BC             abi.encode(address token, uint256 deadline)
+ *   FOURMEME               abi.encode(address token)
+ *   FLAPSH                 0x  (adapter derives everything from tokenIn/tokenOut)
+ *   PANCAKE_V2/UNISWAP_V2  abi.encode(address[] path, uint256 deadline)
+ *   PANCAKE_V3/UNISWAP_V3  single: abi.encode(false, abi.encode(uint24 fee, uint160 sqrtLimit))
+ *                          multi:  abi.encode(true, abi.encodePacked(tok0,fee0,tok1,...))
+ *   PANCAKE_V4/UNISWAP_V4  single: abi.encode(false, PoolKey, bool zeroForOne, bytes hookData, uint256 deadline)
+ *                          multi:  abi.encode(true, PathKey[], uint256 deadline)
  */
 function buildAdapterData(
   adapterName: AdapterName,
   tokenIn:     Hex,
   tokenOut:    Hex,
   body:        Record<string, unknown>,
+  deadline:    bigint,
 ): Hex {
-  const isBc  = adapterName === "ONEMEME_BC" || adapterName === "FOURMEME" || adapterName === "FLAPSH";
-  const isV2  = adapterName === "PANCAKE_V2" || adapterName === "UNISWAP_V2";
-  const isV3  = adapterName === "PANCAKE_V3" || adapterName === "UNISWAP_V3";
-
-  if (isBc) {
-    return encodeBcAdapterData();
+  // ── Bonding-curve adapters ────────────────────────────────────────────────
+  if (adapterName === "ONEMEME_BC") {
+    const token = tokenIn.toLowerCase() === WBNB_BSC ? tokenOut : tokenIn;
+    return encodeOneMemeAdapterData(token, deadline);
   }
 
-  if (isV2) {
+  if (adapterName === "FOURMEME") {
+    const token = tokenIn.toLowerCase() === WBNB_BSC ? tokenOut : tokenIn;
+    return encodeFourMemeAdapterData(token);
+  }
+
+  if (adapterName === "FLAPSH") {
+    return encodeFlapShAdapterData();
+  }
+
+  // ── V2 adapters ───────────────────────────────────────────────────────────
+  if (adapterName === "PANCAKE_V2" || adapterName === "UNISWAP_V2") {
     const rawPath = body["path"];
     let path: Hex[];
     if (Array.isArray(rawPath) && rawPath.length >= 2) {
@@ -116,16 +127,15 @@ function buildAdapterData(
     } else {
       path = [tokenIn, tokenOut];
     }
-    return encodeV2Path(path);
+    return encodeV2AdapterData(path, deadline);
   }
 
-  if (isV3) {
+  // ── V3 adapters ───────────────────────────────────────────────────────────
+  if (adapterName === "PANCAKE_V3" || adapterName === "UNISWAP_V3") {
     const rawPath = body["path"];
     const rawFees = body["fees"];
 
     let tokens: Hex[];
-    let fees:   number[];
-
     if (Array.isArray(rawPath) && rawPath.length >= 2) {
       rawPath.forEach((p, i) => {
         if (!isAddress(String(p))) throw new BadRequestException(`path[${i}] is not a valid address`);
@@ -135,30 +145,76 @@ function buildAdapterData(
       tokens = [tokenIn, tokenOut];
     }
 
-    if (Array.isArray(rawFees) && rawFees.length === tokens.length - 1) {
-      fees = rawFees.map((f, i) => {
-        const n = parseInt(String(f), 10);
-        if (isNaN(n) || n <= 0) throw new BadRequestException(`fees[${i}] must be a positive integer (e.g. 500 = 0.05%)`);
-        return n;
+    const hopCount = tokens.length - 1;
+    if (!Array.isArray(rawFees) || rawFees.length !== hopCount) {
+      throw new BadRequestException(
+        hopCount === 1
+          ? "V3 swaps require a fees array (e.g. [500] for 0.05%)"
+          : `V3 fees must have ${hopCount} element(s) for ${tokens.length} tokens`,
+      );
+    }
+    const fees = rawFees.map((f, i) => {
+      const n = parseInt(String(f), 10);
+      if (isNaN(n) || n <= 0) throw new BadRequestException(`fees[${i}] must be a positive integer`);
+      return n;
+    });
+
+    return hopCount === 1
+      ? encodeV3SingleHopAdapterData(fees[0]!)
+      : encodeV3MultiHopAdapterData(tokens, fees);
+  }
+
+  // ── V4 adapters ───────────────────────────────────────────────────────────
+  if (adapterName === "PANCAKE_V4" || adapterName === "UNISWAP_V4") {
+    const rawPath = body["path"];
+    const rawFees = body["fees"];
+    const rawTickSpacings = body["tickSpacing"];
+    const rawHooks        = body["hooks"];
+
+    let tokens: Hex[];
+    if (Array.isArray(rawPath) && rawPath.length >= 2) {
+      rawPath.forEach((p, i) => {
+        if (!isAddress(String(p))) throw new BadRequestException(`path[${i}] is not a valid address`);
       });
-    } else if (tokens.length === 2 && !rawFees) {
-      throw new BadRequestException("V3 swaps require a fees array (e.g. [500] for 0.05%)");
+      tokens = rawPath.map(p => normalizeAddress(String(p)) as Hex);
     } else {
-      throw new BadRequestException(`V3 fees must have ${tokens.length - 1} element(s) for ${tokens.length} tokens`);
+      tokens = [tokenIn, tokenOut];
     }
 
-    return encodeV3Path(tokens, fees);
+    const hopCount = tokens.length - 1;
+    if (!Array.isArray(rawFees) || rawFees.length !== hopCount) {
+      throw new BadRequestException(`V4 swaps require ${hopCount} fee tier(s) in fees array`);
+    }
+    const fees = rawFees.map((f, i) => {
+      const n = parseInt(String(f), 10);
+      if (isNaN(n) || n <= 0) throw new BadRequestException(`fees[${i}] must be a positive integer`);
+      return n;
+    });
+
+    const tickSpacings: number[] = Array.isArray(rawTickSpacings)
+      ? rawTickSpacings.map(s => parseInt(String(s), 10) || 0)
+      : [];
+    const hooksArr: Hex[] = Array.isArray(rawHooks)
+      ? rawHooks.map((h, i) => {
+          if (!isAddress(String(h))) throw new BadRequestException(`hooks[${i}] is not a valid address`);
+          return normalizeAddress(String(h)) as Hex;
+        })
+      : [];
+
+    const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as Hex;
+
+    if (hopCount === 1) {
+      const fee        = fees[0]!;
+      const tickSpacing = tickSpacings[0] || defaultTickSpacing(fee);
+      const hooks      = hooksArr[0] ?? ZERO_ADDR;
+      return encodeV4SingleHopAdapterData(tokenIn, tokenOut, fee, tickSpacing, hooks, "0x", deadline);
+    } else {
+      return encodeV4MultiHopAdapterData(tokens, fees, tickSpacings, hooksArr, deadline);
+    }
   }
 
-  // V4 adapters: adapterData format is DEX-specific and not yet standardised here.
-  // Pass raw adapterData hex if provided, otherwise fail gracefully.
-  const rawData = body["adapterData"];
-  if (typeof rawData === "string" && /^0x[0-9a-fA-F]*$/.test(rawData)) {
-    return rawData as Hex;
-  }
-  throw new BadRequestException(
-    `${adapterName} requires raw adapterData hex. V4 adapter encoding is not yet auto-built.`,
-  );
+  // Should never be reached — requireAdapter() validates adapter names
+  throw new BadRequestException(`Unknown adapter: ${adapterName}`);
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -381,8 +437,8 @@ export class MetaTxService {
 
     if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
 
-    const adapterId  = ADAPTER_IDS[adapter];
-    const adapterData = buildAdapterData(adapter, tokenIn, tokenOut, body);
+    const adapterId   = ADAPTER_IDS[adapter];
+    const adapterData = buildAdapterData(adapter, tokenIn, tokenOut, body, deadline);
 
     // 1% aggregator fee (informational — the contract deducts it)
     const feeEstimate = amountIn / 100n;
@@ -449,7 +505,8 @@ export class MetaTxService {
     if (relayerFee >= grossAmountIn) throw new BadRequestException("relayerFee must be less than grossAmountIn");
 
     const adapterId   = ADAPTER_IDS[adapter];
-    const adapterData = buildAdapterData(adapter, tokenIn, tokenOut, body);
+    // Use swapDeadline as the inner-swap deadline passed into adapter data
+    const adapterData = buildAdapterData(adapter, tokenIn, tokenOut, body, swapDeadline);
 
     let nonce: bigint;
     try {
