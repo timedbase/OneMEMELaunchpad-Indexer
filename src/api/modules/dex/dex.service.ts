@@ -1,61 +1,49 @@
 import { Injectable, BadRequestException, NotFoundException } from "@nestjs/common";
-import { dexFetch, dexCount } from "./dex-subgraph";
+import {
+  DexEndpoint,
+  DEX_PROTOCOL_ENDPOINTS,
+  dexFetch,
+  dexFetchFrom,
+  dexCount,
+  mainFetch,
+} from "./dex-subgraph";
 import { ADAPTER_IDS, ADAPTER_NAMES } from "./dex-rpc";
 import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir } from "../../helpers";
 
-// ─── Subgraph field shapes ────────────────────────────────────────────────────
-// Field names mirror the OneMEMEAggregator subgraph schema.
-// Adjust if your deployed schema uses different names.
+// ─── Aggregator subgraph types (FOURMEME / FLAPSH bonding-curve + Aggregator swaps) ──
 
-interface SubgraphDexToken {
-  id:                   string;
-  name:                 string | null;
-  symbol:               string | null;
-  decimals:             string;
-  // Platforms this token appears on (subset of: ONEMEME, FOURMEME, FLAPSH, DEX)
-  platforms:            string[];
-  // Live pricing from the aggregator subgraph
-  currentPriceBNB:      string | null;
-  currentPriceUSD:      string | null;
-  currentMarketCapBNB:  string | null;
-  currentMarketCapUSD:  string | null;
-  currentLiquidityBNB:  string | null;
-  // Aggregate counters
-  totalVolumeBNB:       string;
-  tradeCount:           string;
-  // Bonding-curve phase (1MEME / FourMEME / FlapSH tokens)
-  bondingPhase:         boolean;
-  bondingCurve:         string | null;
-  // Migration / DEX info
-  pairAddress:          string | null;
-  createdAtTimestamp:   string;
+interface AggToken {
+  id:                  string;
+  name:                string | null;
+  symbol:              string | null;
+  decimals:            string;
+  platforms:           string[];
+  currentPriceBNB:     string | null;
+  currentPriceUSD:     string | null;
+  currentMarketCapBNB: string | null;
+  currentMarketCapUSD: string | null;
+  currentLiquidityBNB: string | null;
+  totalVolumeBNB:      string;
+  tradeCount:          string;
+  bondingPhase:        boolean;
+  bondingCurve:        string | null;
+  pairAddress:         string | null;
+  createdAtTimestamp:  string;
 }
 
-interface SubgraphPool {
-  id:               string;
-  dex:              string;   // PANCAKE_V2, UNISWAP_V3, etc.
-  poolType:         string;   // V2, V3, V4
-  token0:           { id: string; symbol: string | null };
-  token1:           { id: string; symbol: string | null };
-  feeTier:          string | null;
-  liquidity:        string;
-  volumeBNB:        string;
-  createdAtTimestamp: string;
-}
-
-interface SubgraphBondingTrade {
+interface AggBondingTrade {
   id:          string;
   token:       { id: string; name: string | null; symbol: string | null };
   trader:      string;
   type:        "BUY" | "SELL";
   bnbAmount:   string;
   tokenAmount: string;
-  platform:    string;   // ONEMEME | FOURMEME | FLAPSH
+  platform:    string;
   timestamp:   string;
   txHash:      string;
 }
 
-interface SubgraphSwap {
+interface AggSwap {
   id:            string;
   user:          string;
   adapterId:     string;
@@ -69,24 +57,62 @@ interface SubgraphSwap {
   txHash:        string;
 }
 
-interface SubgraphGlobalState {
+interface AggGlobalState { id: string; bnbPriceUSD: string; lastUpdated: string }
+interface AggProtocol    { id: string; totalSwaps: string; totalVolumeBNB: string; totalFeesBNB: string; uniqueUsers: string }
+
+// ─── Main launchpad subgraph types (1MEME tokens + trades via SUBGRAPH_URL) ──
+
+interface MainToken {
+  id:           string;
+  name:         string | null;
+  symbol:       string | null;
+  decimals:     string;
+  raisedBNB:    string;
+  buysCount:    string;
+  sellsCount:   string;
+  migration:    { pair: string } | null;
+  createdAtBlock: string;
+}
+
+interface MainTrade {
   id:          string;
-  bnbPriceUSD: string;
-  lastUpdated: string;
+  token:       { id: string; name: string | null; symbol: string | null };
+  trader:      string;
+  type:        "BUY" | "SELL";
+  bnbAmount:   string;
+  tokenAmount: string;
+  timestamp:   string;
+  txHash:      string;
 }
 
-interface SubgraphProtocol {
-  id:             string;
-  totalSwaps:     string;
-  totalVolumeBNB: string;
-  totalFeesBNB:   string;
-  uniqueUsers:    string;
+// ─── DEX pool subgraph types (PancakeSwap / Uniswap V2 / V3 / V4) ────────────
+
+interface V2Pair {
+  id:                 string;
+  token0:             { id: string; symbol: string | null };
+  token1:             { id: string; symbol: string | null };
+  reserveUSD:         string;
+  volumeUSD:          string;
+  txCount:            string;
+  createdAtTimestamp: string;
 }
 
-// ─── Queries ──────────────────────────────────────────────────────────────────
+interface V3Pool {
+  id:                  string;
+  token0:              { id: string; symbol: string | null };
+  token1:              { id: string; symbol: string | null };
+  feeTier:             string;
+  liquidity:           string;
+  totalValueLockedUSD: string;
+  volumeUSD:           string;
+  txCount:             string;
+  createdAtTimestamp:  string;
+}
 
-const DEX_TOKENS_QUERY = /* GraphQL */ `
-  query DexTokens($first: Int!, $skip: Int!, $orderBy: Token_orderBy!, $orderDirection: OrderDirection!, $where: Token_filter) {
+// ─── Aggregator queries ───────────────────────────────────────────────────────
+
+const AGG_TOKENS_QUERY = /* GraphQL */ `
+  query AggTokens($first: Int!, $skip: Int!, $orderBy: Token_orderBy!, $orderDirection: OrderDirection!, $where: Token_filter) {
     tokens(first: $first, skip: $skip, orderBy: $orderBy, orderDirection: $orderDirection, where: $where) {
       id name symbol decimals platforms
       currentPriceBNB currentPriceUSD currentMarketCapBNB currentMarketCapUSD currentLiquidityBNB
@@ -95,8 +121,8 @@ const DEX_TOKENS_QUERY = /* GraphQL */ `
   }
 `;
 
-const DEX_TOKEN_QUERY = /* GraphQL */ `
-  query DexToken($id: ID!) {
+const AGG_TOKEN_QUERY = /* GraphQL */ `
+  query AggToken($id: ID!) {
     token(id: $id) {
       id name symbol decimals platforms
       currentPriceBNB currentPriceUSD currentMarketCapBNB currentMarketCapUSD currentLiquidityBNB
@@ -105,18 +131,8 @@ const DEX_TOKEN_QUERY = /* GraphQL */ `
   }
 `;
 
-const DEX_POOLS_QUERY = /* GraphQL */ `
-  query DexPools($first: Int!, $skip: Int!, $where: Pool_filter) {
-    pools(first: $first, skip: $skip, where: $where, orderBy: volumeBNB, orderDirection: desc) {
-      id dex poolType feeTier liquidity volumeBNB createdAtTimestamp
-      token0 { id symbol }
-      token1 { id symbol }
-    }
-  }
-`;
-
-const DEX_BONDING_TRADES_QUERY = /* GraphQL */ `
-  query DexBondingTrades($first: Int!, $skip: Int!, $where: BondingTrade_filter) {
+const AGG_BONDING_TRADES_QUERY = /* GraphQL */ `
+  query AggBondingTrades($first: Int!, $skip: Int!, $where: BondingTrade_filter) {
     bondingTrades(first: $first, skip: $skip, where: $where, orderBy: timestamp, orderDirection: desc) {
       id trader type bnbAmount tokenAmount platform timestamp txHash
       token { id name symbol }
@@ -124,8 +140,8 @@ const DEX_BONDING_TRADES_QUERY = /* GraphQL */ `
   }
 `;
 
-const DEX_SWAPS_QUERY = /* GraphQL */ `
-  query DexSwaps($first: Int!, $skip: Int!, $where: Swap_filter) {
+const AGG_SWAPS_QUERY = /* GraphQL */ `
+  query AggSwaps($first: Int!, $skip: Int!, $where: Swap_filter) {
     swaps(first: $first, skip: $skip, where: $where, orderBy: timestamp, orderDirection: desc) {
       id user adapterId adapterName grossAmountIn feeCharged amountOut timestamp txHash
       tokenIn  { id symbol }
@@ -134,63 +150,185 @@ const DEX_SWAPS_QUERY = /* GraphQL */ `
   }
 `;
 
-const DEX_GLOBAL_QUERY = /* GraphQL */ `
-  query DexGlobal {
+const AGG_GLOBAL_QUERY = /* GraphQL */ `
+  query AggGlobal {
     globalState(id: "global") { id bnbPriceUSD lastUpdated }
-    protocol(id: "aggregator")  { id totalSwaps totalVolumeBNB totalFeesBNB uniqueUsers }
+    protocol(id: "aggregator") { id totalSwaps totalVolumeBNB totalFeesBNB uniqueUsers }
   }
 `;
 
-const DEX_TOKENS_COUNT_QUERY = /* GraphQL */ `
-  query DexTokensCount($first: Int!, $skip: Int!, $where: Token_filter) {
+const AGG_TOKENS_COUNT_QUERY = /* GraphQL */ `
+  query AggTokensCount($first: Int!, $skip: Int!, $where: Token_filter) {
     tokens(first: $first, skip: $skip, where: $where) { id }
   }
 `;
 
-const DEX_SWAPS_COUNT_QUERY = /* GraphQL */ `
-  query DexSwapsCount($first: Int!, $skip: Int!, $where: Swap_filter) {
+const AGG_SWAPS_COUNT_QUERY = /* GraphQL */ `
+  query AggSwapsCount($first: Int!, $skip: Int!, $where: Swap_filter) {
     swaps(first: $first, skip: $skip, where: $where) { id }
   }
 `;
 
+// ─── Main launchpad queries ───────────────────────────────────────────────────
+
+const MAIN_TOKENS_QUERY = /* GraphQL */ `
+  query MainTokens($first: Int!, $skip: Int!, $orderBy: Token_orderBy!, $orderDirection: OrderDirection!, $where: Token_filter) {
+    tokens(first: $first, skip: $skip, orderBy: $orderBy, orderDirection: $orderDirection, where: $where) {
+      id name symbol decimals raisedBNB buysCount sellsCount createdAtBlock
+      migration { pair }
+    }
+  }
+`;
+
+const MAIN_TOKEN_QUERY = /* GraphQL */ `
+  query MainToken($id: ID!) {
+    token(id: $id) {
+      id name symbol decimals raisedBNB buysCount sellsCount createdAtBlock
+      migration { pair }
+    }
+  }
+`;
+
+const MAIN_TRADES_QUERY = /* GraphQL */ `
+  query MainTrades($first: Int!, $skip: Int!, $where: Trade_filter) {
+    trades(first: $first, skip: $skip, where: $where, orderBy: timestamp, orderDirection: desc) {
+      id trader type bnbAmount tokenAmount timestamp txHash
+      token { id name symbol }
+    }
+  }
+`;
+
+const MAIN_TOKENS_COUNT_QUERY = /* GraphQL */ `
+  query MainTokensCount($first: Int!, $skip: Int!, $where: Token_filter) {
+    tokens(first: $first, skip: $skip, where: $where) { id }
+  }
+`;
+
+// ─── V2 pool queries (PancakeSwap V2 / Uniswap V2) ───────────────────────────
+
+const V2_POOLS_QUERY = /* GraphQL */ `
+  query V2Pools($addr: String!, $first: Int!) {
+    t0: pairs(first: $first, where: { token0: $addr }, orderBy: volumeUSD, orderDirection: desc) {
+      id token0 { id symbol } token1 { id symbol }
+      reserveUSD volumeUSD txCount createdAtTimestamp
+    }
+    t1: pairs(first: $first, where: { token1: $addr }, orderBy: volumeUSD, orderDirection: desc) {
+      id token0 { id symbol } token1 { id symbol }
+      reserveUSD volumeUSD txCount createdAtTimestamp
+    }
+  }
+`;
+
+// ─── V3/V4 pool queries (PancakeSwap V3/V4 / Uniswap V3/V4) ─────────────────
+
+const V3_POOLS_QUERY = /* GraphQL */ `
+  query V3Pools($addr: String!, $first: Int!) {
+    t0: pools(first: $first, where: { token0: $addr }, orderBy: volumeUSD, orderDirection: desc) {
+      id token0 { id symbol } token1 { id symbol }
+      feeTier liquidity totalValueLockedUSD volumeUSD txCount createdAtTimestamp
+    }
+    t1: pools(first: $first, where: { token1: $addr }, orderBy: volumeUSD, orderDirection: desc) {
+      id token0 { id symbol } token1 { id symbol }
+      feeTier liquidity totalValueLockedUSD volumeUSD txCount createdAtTimestamp
+    }
+  }
+`;
+
+// ─── Endpoint → query/schema mapping ─────────────────────────────────────────
+
+function poolQueryForEndpoint(endpoint: DexEndpoint): string {
+  return endpoint === "PANCAKE_V2" || endpoint === "UNISWAP_V2"
+    ? V2_POOLS_QUERY
+    : V3_POOLS_QUERY;
+}
+
+function poolTypeFor(endpoint: DexEndpoint): string {
+  if (endpoint.endsWith("_V2")) return "V2";
+  if (endpoint.endsWith("_V3")) return "V3";
+  return "V4";
+}
+
+function dexNameFor(endpoint: DexEndpoint): string {
+  return endpoint; // "PANCAKE_V2", "UNISWAP_V3", etc.
+}
+
 // ─── Normalizers ──────────────────────────────────────────────────────────────
 
-function normalizeToken(t: SubgraphDexToken) {
+function normalizeAggToken(t: AggToken) {
   return {
     address:             t.id,
-    name:                t.name    ?? null,
-    symbol:              t.symbol  ?? null,
+    name:                t.name   ?? null,
+    symbol:              t.symbol ?? null,
     decimals:            parseInt(t.decimals),
     platforms:           t.platforms,
     bondingPhase:        t.bondingPhase,
     bondingCurve:        t.bondingCurve ?? null,
     pairAddress:         t.pairAddress  ?? null,
-    currentPriceBNB:     t.currentPriceBNB    ?? null,
-    currentPriceUSD:     t.currentPriceUSD    ?? null,
+    currentPriceBNB:     t.currentPriceBNB     ?? null,
+    currentPriceUSD:     t.currentPriceUSD     ?? null,
     currentMarketCapBNB: t.currentMarketCapBNB ?? null,
     currentMarketCapUSD: t.currentMarketCapUSD ?? null,
     currentLiquidityBNB: t.currentLiquidityBNB ?? null,
     totalVolumeBNB:      t.totalVolumeBNB,
     tradeCount:          parseInt(t.tradeCount),
     createdAtTimestamp:  parseInt(t.createdAtTimestamp),
+    source:              "aggregator" as const,
   };
 }
 
-function normalizePool(p: SubgraphPool) {
+function normalizeMainToken(t: MainToken) {
+  return {
+    address:             t.id,
+    name:                t.name   ?? null,
+    symbol:              t.symbol ?? null,
+    decimals:            parseInt(t.decimals),
+    platforms:           ["ONEMEME"],
+    bondingPhase:        !t.migration,
+    bondingCurve:        null as string | null,
+    pairAddress:         t.migration?.pair ?? null,
+    currentPriceBNB:     null as string | null,
+    currentPriceUSD:     null as string | null,
+    currentMarketCapBNB: null as string | null,
+    currentMarketCapUSD: null as string | null,
+    currentLiquidityBNB: null as string | null,
+    totalVolumeBNB:      t.raisedBNB,
+    tradeCount:          parseInt(t.buysCount) + parseInt(t.sellsCount),
+    createdAtTimestamp:  parseInt(t.createdAtBlock),
+    source:              "main" as const,
+  };
+}
+
+function normalizeV2Pool(p: V2Pair, endpoint: DexEndpoint) {
   return {
     address:            p.id,
-    dex:                p.dex,
-    poolType:           p.poolType,
-    feeTier:            p.feeTier ? parseInt(p.feeTier) : null,
+    dex:                dexNameFor(endpoint),
+    poolType:           "V2",
+    feeTier:            null as number | null,
     token0:             { address: p.token0.id, symbol: p.token0.symbol ?? null },
     token1:             { address: p.token1.id, symbol: p.token1.symbol ?? null },
-    liquidity:          p.liquidity,
-    volumeBNB:          p.volumeBNB,
+    liquidity:          p.reserveUSD,
+    volumeUSD:          p.volumeUSD,
+    txCount:            parseInt(p.txCount),
     createdAtTimestamp: parseInt(p.createdAtTimestamp),
   };
 }
 
-function normalizeBondingTrade(t: SubgraphBondingTrade) {
+function normalizeV3Pool(p: V3Pool, endpoint: DexEndpoint) {
+  return {
+    address:            p.id,
+    dex:                dexNameFor(endpoint),
+    poolType:           poolTypeFor(endpoint),
+    feeTier:            p.feeTier ? parseInt(p.feeTier) : null,
+    token0:             { address: p.token0.id, symbol: p.token0.symbol ?? null },
+    token1:             { address: p.token1.id, symbol: p.token1.symbol ?? null },
+    liquidity:          p.liquidity,
+    volumeUSD:          p.volumeUSD,
+    txCount:            parseInt(p.txCount),
+    createdAtTimestamp: parseInt(p.createdAtTimestamp),
+  };
+}
+
+function normalizeBondingTrade(t: AggBondingTrade) {
   return {
     id:          t.id,
     token:       t.token.id,
@@ -206,7 +344,23 @@ function normalizeBondingTrade(t: SubgraphBondingTrade) {
   };
 }
 
-function normalizeSwap(s: SubgraphSwap) {
+function normalizeMainTrade(t: MainTrade) {
+  return {
+    id:          t.id,
+    token:       t.token.id,
+    tokenName:   t.token.name   ?? null,
+    tokenSymbol: t.token.symbol ?? null,
+    trader:      t.trader,
+    tradeType:   t.type === "BUY" ? "buy" : "sell",
+    bnbAmount:   t.bnbAmount,
+    tokenAmount: t.tokenAmount,
+    platform:    "ONEMEME",
+    timestamp:   parseInt(t.timestamp),
+    txHash:      t.txHash,
+  };
+}
+
+function normalizeSwap(s: AggSwap) {
   return {
     id:            s.id,
     user:          s.user,
@@ -222,7 +376,7 @@ function normalizeSwap(s: SubgraphSwap) {
   };
 }
 
-// ─── Valid sort fields ────────────────────────────────────────────────────────
+// ─── Sort fields ──────────────────────────────────────────────────────────────
 
 const TOKEN_ORDER_MAP: Record<string, string> = {
   createdAtTimestamp:  "createdAtTimestamp",
@@ -232,90 +386,169 @@ const TOKEN_ORDER_MAP: Record<string, string> = {
   currentLiquidityBNB: "currentLiquidityBNB",
 };
 
+const MAIN_ORDER_MAP: Record<string, string> = {
+  createdAtTimestamp:  "createdAtBlock",
+  totalVolumeBNB:      "raisedBNB",
+  tradeCount:          "buysCount",
+  currentMarketCapBNB: "raisedBNB",
+  currentLiquidityBNB: "raisedBNB",
+};
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class DexService {
 
   // ── GET /dex/tokens ──────────────────────────────────────────────────────────
+  //
+  // Routing:
+  //   platform=ONEMEME            → MAIN subgraph (launchpad token schema)
+  //   platform=FOURMEME|FLAPSH    → AGGREGATOR subgraph
+  //   no filter                   → both subgraphs, merged by createdAtTimestamp desc
 
   async listTokens(query: Record<string, string | undefined>) {
     const { page, limit, offset } = parsePagination(query);
-    const platform = query["platform"];
+    const platform = query["platform"]?.toUpperCase();
     const bonding  = query["bondingPhase"];
     const search   = query["search"];
 
     const ALLOWED_ORDER = Object.keys(TOKEN_ORDER_MAP) as (keyof typeof TOKEN_ORDER_MAP)[];
-    const orderBy  = TOKEN_ORDER_MAP[parseOrderBy(query, ALLOWED_ORDER, "createdAtTimestamp")] ?? "createdAtTimestamp";
-    const orderDir = parseOrderDir(query).toLowerCase() as "asc" | "desc";
+    const orderKey  = parseOrderBy(query, ALLOWED_ORDER, "createdAtTimestamp");
+    const orderDir  = parseOrderDir(query).toLowerCase() as "asc" | "desc";
 
-    const where: Record<string, unknown> = {};
-    if (platform)           where["platforms_contains"]      = [platform];
-    if (bonding === "true") where["bondingPhase"]            = true;
-    if (bonding === "false") where["bondingPhase"]           = false;
-    if (search)             where["symbol_contains_nocase"]  = search;
+    const useMain = !platform || platform === "ONEMEME";
+    const useAgg  = !platform || platform === "FOURMEME" || platform === "FLAPSH";
 
-    const whereArg = Object.keys(where).length ? where : undefined;
+    const mainWhere:  Record<string, unknown> = {};
+    if (search)             mainWhere["symbol_contains_nocase"] = search;
+    if (bonding === "true") mainWhere["migration"] = null;
+    // MAIN subgraph has no bondingPhase=false filter (need migration != null)
+    // handled by post-filter below
 
-    const [{ tokens }, total] = await Promise.all([
-      dexFetch<{ tokens: SubgraphDexToken[] }>(DEX_TOKENS_QUERY, {
-        first: limit, skip: offset, orderBy, orderDirection: orderDir,
-        where: whereArg,
-      }),
-      dexCount("tokens", DEX_TOKENS_COUNT_QUERY, { where: whereArg }),
+    const aggWhere: Record<string, unknown> = {};
+    if (platform)           aggWhere["platforms_contains"]     = [platform];
+    if (bonding === "true") aggWhere["bondingPhase"]            = true;
+    if (bonding === "false") aggWhere["bondingPhase"]           = false;
+    if (search)             aggWhere["symbol_contains_nocase"]  = search;
+
+    const [mainResult, aggResult] = await Promise.all([
+      useMain ? mainFetch<{ tokens: MainToken[] }>(MAIN_TOKENS_QUERY, {
+        first: 200, skip: 0,
+        orderBy: MAIN_ORDER_MAP[orderKey] ?? "createdAtBlock",
+        orderDirection: orderDir,
+        where: Object.keys(mainWhere).length ? mainWhere : undefined,
+      }).catch(() => ({ tokens: [] as MainToken[] })) : Promise.resolve({ tokens: [] as MainToken[] }),
+
+      useAgg ? dexFetch<{ tokens: AggToken[] }>(AGG_TOKENS_QUERY, {
+        first: 200, skip: 0,
+        orderBy: TOKEN_ORDER_MAP[orderKey] ?? "createdAtTimestamp",
+        orderDirection: orderDir,
+        where: Object.keys(aggWhere).length ? aggWhere : undefined,
+      }).catch(() => ({ tokens: [] as AggToken[] })) : Promise.resolve({ tokens: [] as AggToken[] }),
     ]);
 
-    return paginated(tokens.map(normalizeToken), total, page, limit);
+    let mainTokens = mainResult.tokens.map(normalizeMainToken);
+    if (bonding === "false") mainTokens = mainTokens.filter(t => !t.bondingPhase);
+
+    const aggTokens = aggResult.tokens.map(normalizeAggToken);
+
+    // Deduplicate by address — aggregator wins if present in both
+    const seen = new Set(aggTokens.map(t => t.address));
+    const merged = [
+      ...aggTokens,
+      ...mainTokens.filter(t => !seen.has(t.address)),
+    ].sort((a, b) => b.createdAtTimestamp - a.createdAtTimestamp);
+
+    const total = merged.length;
+    const rows  = merged.slice(offset, offset + limit);
+    return paginated(rows, total, page, limit);
   }
 
   // ── GET /dex/tokens/:address ─────────────────────────────────────────────────
+  //
+  // Tries AGGREGATOR first (covers FOURMEME/FLAPSH). Falls back to MAIN (1MEME).
 
   async getToken(address: string) {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
     const addr = normalizeAddress(address);
 
-    const { token } = await dexFetch<{ token: SubgraphDexToken | null }>(DEX_TOKEN_QUERY, { id: addr });
-    if (!token) throw new NotFoundException(`Token ${address} not found in aggregator subgraph`);
+    const [aggResult, mainResult] = await Promise.allSettled([
+      dexFetch<{ token: AggToken | null }>(AGG_TOKEN_QUERY, { id: addr }),
+      mainFetch<{ token: MainToken | null }>(MAIN_TOKEN_QUERY, { id: addr }),
+    ]);
 
-    return { data: normalizeToken(token) };
+    const aggToken  = aggResult.status  === "fulfilled" ? aggResult.value.token   : null;
+    const mainToken = mainResult.status === "fulfilled" ? mainResult.value.token  : null;
+
+    if (aggToken)  return { data: normalizeAggToken(aggToken) };
+    if (mainToken) return { data: normalizeMainToken(mainToken) };
+
+    throw new NotFoundException(`Token ${address} not found`);
   }
 
   // ── GET /dex/tokens/:address/pools ───────────────────────────────────────────
+  //
+  // Routes to the appropriate DEX subgraph(s) based on ?dex= filter.
+  // When no filter is set, queries all 6 DEX subgraphs in parallel.
 
   async getTokenPools(address: string, query: Record<string, string | undefined>) {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
-    const addr = normalizeAddress(address);
+    const addr = normalizeAddress(address).toLowerCase();
     const { page, limit, offset } = parsePagination(query);
-    const dexFilter = query["dex"];
+    const dexFilter = query["dex"]?.toUpperCase();
 
-    const where: Record<string, unknown> = {};
-    if (dexFilter) where["dex"] = dexFilter.toUpperCase();
+    if (dexFilter && !DEX_PROTOCOL_ENDPOINTS.includes(dexFilter as DexEndpoint)) {
+      throw new BadRequestException(
+        `dex must be one of: ${DEX_PROTOCOL_ENDPOINTS.join(", ")}`,
+      );
+    }
 
-    // Fetch pools where this token is token0 or token1 then merge
-    const [pools0, pools1] = await Promise.all([
-      dexFetch<{ pools: SubgraphPool[] }>(DEX_POOLS_QUERY, {
-        first: 100, skip: 0, where: { ...where, token0: addr },
+    const endpoints: DexEndpoint[] = dexFilter
+      ? [dexFilter as DexEndpoint]
+      : DEX_PROTOCOL_ENDPOINTS;
+
+    type NormPool = ReturnType<typeof normalizeV2Pool>;
+    const results = await Promise.allSettled(
+      endpoints.map(async (ep): Promise<NormPool[]> => {
+        const isV2 = ep === "PANCAKE_V2" || ep === "UNISWAP_V2";
+        const gql  = poolQueryForEndpoint(ep);
+
+        if (isV2) {
+          const data = await dexFetchFrom<{ t0: V2Pair[]; t1: V2Pair[] }>(ep, gql, {
+            addr, first: 50,
+          });
+          return [...(data.t0 ?? []), ...(data.t1 ?? [])].map(p => normalizeV2Pool(p, ep));
+        } else {
+          const data = await dexFetchFrom<{ t0: V3Pool[]; t1: V3Pool[] }>(ep, gql, {
+            addr, first: 50,
+          });
+          return [...(data.t0 ?? []), ...(data.t1 ?? [])].map(p => normalizeV3Pool(p, ep));
+        }
       }),
-      dexFetch<{ pools: SubgraphPool[] }>(DEX_POOLS_QUERY, {
-        first: 100, skip: 0, where: { ...where, token1: addr },
-      }),
-    ]);
+    );
 
-    const allPools = [...pools0.pools, ...pools1.pools]
-      .sort((a, b) => parseFloat(b.volumeBNB) - parseFloat(a.volumeBNB));
+    const allPools = results
+      .flatMap(r => r.status === "fulfilled" ? r.value : [])
+      .sort((a, b) => parseFloat(b.volumeUSD) - parseFloat(a.volumeUSD));
 
     const total = allPools.length;
-    const rows  = allPools.slice(offset, offset + limit).map(normalizePool);
+    const rows  = allPools.slice(offset, offset + limit);
     return paginated(rows, total, page, limit);
   }
 
   // ── GET /dex/tokens/:address/trades ──────────────────────────────────────────
+  //
+  // Bonding trades:
+  //   ONEMEME tokens → MAIN subgraph (trades entity)
+  //   FOURMEME/FLAPSH tokens → AGGREGATOR subgraph (bondingTrades entity)
+  //   No source filter → queries both
+  // DEX swaps → AGGREGATOR (Aggregator Swapped events)
 
   async getTokenTrades(address: string, query: Record<string, string | undefined>) {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
     const addr = normalizeAddress(address);
     const { page, limit, offset } = parsePagination(query);
-    const source = query["source"]; // "bonding" | "dex" | undefined (all)
+    const source = query["source"];
 
     if (source && source !== "bonding" && source !== "dex") {
       throw new BadRequestException('source must be "bonding" or "dex"');
@@ -324,31 +557,51 @@ export class DexService {
     const fetchBonding = !source || source === "bonding";
     const fetchDex     = !source || source === "dex";
 
-    const [bondingData, swapData] = await Promise.all([
+    const [mainTradesResult, aggBondingResult, aggSwapsResult] = await Promise.all([
       fetchBonding
-        ? dexFetch<{ bondingTrades: SubgraphBondingTrade[] }>(DEX_BONDING_TRADES_QUERY, {
+        ? mainFetch<{ trades: MainTrade[] }>(MAIN_TRADES_QUERY, {
             first: 200, skip: 0, where: { token: addr },
-          })
-        : Promise.resolve({ bondingTrades: [] as SubgraphBondingTrade[] }),
+          }).catch(() => ({ trades: [] as MainTrade[] }))
+        : Promise.resolve({ trades: [] as MainTrade[] }),
+
+      fetchBonding
+        ? dexFetch<{ bondingTrades: AggBondingTrade[] }>(AGG_BONDING_TRADES_QUERY, {
+            first: 200, skip: 0, where: { token: addr },
+          }).catch(() => ({ bondingTrades: [] as AggBondingTrade[] }))
+        : Promise.resolve({ bondingTrades: [] as AggBondingTrade[] }),
+
       fetchDex
-        ? dexFetch<{ swaps: SubgraphSwap[] }>(DEX_SWAPS_QUERY, {
+        ? dexFetch<{ swaps: AggSwap[] }>(AGG_SWAPS_QUERY, {
             first: 200, skip: 0,
             where: { tokenIn_in: [addr], tokenOut_in: [addr] },
-          })
-        : Promise.resolve({ swaps: [] as SubgraphSwap[] }),
+          }).catch(() => ({ swaps: [] as AggSwap[] }))
+        : Promise.resolve({ swaps: [] as AggSwap[] }),
     ]);
 
-    const bonding = bondingData.bondingTrades.map(t => ({ ...normalizeBondingTrade(t), source: "bonding" as const }));
-    const swaps   = swapData.swaps.map(s => ({ ...normalizeSwap(s), source: "dex" as const }));
+    const mainTrades = mainTradesResult.trades.map(t => ({
+      ...normalizeMainTrade(t), source: "bonding" as const,
+    }));
+    const aggBonding = aggBondingResult.bondingTrades.map(t => ({
+      ...normalizeBondingTrade(t), source: "bonding" as const,
+    }));
+    const aggSwaps   = aggSwapsResult.swaps.map(s => ({
+      ...normalizeSwap(s), source: "dex" as const,
+    }));
 
-    const merged = [...bonding, ...swaps].sort((a, b) => b.timestamp - a.timestamp);
-    const total  = merged.length;
-    const rows   = merged.slice(offset, offset + limit);
+    // Merge bonding trades — deduplicate by txHash (aggregator may re-index 1MEME too)
+    const seenTx = new Set(aggBonding.map(t => t.txHash));
+    const allBonding = [...aggBonding, ...mainTrades.filter(t => !seenTx.has(t.txHash))];
 
+    const merged = [...allBonding, ...aggSwaps]
+      .sort((a, b) => b.timestamp - a.timestamp);
+
+    const total = merged.length;
+    const rows  = merged.slice(offset, offset + limit);
     return paginated(rows, total, page, limit);
   }
 
   // ── GET /dex/swaps ───────────────────────────────────────────────────────────
+  // OneMEMEAggregator swap events — always from AGGREGATOR subgraph.
 
   async listSwaps(query: Record<string, string | undefined>) {
     const { page, limit, offset } = parsePagination(query);
@@ -370,32 +623,33 @@ export class DexService {
     }
 
     const where: Record<string, unknown> = {};
-    if (user)     where["user"]          = normalizeAddress(user);
-    if (tokenIn)  where["tokenIn"]       = normalizeAddress(tokenIn);
-    if (tokenOut) where["tokenOut"]      = normalizeAddress(tokenOut);
-    if (adapter)  where["adapterName"]   = adapter.toUpperCase();
+    if (user)          where["user"]          = normalizeAddress(user);
+    if (tokenIn)       where["tokenIn"]       = normalizeAddress(tokenIn);
+    if (tokenOut)      where["tokenOut"]      = normalizeAddress(tokenOut);
+    if (adapter)       where["adapterName"]   = adapter.toUpperCase();
     if (from !== null) where["timestamp_gte"] = from.toString();
     if (to   !== null) where["timestamp_lte"] = to.toString();
 
     const whereArg = Object.keys(where).length ? where : undefined;
 
     const [{ swaps }, total] = await Promise.all([
-      dexFetch<{ swaps: SubgraphSwap[] }>(DEX_SWAPS_QUERY, {
+      dexFetch<{ swaps: AggSwap[] }>(AGG_SWAPS_QUERY, {
         first: limit, skip: offset, where: whereArg,
       }),
-      dexCount("swaps", DEX_SWAPS_COUNT_QUERY, { where: whereArg }),
+      dexCount("AGGREGATOR", "swaps", AGG_SWAPS_COUNT_QUERY, { where: whereArg }),
     ]);
 
     return paginated(swaps.map(normalizeSwap), total, page, limit);
   }
 
   // ── GET /dex/stats ───────────────────────────────────────────────────────────
+  // Always from AGGREGATOR subgraph.
 
   async stats() {
     const { globalState, protocol } = await dexFetch<{
-      globalState: SubgraphGlobalState | null;
-      protocol:    SubgraphProtocol    | null;
-    }>(DEX_GLOBAL_QUERY);
+      globalState: AggGlobalState | null;
+      protocol:    AggProtocol    | null;
+    }>(AGG_GLOBAL_QUERY);
 
     return {
       data: {
@@ -415,7 +669,7 @@ export class DexService {
     const entries = ADAPTER_NAMES.map(name => ({
       name,
       id:       ADAPTER_IDS[name],
-      category: name.endsWith("_BC") || name === "FOURMEME" || name === "FLAPSH"
+      category: name === "ONEMEME_BC" || name === "FOURMEME" || name === "FLAPSH"
         ? "bonding-curve"
         : name.includes("V2") ? "amm-v2"
         : name.includes("V3") ? "amm-v3"
