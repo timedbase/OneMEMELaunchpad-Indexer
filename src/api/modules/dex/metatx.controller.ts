@@ -24,7 +24,7 @@ export class MetaTxController {
    * Live on-chain quote — simulates expected output before committing to a swap.
    * Use this to compute amountOut and minOut before calling POST /dex/swap or /dex/metatx/digest.
    *
-   * Supported adapters: PANCAKE_V2, UNISWAP_V2, PANCAKE_V3, UNISWAP_V3, ONEMEME_BC
+   * Supported adapters: all — PANCAKE_V2/V3/V4, UNISWAP_V2/V3/V4, ONEMEME_BC, FOURMEME, FLAPSH
    *
    * Query params:
    *   adapter   — adapter name (required)

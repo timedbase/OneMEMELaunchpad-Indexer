@@ -10,8 +10,11 @@ import { DexService } from "./dex.service";
 /**
  * All read endpoints under /dex.
  *
- * Powered entirely by the OneMEMEAggregator subgraph (AGGREGATOR_SUBGRAPH_URL).
- * No data from the main launchpad subgraph is mixed in here.
+ * Data sources:
+ *   SUBGRAPH_URL             — 1MEME launchpad tokens and trades
+ *   AGGREGATOR_SUBGRAPH_URL  — FourMEME / Flap.SH bonding-curve data + Aggregator swaps
+ *   The Graph gateway        — PancakeSwap V3/V4 and Uniswap V2/V3/V4 pool/token data
+ *   NodeReal (hardcoded)     — PancakeSwap V2 pool/token data
  *
  * Base path: /api/v1/:chain/dex
  */
@@ -42,7 +45,7 @@ export class DexController {
    * Paginated list of all tokens tracked by the aggregator subgraph.
    *
    * Query params:
-   *   platform      — filter by platform: ONEMEME | FOURMEME | FLAPSH | DEX
+   *   platform      — 1MEME | FOURMEME | FLAPSH | PANCAKESWAP-V2/V3/V4 | UNISWAP-V2/V3/V4
    *   bondingPhase  — filter bonding-curve tokens: true | false
    *   search        — case-insensitive symbol substring match
    *   orderBy       — createdAtTimestamp | totalVolumeBNB | tradeCount | currentMarketCapBNB | currentLiquidityBNB
@@ -119,10 +122,12 @@ export class DexController {
       return await fn();
     } catch (err: unknown) {
       const msg = String(err);
-      if (msg.includes("AGGREGATOR_SUBGRAPH_URL")) {
-        throw new ServiceUnavailableException(
-          "Aggregator subgraph is not configured. Set AGGREGATOR_SUBGRAPH_URL.",
-        );
+      if (
+        msg.includes("AGGREGATOR_SUBGRAPH_URL") ||
+        msg.includes("SUBGRAPH_URL") ||
+        msg.includes("THE_GRAPH_API_KEY")
+      ) {
+        throw new ServiceUnavailableException(`Subgraph not configured: ${msg}`);
       }
       throw err;
     }

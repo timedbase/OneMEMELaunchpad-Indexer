@@ -513,7 +513,9 @@ export class MetaTxService {
       nonce = await getUserNonce(user);
     } catch (err: unknown) {
       const msg = String(err);
-      if (msg.includes("METATX_ADDRESS")) throw new BadRequestException("METATX_ADDRESS is not configured");
+      if (msg.includes("METATX_ADDRESS")) {
+        throw new ServiceUnavailableException("METATX_ADDRESS is not configured");
+      }
       throw err;
     }
 
@@ -537,7 +539,9 @@ export class MetaTxService {
       digest = await getOrderDigest(order);
     } catch (err: unknown) {
       const msg = String(err);
-      if (msg.includes("METATX_ADDRESS")) throw new BadRequestException("METATX_ADDRESS is not configured");
+      if (msg.includes("METATX_ADDRESS")) {
+        throw new ServiceUnavailableException("METATX_ADDRESS is not configured");
+      }
       throw err;
     }
 

@@ -366,7 +366,7 @@ function normalizeMainToken(t: MainToken) {
     currentLiquidityBNB: null as string | null,
     totalVolumeBNB:      t.raisedBNB,
     tradeCount:          parseInt(t.buysCount) + parseInt(t.sellsCount),
-    createdAtTimestamp:  parseInt(t.createdAtBlock),
+    createdAtTimestamp:  0, // main subgraph exposes block number, not unix timestamp
     source:              "main" as const,
   };
 }
@@ -558,15 +558,18 @@ export class DexService {
           first: limit, skip: offset,
           where: Object.keys(dexWhere).length ? dexWhere : undefined,
         }).catch(() => ({ tokens: [] as DexV2Token[] }));
-        const rows = data.tokens.map(t => normalizeDexV2Token(t, platform!));
-        return paginated(rows, rows.length, page, limit);
+        const rows  = data.tokens.map(t => normalizeDexV2Token(t, platform!));
+        // Use sentinel total: if we got a full page, signal that more may exist
+        const total = rows.length < limit ? offset + rows.length : offset + limit + 1;
+        return paginated(rows, total, page, limit);
       } else {
         const data = await dexFetchFrom<{ tokens: DexV3Token[] }>(ep, V3_TOKENS_QUERY, {
           first: limit, skip: offset,
           where: Object.keys(dexWhere).length ? dexWhere : undefined,
         }).catch(() => ({ tokens: [] as DexV3Token[] }));
-        const rows = data.tokens.map(t => normalizeDexV3Token(t, platform!));
-        return paginated(rows, rows.length, page, limit);
+        const rows  = data.tokens.map(t => normalizeDexV3Token(t, platform!));
+        const total = rows.length < limit ? offset + rows.length : offset + limit + 1;
+        return paginated(rows, total, page, limit);
       }
     }
 
@@ -727,7 +730,7 @@ export class DexService {
     const fetchBonding = !source || source === "bonding";
     const fetchDex     = !source || source === "dex";
 
-    const [mainTradesResult, aggBondingResult, aggSwapsResult] = await Promise.all([
+    const [mainTradesResult, aggBondingResult] = await Promise.all([
       fetchBonding
         ? mainFetch<{ trades: MainTrade[] }>(MAIN_TRADES_QUERY, {
             first: 200, skip: 0, where: { token: addr },
@@ -740,13 +743,22 @@ export class DexService {
           }).catch(() => ({ bondingTrades: [] as AggBondingTrade[] }))
         : Promise.resolve({ bondingTrades: [] as AggBondingTrade[] }),
 
-      fetchDex
-        ? dexFetch<{ swaps: AggSwap[] }>(AGG_SWAPS_QUERY, {
-            first: 200, skip: 0,
-            where: { tokenIn_in: [addr], tokenOut_in: [addr] },
-          }).catch(() => ({ swaps: [] as AggSwap[] }))
-        : Promise.resolve({ swaps: [] as AggSwap[] }),
+      // intentionally unused slot — swaps queried separately below
+      Promise.resolve(null),
     ]);
+
+    // Query swaps as tokenIn and tokenOut separately — AND-ing both in one where
+    // clause would require the token to be both sides of the swap simultaneously.
+    const [swapsInResult, swapsOutResult] = fetchDex
+      ? await Promise.all([
+          dexFetch<{ swaps: AggSwap[] }>(AGG_SWAPS_QUERY, {
+            first: 200, skip: 0, where: { tokenIn: addr },
+          }).catch(() => ({ swaps: [] as AggSwap[] })),
+          dexFetch<{ swaps: AggSwap[] }>(AGG_SWAPS_QUERY, {
+            first: 200, skip: 0, where: { tokenOut: addr },
+          }).catch(() => ({ swaps: [] as AggSwap[] })),
+        ])
+      : [{ swaps: [] as AggSwap[] }, { swaps: [] as AggSwap[] }];
 
     const mainTrades = mainTradesResult.trades.map(t => ({
       ...normalizeMainTrade(t), source: "bonding" as const,
@@ -754,9 +766,13 @@ export class DexService {
     const aggBonding = aggBondingResult.bondingTrades.map(t => ({
       ...normalizeBondingTrade(t), source: "bonding" as const,
     }));
-    const aggSwaps   = aggSwapsResult.swaps.map(s => ({
-      ...normalizeSwap(s), source: "dex" as const,
-    }));
+
+    // Merge tokenIn + tokenOut swap results, deduplicate by id
+    const seenSwapId = new Set(swapsInResult.swaps.map(s => s.id));
+    const aggSwaps = [
+      ...swapsInResult.swaps,
+      ...swapsOutResult.swaps.filter(s => !seenSwapId.has(s.id)),
+    ].map(s => ({ ...normalizeSwap(s), source: "dex" as const }));
 
     // Merge bonding trades — deduplicate by txHash (aggregator may re-index 1MEME too)
     const seenTx = new Set(aggBonding.map(t => t.txHash));
