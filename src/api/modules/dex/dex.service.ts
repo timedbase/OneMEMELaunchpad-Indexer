@@ -85,6 +85,27 @@ interface MainTrade {
   txHash:      string;
 }
 
+// ─── DEX protocol token subgraph types ───────────────────────────────────────
+
+interface DexV2Token {
+  id:             string;
+  name:           string | null;
+  symbol:         string | null;
+  decimals:       string;
+  tradeVolumeUSD: string;
+  txCount:        string;
+}
+
+interface DexV3Token {
+  id:                  string;
+  name:                string | null;
+  symbol:              string | null;
+  decimals:            string;
+  volumeUSD:           string;
+  totalValueLockedUSD: string;
+  txCount:             string;
+}
+
 // ─── DEX pool subgraph types (PancakeSwap / Uniswap V2 / V3 / V4) ────────────
 
 interface V2Pair {
@@ -204,6 +225,52 @@ const MAIN_TOKENS_COUNT_QUERY = /* GraphQL */ `
   }
 `;
 
+// ─── DEX protocol token queries ──────────────────────────────────────────────
+
+const V2_TOKENS_QUERY = /* GraphQL */ `
+  query V2Tokens($first: Int!, $skip: Int!, $where: Token_filter) {
+    tokens(first: $first, skip: $skip, orderBy: tradeVolumeUSD, orderDirection: desc, where: $where) {
+      id name symbol decimals tradeVolumeUSD txCount
+    }
+  }
+`;
+
+const V3_TOKENS_QUERY = /* GraphQL */ `
+  query V3Tokens($first: Int!, $skip: Int!, $where: Token_filter) {
+    tokens(first: $first, skip: $skip, orderBy: volumeUSD, orderDirection: desc, where: $where) {
+      id name symbol decimals volumeUSD totalValueLockedUSD txCount
+    }
+  }
+`;
+
+const V2_TOKEN_QUERY = /* GraphQL */ `
+  query V2Token($id: ID!) {
+    token(id: $id) { id name symbol decimals tradeVolumeUSD txCount }
+  }
+`;
+
+const V3_TOKEN_QUERY = /* GraphQL */ `
+  query V3Token($id: ID!) {
+    token(id: $id) { id name symbol decimals volumeUSD totalValueLockedUSD txCount }
+  }
+`;
+
+// Platform filter → DexEndpoint (for the 6 DEX protocol platforms)
+const DEX_PLATFORM_TO_ENDPOINT: Record<string, DexEndpoint> = {
+  "PANCAKESWAP-V2": "PANCAKE_V2",
+  "PANCAKESWAP-V3": "PANCAKE_V3",
+  "PANCAKESWAP-V4": "PANCAKE_V4",
+  "UNISWAP-V2":     "UNISWAP_V2",
+  "UNISWAP-V3":     "UNISWAP_V3",
+  "UNISWAP-V4":     "UNISWAP_V4",
+};
+
+const ALL_PLATFORMS = [
+  "1MEME", "FOURMEME", "FLAPSH",
+  "PANCAKESWAP-V2", "PANCAKESWAP-V3", "PANCAKESWAP-V4",
+  "UNISWAP-V2", "UNISWAP-V3", "UNISWAP-V4",
+];
+
 // ─── V2 pool queries (PancakeSwap V2 / Uniswap V2) ───────────────────────────
 
 const V2_POOLS_QUERY = /* GraphQL */ `
@@ -282,7 +349,7 @@ function normalizeMainToken(t: MainToken) {
     name:                t.name   ?? null,
     symbol:              t.symbol ?? null,
     decimals:            parseInt(t.decimals),
-    platforms:           ["ONEMEME"],
+    platforms:           ["1MEME"],
     bondingPhase:        !t.migration,
     bondingCurve:        null as string | null,
     pairAddress:         t.migration?.pair ?? null,
@@ -328,6 +395,50 @@ function normalizeV3Pool(p: V3Pool, endpoint: DexEndpoint) {
   };
 }
 
+function normalizeDexV2Token(t: DexV2Token, platform: string) {
+  return {
+    address:             t.id,
+    name:                t.name   ?? null,
+    symbol:              t.symbol ?? null,
+    decimals:            parseInt(t.decimals),
+    platforms:           [platform],
+    bondingPhase:        false,
+    bondingCurve:        null as string | null,
+    pairAddress:         null as string | null,
+    currentPriceBNB:     null as string | null,
+    currentPriceUSD:     null as string | null,
+    currentMarketCapBNB: null as string | null,
+    currentMarketCapUSD: null as string | null,
+    currentLiquidityBNB: null as string | null,
+    totalVolumeBNB:      null as string | null,
+    tradeCount:          parseInt(t.txCount),
+    createdAtTimestamp:  0,
+    source:              "dex" as const,
+  };
+}
+
+function normalizeDexV3Token(t: DexV3Token, platform: string) {
+  return {
+    address:             t.id,
+    name:                t.name   ?? null,
+    symbol:              t.symbol ?? null,
+    decimals:            parseInt(t.decimals),
+    platforms:           [platform],
+    bondingPhase:        false,
+    bondingCurve:        null as string | null,
+    pairAddress:         null as string | null,
+    currentPriceBNB:     null as string | null,
+    currentPriceUSD:     null as string | null,
+    currentMarketCapBNB: null as string | null,
+    currentMarketCapUSD: null as string | null,
+    currentLiquidityBNB: null as string | null,
+    totalVolumeBNB:      null as string | null,
+    tradeCount:          parseInt(t.txCount),
+    createdAtTimestamp:  0,
+    source:              "dex" as const,
+  };
+}
+
 function normalizeBondingTrade(t: AggBondingTrade) {
   return {
     id:          t.id,
@@ -354,7 +465,7 @@ function normalizeMainTrade(t: MainTrade) {
     tradeType:   t.type === "BUY" ? "buy" : "sell",
     bnbAmount:   t.bnbAmount,
     tokenAmount: t.tokenAmount,
-    platform:    "ONEMEME",
+    platform:    "1MEME",
     timestamp:   parseInt(t.timestamp),
     txHash:      t.txHash,
   };
@@ -401,10 +512,12 @@ export class DexService {
 
   // ── GET /dex/tokens ──────────────────────────────────────────────────────────
   //
-  // Routing:
-  //   platform=ONEMEME            → MAIN subgraph (launchpad token schema)
-  //   platform=FOURMEME|FLAPSH    → AGGREGATOR subgraph
-  //   no filter                   → both subgraphs, merged by createdAtTimestamp desc
+  // Routing by platform filter:
+  //   1MEME                        → MAIN subgraph (launchpad token schema)
+  //   FOURMEME | FLAPSH            → AGGREGATOR subgraph
+  //   PANCAKESWAP-V2/V3/V4         → respective PancakeSwap subgraph
+  //   UNISWAP-V2/V3/V4             → respective Uniswap subgraph
+  //   (none)                       → MAIN + AGGREGATOR merged (bonding-curve platforms only)
 
   async listTokens(query: Record<string, string | undefined>) {
     const { page, limit, offset } = parsePagination(query);
@@ -412,36 +525,67 @@ export class DexService {
     const bonding  = query["bondingPhase"];
     const search   = query["search"];
 
+    if (platform && !ALL_PLATFORMS.includes(platform)) {
+      throw new BadRequestException(
+        `platform must be one of: ${ALL_PLATFORMS.join(", ")}`,
+      );
+    }
+
     const ALLOWED_ORDER = Object.keys(TOKEN_ORDER_MAP) as (keyof typeof TOKEN_ORDER_MAP)[];
     const orderKey  = parseOrderBy(query, ALLOWED_ORDER, "createdAtTimestamp");
     const orderDir  = parseOrderDir(query).toLowerCase() as "asc" | "desc";
 
-    const useMain = !platform || platform === "ONEMEME";
-    const useAgg  = !platform || platform === "FOURMEME" || platform === "FLAPSH";
+    const dexEndpoint = platform ? DEX_PLATFORM_TO_ENDPOINT[platform] : undefined;
+    const useMain     = !platform || platform === "1MEME";
+    const useAgg      = !platform || platform === "FOURMEME" || platform === "FLAPSH";
+    const useDex      = !!dexEndpoint;
 
-    const mainWhere:  Record<string, unknown> = {};
+    // ── DEX protocol subgraph query ──────────────────────────────────────────
+    if (useDex) {
+      const ep   = dexEndpoint!;
+      const isV2 = ep === "PANCAKE_V2" || ep === "UNISWAP_V2";
+      const dexWhere: Record<string, unknown> = {};
+      if (search) dexWhere["symbol_contains_nocase"] = search;
+
+      if (isV2) {
+        const data = await dexFetchFrom<{ tokens: DexV2Token[] }>(ep, V2_TOKENS_QUERY, {
+          first: limit, skip: offset,
+          where: Object.keys(dexWhere).length ? dexWhere : undefined,
+        }).catch(() => ({ tokens: [] as DexV2Token[] }));
+        const rows = data.tokens.map(t => normalizeDexV2Token(t, platform!));
+        return paginated(rows, rows.length, page, limit);
+      } else {
+        const data = await dexFetchFrom<{ tokens: DexV3Token[] }>(ep, V3_TOKENS_QUERY, {
+          first: limit, skip: offset,
+          where: Object.keys(dexWhere).length ? dexWhere : undefined,
+        }).catch(() => ({ tokens: [] as DexV3Token[] }));
+        const rows = data.tokens.map(t => normalizeDexV3Token(t, platform!));
+        return paginated(rows, rows.length, page, limit);
+      }
+    }
+
+    // ── MAIN + AGGREGATOR merge ───────────────────────────────────────────────
+    const mainWhere: Record<string, unknown> = {};
     if (search)             mainWhere["symbol_contains_nocase"] = search;
-    if (bonding === "true") mainWhere["migration"] = null;
-    // MAIN subgraph has no bondingPhase=false filter (need migration != null)
-    // handled by post-filter below
+    if (bonding === "true") mainWhere["migration"]               = null;
 
     const aggWhere: Record<string, unknown> = {};
-    if (platform)           aggWhere["platforms_contains"]     = [platform];
-    if (bonding === "true") aggWhere["bondingPhase"]            = true;
-    if (bonding === "false") aggWhere["bondingPhase"]           = false;
-    if (search)             aggWhere["symbol_contains_nocase"]  = search;
+    if (platform)            aggWhere["platforms_contains"]    = [platform];
+    if (bonding === "true")  aggWhere["bondingPhase"]          = true;
+    if (bonding === "false") aggWhere["bondingPhase"]          = false;
+    if (search)              aggWhere["symbol_contains_nocase"] = search;
 
     const [mainResult, aggResult] = await Promise.all([
       useMain ? mainFetch<{ tokens: MainToken[] }>(MAIN_TOKENS_QUERY, {
         first: 200, skip: 0,
-        orderBy: MAIN_ORDER_MAP[orderKey] ?? "createdAtBlock",
+        orderBy:        MAIN_ORDER_MAP[orderKey] ?? "createdAtBlock",
         orderDirection: orderDir,
         where: Object.keys(mainWhere).length ? mainWhere : undefined,
       }).catch(() => ({ tokens: [] as MainToken[] })) : Promise.resolve({ tokens: [] as MainToken[] }),
 
       useAgg ? dexFetch<{ tokens: AggToken[] }>(AGG_TOKENS_QUERY, {
         first: 200, skip: 0,
-        orderBy: TOKEN_ORDER_MAP[orderKey] ?? "createdAtTimestamp",
+        orderBy:        TOKEN_ORDER_MAP[orderKey] ?? "createdAtTimestamp",
         orderDirection: orderDir,
         where: Object.keys(aggWhere).length ? aggWhere : undefined,
       }).catch(() => ({ tokens: [] as AggToken[] })) : Promise.resolve({ tokens: [] as AggToken[] }),
@@ -466,7 +610,9 @@ export class DexService {
 
   // ── GET /dex/tokens/:address ─────────────────────────────────────────────────
   //
-  // Tries AGGREGATOR first (covers FOURMEME/FLAPSH). Falls back to MAIN (1MEME).
+  // 1. Try AGGREGATOR (FOURMEME/FLAPSH tokens)
+  // 2. Try MAIN (1MEME tokens)
+  // 3. Try all DEX protocol subgraphs in parallel
 
   async getToken(address: string) {
     if (!isAddress(address)) throw new BadRequestException("Invalid token address");
@@ -477,11 +623,29 @@ export class DexService {
       mainFetch<{ token: MainToken | null }>(MAIN_TOKEN_QUERY, { id: addr }),
     ]);
 
-    const aggToken  = aggResult.status  === "fulfilled" ? aggResult.value.token   : null;
-    const mainToken = mainResult.status === "fulfilled" ? mainResult.value.token  : null;
+    const aggToken  = aggResult.status  === "fulfilled" ? aggResult.value.token  : null;
+    const mainToken = mainResult.status === "fulfilled" ? mainResult.value.token : null;
 
     if (aggToken)  return { data: normalizeAggToken(aggToken) };
     if (mainToken) return { data: normalizeMainToken(mainToken) };
+
+    // Fall back to DEX protocol subgraphs
+    const dexResults = await Promise.allSettled(
+      Object.entries(DEX_PLATFORM_TO_ENDPOINT).map(async ([platform, ep]) => {
+        const isV2 = ep === "PANCAKE_V2" || ep === "UNISWAP_V2";
+        if (isV2) {
+          const { token } = await dexFetchFrom<{ token: DexV2Token | null }>(ep, V2_TOKEN_QUERY, { id: addr });
+          return token ? normalizeDexV2Token(token, platform) : null;
+        } else {
+          const { token } = await dexFetchFrom<{ token: DexV3Token | null }>(ep, V3_TOKEN_QUERY, { id: addr });
+          return token ? normalizeDexV3Token(token, platform) : null;
+        }
+      }),
+    );
+
+    for (const r of dexResults) {
+      if (r.status === "fulfilled" && r.value) return { data: r.value };
+    }
 
     throw new NotFoundException(`Token ${address} not found`);
   }
