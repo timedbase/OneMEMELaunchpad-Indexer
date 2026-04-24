@@ -117,13 +117,24 @@ GET /api/v1/bsc/dex/stats
 
 ## GET /dex/tokens
 
-Paginated list of all tokens tracked by the aggregator subgraph across all platforms.
+Paginated list of tokens across all platforms.
+
+**Subgraph routing**
+
+| `platform` filter | Data source |
+|---|---|
+| `ONEMEME` | `SUBGRAPH_URL` — main launchpad subgraph |
+| `FOURMEME` or `FLAPSH` | `AGGREGATOR_SUBGRAPH_URL` |
+| _(omitted)_ | Both subgraphs merged; AGGREGATOR wins on duplicate address |
+
+Tokens from the main launchpad subgraph (`source: "main"`) have live price/market-cap
+fields set to `null` — the main subgraph does not index USD prices.
 
 **Query Parameters**
 
 | Parameter    | Type    | Default              | Description |
 |---|---|---|---|
-| `platform`   | string  | —                    | Filter: `ONEMEME` \| `FOURMEME` \| `FLAPSH` \| `DEX` |
+| `platform`   | string  | —                    | Filter: `ONEMEME` \| `FOURMEME` \| `FLAPSH` |
 | `bondingPhase` | bool  | —                    | `true` = still on bonding curve, `false` = migrated |
 | `search`     | string  | —                    | Case-insensitive symbol substring match |
 | `orderBy`    | string  | `createdAtTimestamp` | `createdAtTimestamp` \| `totalVolumeBNB` \| `tradeCount` \| `currentMarketCapBNB` \| `currentLiquidityBNB` |
@@ -131,9 +142,9 @@ Paginated list of all tokens tracked by the aggregator subgraph across all platf
 | `page`       | number  | `1`                  | Page number |
 | `limit`      | number  | `20`                 | Items per page (max 100) |
 
-**Request**
+**Request — FOURMEME tokens on bonding curve**
 ```
-GET /api/v1/bsc/dex/tokens?platform=ONEMEME&bondingPhase=true&orderBy=totalVolumeBNB&limit=2
+GET /api/v1/bsc/dex/tokens?platform=FOURMEME&bondingPhase=true&orderBy=totalVolumeBNB&limit=2
 ```
 
 **Response**
@@ -145,7 +156,7 @@ GET /api/v1/bsc/dex/tokens?platform=ONEMEME&bondingPhase=true&orderBy=totalVolum
       "name": "PepeBSC",
       "symbol": "PEPEBSC",
       "decimals": 18,
-      "platforms": ["ONEMEME"],
+      "platforms": ["FOURMEME"],
       "bondingPhase": true,
       "bondingCurve": "0xd1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a6f7e8d9c0",
       "pairAddress": null,
@@ -156,14 +167,15 @@ GET /api/v1/bsc/dex/tokens?platform=ONEMEME&bondingPhase=true&orderBy=totalVolum
       "currentLiquidityBNB": "12.48",
       "totalVolumeBNB": "241.83",
       "tradeCount": 1847,
-      "createdAtTimestamp": 1745001234
+      "createdAtTimestamp": 1745001234,
+      "source": "aggregator"
     },
     {
       "address": "0xb4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3",
       "name": "MoonDoge",
       "symbol": "MDOGE",
       "decimals": 18,
-      "platforms": ["ONEMEME"],
+      "platforms": ["FOURMEME"],
       "bondingPhase": true,
       "bondingCurve": "0xe2d3c4b5a6f7e8d9c0b1a2f3e4d5c6b7a8f9e0d1",
       "pairAddress": null,
@@ -174,7 +186,8 @@ GET /api/v1/bsc/dex/tokens?platform=ONEMEME&bondingPhase=true&orderBy=totalVolum
       "currentLiquidityBNB": "18.76",
       "totalVolumeBNB": "189.42",
       "tradeCount": 1203,
-      "createdAtTimestamp": 1745009876
+      "createdAtTimestamp": 1745009876,
+      "source": "aggregator"
     }
   ],
   "pagination": {
@@ -187,18 +200,58 @@ GET /api/v1/bsc/dex/tokens?platform=ONEMEME&bondingPhase=true&orderBy=totalVolum
 }
 ```
 
+**Request — 1MEME tokens (main launchpad subgraph)**
+```
+GET /api/v1/bsc/dex/tokens?platform=ONEMEME&bondingPhase=true&limit=1
+```
+
+**Response** — price/market-cap fields are `null` for MAIN-sourced tokens
+```json
+{
+  "data": [
+    {
+      "address": "0xc5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4",
+      "name": "StarMeme",
+      "symbol": "STAR",
+      "decimals": 18,
+      "platforms": ["ONEMEME"],
+      "bondingPhase": true,
+      "bondingCurve": null,
+      "pairAddress": null,
+      "currentPriceBNB": null,
+      "currentPriceUSD": null,
+      "currentMarketCapBNB": null,
+      "currentMarketCapUSD": null,
+      "currentLiquidityBNB": null,
+      "totalVolumeBNB": "38.74",
+      "tradeCount": 412,
+      "createdAtTimestamp": 1745020100,
+      "source": "main"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 1,
+    "total": 834,
+    "pages": 834,
+    "hasMore": true
+  }
+}
+```
+
 ---
 
 ## GET /dex/tokens/:address
 
-Full detail for a single token including live price and liquidity.
+Full detail for a single token. Tries `AGGREGATOR_SUBGRAPH_URL` first (covers FOURMEME/FLAPSH);
+falls back to `SUBGRAPH_URL` (1MEME tokens).
 
 **Request**
 ```
 GET /api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
 ```
 
-**Response**
+**Response — FOURMEME / FLAPSH token (from aggregator)**
 ```json
 {
   "data": {
@@ -206,7 +259,7 @@ GET /api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
     "name": "PepeBSC",
     "symbol": "PEPEBSC",
     "decimals": 18,
-    "platforms": ["ONEMEME"],
+    "platforms": ["FOURMEME"],
     "bondingPhase": true,
     "bondingCurve": "0xd1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a6f7e8d9c0",
     "pairAddress": null,
@@ -217,14 +270,40 @@ GET /api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
     "currentLiquidityBNB": "12.48",
     "totalVolumeBNB": "241.83",
     "tradeCount": 1847,
-    "createdAtTimestamp": 1745001234
+    "createdAtTimestamp": 1745001234,
+    "source": "aggregator"
+  }
+}
+```
+
+**Response — 1MEME token (from main launchpad subgraph)**
+```json
+{
+  "data": {
+    "address": "0xc5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4",
+    "name": "StarMeme",
+    "symbol": "STAR",
+    "decimals": 18,
+    "platforms": ["ONEMEME"],
+    "bondingPhase": true,
+    "bondingCurve": null,
+    "pairAddress": null,
+    "currentPriceBNB": null,
+    "currentPriceUSD": null,
+    "currentMarketCapBNB": null,
+    "currentMarketCapUSD": null,
+    "currentLiquidityBNB": null,
+    "totalVolumeBNB": "38.74",
+    "tradeCount": 412,
+    "createdAtTimestamp": 1745020100,
+    "source": "main"
   }
 }
 ```
 
 **Error — not found**
 ```json
-{ "statusCode": 404, "message": "Token 0x... not found in aggregator subgraph" }
+{ "statusCode": 404, "message": "Token 0x... not found" }
 ```
 
 ---
@@ -232,14 +311,25 @@ GET /api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
 ## GET /dex/tokens/:address/pools
 
 DEX pools containing this token across all supported AMMs (V2/V3/V4).
+Each protocol is queried from its own subgraph (V3/V4 via The Graph gateway, V2 via NodeReal).
+Requires `THE_GRAPH_API_KEY` for V3/V4 endpoints unless per-protocol URL overrides are set.
 
 **Query Parameters**
 
 | Parameter | Type   | Default | Description |
 |---|---|---|---|
-| `dex`     | string | —       | Filter by DEX: `PANCAKE_V2` \| `PANCAKE_V3` \| `UNISWAP_V2` \| `UNISWAP_V3` \| etc. |
+| `dex`     | string | —       | Filter by protocol: `PANCAKE_V2` \| `PANCAKE_V3` \| `PANCAKE_V4` \| `UNISWAP_V2` \| `UNISWAP_V3` \| `UNISWAP_V4` |
 | `page`    | number | `1`     | |
 | `limit`   | number | `20`    | |
+
+**Pool shape**
+
+| Field              | V2                    | V3 / V4              |
+|---|---|---|
+| `feeTier`          | `null`                | fee in bps (e.g. 500) |
+| `liquidity`        | reserve in USD (`reserveUSD`) | raw sqrt-price liquidity |
+| `volumeUSD`        | cumulative volume USD | cumulative volume USD |
+| `txCount`          | swap count            | swap count           |
 
 **Request**
 ```
@@ -263,8 +353,9 @@ GET /api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/pools
         "address": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
         "symbol": "WBNB"
       },
-      "liquidity": "847293000000000000000",
-      "volumeBNB": "184.32",
+      "liquidity": "184293.52",
+      "volumeUSD": "112847.30",
+      "txCount": 3841,
       "createdAtTimestamp": 1745002100
     },
     {
@@ -281,7 +372,8 @@ GET /api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/pools
         "symbol": "WBNB"
       },
       "liquidity": "2391847000000000000000",
-      "volumeBNB": "57.91",
+      "volumeUSD": "35418.91",
+      "txCount": 924,
       "createdAtTimestamp": 1745003600
     }
   ],
@@ -301,6 +393,17 @@ GET /api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/pools
 
 Combined bonding-curve trades and aggregator swaps for a token, sorted by timestamp descending.
 
+**Subgraph routing**
+
+| Trade type | Source |
+|---|---|
+| 1MEME bonding-curve buys/sells | `SUBGRAPH_URL` (main launchpad) |
+| FOURMEME / FLAPSH bonding-curve buys/sells | `AGGREGATOR_SUBGRAPH_URL` |
+| DEX swaps via OneMEMEAggregator | `AGGREGATOR_SUBGRAPH_URL` |
+
+Bonding trades are deduplicated by `txHash` — the aggregator subgraph may re-index 1MEME
+trades, so AGGREGATOR always wins when both sources have the same hash.
+
 **Query Parameters**
 
 | Parameter | Type   | Default | Description |
@@ -308,6 +411,18 @@ Combined bonding-curve trades and aggregator swaps for a token, sorted by timest
 | `source`  | string | —       | `bonding` = bonding-curve only, `dex` = aggregator swaps only, omit for all |
 | `page`    | number | `1`     | |
 | `limit`   | number | `20`    | |
+
+**Response shape differs by source**
+
+Bonding trade (`source: "bonding"`):
+```
+id, token, tokenName, tokenSymbol, trader, tradeType, bnbAmount, tokenAmount, platform, timestamp, txHash, source
+```
+
+DEX swap (`source: "dex"`):
+```
+id, user, adapterId, adapterName, tokenIn, tokenOut, grossAmountIn, feeCharged, amountOut, timestamp, txHash, source
+```
 
 **Request**
 ```
@@ -347,7 +462,7 @@ GET /api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/trades?lim
       "tradeType": "buy",
       "bnbAmount": "500000000000000000",
       "tokenAmount": "612345000000000000000000",
-      "platform": "ONEMEME",
+      "platform": "FOURMEME",
       "timestamp": 1745123100,
       "txHash": "0xdef789abc012def789abc012def789abc012def789abc012def789abc012def789",
       "source": "bonding"
@@ -368,6 +483,7 @@ GET /api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/trades?lim
 ## GET /dex/swaps
 
 Paginated list of all aggregator swaps (OneMEMEAggregator `Swapped` events).
+Always reads from `AGGREGATOR_SUBGRAPH_URL`.
 
 **Query Parameters**
 
@@ -469,7 +585,7 @@ GET /api/v1/bsc/dex/metatx/nonce/0x71be63f3384f5fb98995aa9b7a5b6e1234567890
 Live on-chain quote — simulates expected output before committing to a swap.
 Use this to calculate `amountOut` and `minOut` before calling `POST /dex/swap` or `POST /dex/metatx/digest`.
 
-**Supported adapters:** `PANCAKE_V2`, `UNISWAP_V2`, `PANCAKE_V3`, `UNISWAP_V3`, `ONEMEME_BC`
+**Supported adapters:** `PANCAKE_V2`, `UNISWAP_V2`, `PANCAKE_V3`, `UNISWAP_V3`, `PANCAKE_V4`, `UNISWAP_V4`, `ONEMEME_BC`, `FOURMEME`, `FLAPSH`
 
 **Query Parameters**
 
@@ -479,11 +595,11 @@ Use this to calculate `amountOut` and `minOut` before calling `POST /dex/swap` o
 | `tokenIn`     | string | Yes | Input token address |
 | `amountIn`    | string | Yes | Input amount in wei |
 | `tokenOut`    | string | Yes | Output token address |
-| `path`        | string | No  | Comma-separated token addresses for multi-hop (defaults to direct `tokenIn,tokenOut`; V4 single-hop only) |
-| `fees`        | string | No  | Comma-separated fee tiers — **required for V3 and V4** (e.g. `500` or `500,3000`) |
+| `path`        | string | No  | Comma-separated token addresses for multi-hop (V2/V3/V4 only; defaults to `tokenIn,tokenOut`) |
+| `fees`        | string | No  | Comma-separated fee tiers — **required for V3 and V4** (e.g. `500` or `3000,500`) |
 | `slippage`    | number | No  | Slippage tolerance in basis points, default `100` (1%) |
-| `tickSpacing` | string | V4 only | Comma-separated tick spacings per hop — auto-derived from fee if omitted (e.g. fee `500` → `10`) |
-| `hooks`       | string | V4 only | Comma-separated hooks addresses per hop — defaults to zero address (vanilla pool) |
+| `tickSpacing` | string | V4 only | Comma-separated tick spacings per hop — auto-derived from fee if omitted |
+| `hooks`       | string | V4 only | Comma-separated hooks addresses per hop — defaults to zero address |
 
 ### V2 single-hop
 
@@ -549,43 +665,10 @@ GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V3&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2
 GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V3&tokenIn=0xa3f1...&amountIn=1000000000000000000000000&tokenOut=0x55d3...&path=0xa3f1...,0xbb4c...,0x55d3...&fees=500,100
 ```
 
-### Bonding-curve buy (WBNB → meme token)
-
-```
-GET /api/v1/bsc/dex/quote?adapter=ONEMEME_BC&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
-```
-
-**Response**
-```json
-{
-  "data": {
-    "adapter":        "ONEMEME_BC",
-    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-    "amountIn":       "1000000000000000000",
-    "amountOut":      "1218432000000000000000000",
-    "minOut":         "1206247680000000000000000",
-    "aggregatorFee":  "10000000000000000",
-    "bondingFee":     "3000000000000000",
-    "slippageBps":    "100",
-    "quotedBy":       "OneMEME BondingCurve",
-    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
-    "fees":           null
-  }
-}
-```
-
-### Bonding-curve sell (meme token → WBNB)
-
-```
-GET /api/v1/bsc/dex/quote?adapter=ONEMEME_BC&tokenIn=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&amountIn=500000000000000000000000&tokenOut=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c
-```
-
-### V4 single-hop (PANCAKE_V4 / UNISWAP_V4)
+### V4 single-hop
 
 V4 uses a singleton `PoolManager` — the quote requires a `PoolKey` (fee + tickSpacing + hooks)
 instead of path bytes. `tickSpacing` is auto-derived from the fee tier if omitted.
-Both single-hop and multi-hop are supported via `path` + per-hop `fees`/`tickSpacing`/`hooks`.
 
 ```
 GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&fees=3000
@@ -615,13 +698,13 @@ GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2
 
 V4 with explicit tickSpacing and a custom hooks contract:
 ```
-GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xbb4c...&amountIn=1000000000000000000&tokenOut=0xa3f1...&fees=3000&tickSpacing=60&hooks=0x1234...
+GET ...&fees=3000&tickSpacing=60&hooks=0x1234...
 ```
 
-### V4 multi-hop (PANCAKE_V4 / UNISWAP_V4)
+### V4 multi-hop
 
-For multi-hop, provide a comma-separated `path` (all intermediate tokens included), `fees` per hop,
-and optionally `tickSpacing` and `hooks` per hop (comma-separated, one value per hop).
+Provide a comma-separated `path` (all intermediate tokens), `fees` per hop,
+and optionally `tickSpacing`/`hooks` per hop (one value per hop, comma-separated).
 
 ```
 GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&amountIn=1000000000000000000000000&tokenOut=0x55d398326f99059ff775485246999027b3197955&path=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0,0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c,0x55d398326f99059ff775485246999027b3197955&fees=3000,500
@@ -671,7 +754,98 @@ GET ...&fees=3000,500&tickSpacing=60,10&hooks=0x0000...,0x1234...
 | 3000 (0.30%) | 60 |
 | 10000+ (1%+) | 200 |
 
-**Error — V3 missing fees**
+### OneMEME bonding-curve (ONEMEME_BC)
+
+`tokenIn` is WBNB for a buy, `tokenOut` is WBNB for a sell.
+
+```
+GET /api/v1/bsc/dex/quote?adapter=ONEMEME_BC&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
+```
+
+**Response**
+```json
+{
+  "data": {
+    "adapter":        "ONEMEME_BC",
+    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+    "amountIn":       "1000000000000000000",
+    "amountOut":      "1218432000000000000000000",
+    "minOut":         "1206247680000000000000000",
+    "aggregatorFee":  "10000000000000000",
+    "bondingFee":     "3000000000000000",
+    "slippageBps":    "100",
+    "quotedBy":       "OneMEME BondingCurve",
+    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
+    "fees":           null
+  }
+}
+```
+
+Sell — swap token addresses:
+```
+GET .../quote?adapter=ONEMEME_BC&tokenIn=0xa3f1...&amountIn=500000000000000000000000&tokenOut=0xbb4c...
+```
+
+### FourMEME bonding-curve (FOURMEME)
+
+Quoted via `TokenManagerHelper3.tryBuy` / `trySell` on-chain. No `path` or `fees` required.
+`tokenIn` is WBNB for a buy; `tokenOut` is WBNB for a sell.
+
+```
+GET /api/v1/bsc/dex/quote?adapter=FOURMEME&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
+```
+
+**Response**
+```json
+{
+  "data": {
+    "adapter":        "FOURMEME",
+    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+    "amountIn":       "1000000000000000000",
+    "amountOut":      "984210000000000000000000",
+    "minOut":         "974367900000000000000000",
+    "aggregatorFee":  "10000000000000000",
+    "bondingFee":     null,
+    "slippageBps":    "100",
+    "quotedBy":       "FourMEME TokenManagerHelper3",
+    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
+    "fees":           null
+  }
+}
+```
+
+### Flap.SH bonding-curve (FLAPSH)
+
+Quoted via `Portal.previewBuy` / `previewSell` on-chain. No `path` or `fees` required.
+`tokenIn` is WBNB for a buy; `tokenOut` is WBNB for a sell.
+
+```
+GET /api/v1/bsc/dex/quote?adapter=FLAPSH&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=500000000000000000&tokenOut=0xb4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3
+```
+
+**Response**
+```json
+{
+  "data": {
+    "adapter":        "FLAPSH",
+    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "tokenOut":       "0xb4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3",
+    "amountIn":       "500000000000000000",
+    "amountOut":      "412847000000000000000000",
+    "minOut":         "408718530000000000000000",
+    "aggregatorFee":  "5000000000000000",
+    "bondingFee":     null,
+    "slippageBps":    "100",
+    "quotedBy":       "Flap.SH Portal",
+    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xb4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3"],
+    "fees":           null
+  }
+}
+```
+
+**Error — V3/V4 missing fees**
 ```json
 { "statusCode": 400, "message": "V3 quote requires 1 fee tier(s) — provide via ?fees=500 (comma-separated for multi-hop)" }
 ```
@@ -771,11 +945,11 @@ No `path` or `fees` required — the adapter resolves the curve from `tokenIn`/`
 ```json
 POST /api/v1/bsc/dex/swap
 {
-  "adapter":  "ONEMEME_BC",
+  "adapter":  "FOURMEME",
   "tokenIn":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
   "amountIn": "1000000000000000000",
   "tokenOut": "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-  "minOut":   "1200000000000000000000000",
+  "minOut":   "974367900000000000000000",
   "to":       "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
   "deadline": 1745130000
 }
@@ -924,17 +1098,43 @@ POST /api/v1/bsc/dex/metatx/relay
 
 | Status | Cause |
 |---|---|
-| `400 Bad Request` | Invalid address, bad amounts, unknown adapter, expired deadline |
-| `404 Not Found` | Token address not in aggregator subgraph |
-| `503 Service Unavailable` | `AGGREGATOR_SUBGRAPH_URL` not set |
+| `400 Bad Request` | Invalid address, bad amounts, unknown adapter, missing fees, expired deadline |
+| `404 Not Found` | Token address not found in either subgraph |
+| `503 Service Unavailable` | Required env var not set (`AGGREGATOR_SUBGRAPH_URL`, `THE_GRAPH_API_KEY`, `BSC_RPC_URL`, etc.) or upstream RPC/subgraph unreachable |
+
+---
 
 ## Environment Variables
 
+### Subgraph endpoints
+
 | Variable | Required | Description |
 |---|---|---|
-| `AGGREGATOR_SUBGRAPH_URL` | Yes (read endpoints) | GraphQL endpoint for the OneMEMEAggregator subgraph |
+| `SUBGRAPH_URL` | Yes (read: 1MEME tokens/trades) | Main launchpad subgraph GraphQL endpoint |
+| `SUBGRAPH_API_KEY` | No | Bearer token for the main launchpad subgraph |
+| `AGGREGATOR_SUBGRAPH_URL` | Yes (read: FOURMEME/FLAPSH + DEX swaps) | OneMEMEAggregator subgraph endpoint |
 | `AGGREGATOR_SUBGRAPH_API_KEY` | No | Bearer token for the aggregator subgraph |
+| `THE_GRAPH_API_KEY` | Yes (V3/V4 pools) | The Graph gateway API key for PancakeSwap V3/V4 and Uniswap V2/V3/V4 subgraphs |
+| `PANCAKE_V2_SUBGRAPH_URL` | No | Override default NodeReal PancakeSwap V2 endpoint |
+| `PANCAKE_V3_SUBGRAPH_URL` | No | Override default The Graph PancakeSwap V3 endpoint |
+| `PANCAKE_V4_SUBGRAPH_URL` | No | Override default The Graph PancakeSwap V4 endpoint |
+| `UNISWAP_V2_SUBGRAPH_URL` | No | Override default The Graph Uniswap V2 endpoint |
+| `UNISWAP_V3_SUBGRAPH_URL` | No | Override default The Graph Uniswap V3 endpoint |
+| `UNISWAP_V4_SUBGRAPH_URL` | No | Override default The Graph Uniswap V4 endpoint |
+
+### Contracts and RPC
+
+| Variable | Required | Description |
+|---|---|---|
 | `AGGREGATOR_ADDRESS` | Yes (`POST /dex/swap`, `POST /dex/metatx/*`) | OneMEMEAggregator contract address |
 | `METATX_ADDRESS` | Yes (`POST /dex/metatx/*`) | OneMEMEMetaTx contract address |
 | `RELAYER_PRIVATE_KEY` | Yes (`POST /dex/metatx/relay`) | 0x-prefixed private key of the funded relayer EOA |
-| `BSC_RPC_URL` | Yes (`POST /dex/metatx/*`) | BSC HTTP RPC for contract reads and relay broadcast |
+| `BSC_RPC_URL` | Yes (quotes, relay) | BSC HTTP RPC for contract reads and relay broadcast |
+| `FOURMEME_HELPER_ADDRESS` | No | TokenManagerHelper3 address (default: BSC mainnet) |
+| `FLAPSH_PORTAL_ADDRESS` | No | Flap.SH Portal address (default: BSC mainnet) |
+| `PANCAKE_V2_ROUTER_ADDRESS` | No | PancakeSwap V2 Router (default: BSC mainnet) |
+| `PANCAKE_V3_QUOTER_ADDRESS` | No | PancakeSwap V3 QuoterV2 (default: BSC mainnet) |
+| `UNISWAP_V2_ROUTER_ADDRESS` | No | Uniswap V2 Router (default: BSC mainnet) |
+| `UNISWAP_V3_QUOTER_ADDRESS` | No | Uniswap V3 Quoter (no BSC default; set if deployed) |
+| `PANCAKE_V4_QUOTER_ADDRESS` | No | PancakeSwap V4 Quoter (no default; required for V4 quotes) |
+| `UNISWAP_V4_QUOTER_ADDRESS` | No | Uniswap V4 Quoter (no default; required for V4 quotes) |
