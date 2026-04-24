@@ -123,18 +123,20 @@ Paginated list of tokens across all platforms.
 
 | `platform` filter | Data source |
 |---|---|
-| `ONEMEME` | `SUBGRAPH_URL` — main launchpad subgraph |
+| `1MEME` | `SUBGRAPH_URL` — main launchpad subgraph |
 | `FOURMEME` or `FLAPSH` | `AGGREGATOR_SUBGRAPH_URL` |
-| _(omitted)_ | Both subgraphs merged; AGGREGATOR wins on duplicate address |
+| `PANCAKESWAP-V2/V3/V4` | respective PancakeSwap subgraph (The Graph gateway) |
+| `UNISWAP-V2/V3/V4` | respective Uniswap subgraph (The Graph gateway) |
+| _(omitted)_ | `1MEME` + `FOURMEME` + `FLAPSH` merged; AGGREGATOR wins on duplicate address |
 
-Tokens from the main launchpad subgraph (`source: "main"`) have live price/market-cap
-fields set to `null` — the main subgraph does not index USD prices.
+Tokens from the main launchpad subgraph (`source: "main"`) and DEX protocol subgraphs
+(`source: "dex"`) have live price/market-cap fields set to `null`.
 
 **Query Parameters**
 
 | Parameter    | Type    | Default              | Description |
 |---|---|---|---|
-| `platform`   | string  | —                    | Filter: `ONEMEME` \| `FOURMEME` \| `FLAPSH` |
+| `platform`   | string  | —                    | `1MEME` \| `FOURMEME` \| `FLAPSH` \| `PANCAKESWAP-V2` \| `PANCAKESWAP-V3` \| `PANCAKESWAP-V4` \| `UNISWAP-V2` \| `UNISWAP-V3` \| `UNISWAP-V4` |
 | `bondingPhase` | bool  | —                    | `true` = still on bonding curve, `false` = migrated |
 | `search`     | string  | —                    | Case-insensitive symbol substring match |
 | `orderBy`    | string  | `createdAtTimestamp` | `createdAtTimestamp` \| `totalVolumeBNB` \| `tradeCount` \| `currentMarketCapBNB` \| `currentLiquidityBNB` |
@@ -158,14 +160,15 @@ GET /api/v1/bsc/dex/tokens?platform=FOURMEME&bondingPhase=true&orderBy=totalVolu
       "decimals": 18,
       "platforms": ["FOURMEME"],
       "bondingPhase": true,
-      "bondingCurve": "0xd1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a6f7e8d9c0",
+      "bondingCurve": null,
       "pairAddress": null,
       "currentPriceBNB": "0.000000812",
       "currentPriceUSD": "0.000497",
       "currentMarketCapBNB": "8.12",
       "currentMarketCapUSD": "4972.54",
       "currentLiquidityBNB": "12.48",
-      "totalVolumeBNB": "241.83",
+      "totalVolumeBNB": "841200000000000000000",
+      "dexVolumeBNB": "12.48",
       "tradeCount": 1847,
       "createdAtTimestamp": 1745001234,
       "source": "aggregator"
@@ -177,14 +180,15 @@ GET /api/v1/bsc/dex/tokens?platform=FOURMEME&bondingPhase=true&orderBy=totalVolu
       "decimals": 18,
       "platforms": ["FOURMEME"],
       "bondingPhase": true,
-      "bondingCurve": "0xe2d3c4b5a6f7e8d9c0b1a2f3e4d5c6b7a8f9e0d1",
+      "bondingCurve": null,
       "pairAddress": null,
       "currentPriceBNB": "0.000001204",
       "currentPriceUSD": "0.000737",
       "currentMarketCapBNB": "12.04",
       "currentMarketCapUSD": "7371.18",
       "currentLiquidityBNB": "18.76",
-      "totalVolumeBNB": "189.42",
+      "totalVolumeBNB": "694200000000000000000",
+      "dexVolumeBNB": "0",
       "tradeCount": 1203,
       "createdAtTimestamp": 1745009876,
       "source": "aggregator"
@@ -202,7 +206,7 @@ GET /api/v1/bsc/dex/tokens?platform=FOURMEME&bondingPhase=true&orderBy=totalVolu
 
 **Request — 1MEME tokens (main launchpad subgraph)**
 ```
-GET /api/v1/bsc/dex/tokens?platform=ONEMEME&bondingPhase=true&limit=1
+GET /api/v1/bsc/dex/tokens?platform=1MEME&bondingPhase=true&limit=1
 ```
 
 **Response** — price/market-cap fields are `null` for MAIN-sourced tokens
@@ -243,8 +247,8 @@ GET /api/v1/bsc/dex/tokens?platform=ONEMEME&bondingPhase=true&limit=1
 
 ## GET /dex/tokens/:address
 
-Full detail for a single token. Tries `AGGREGATOR_SUBGRAPH_URL` first (covers FOURMEME/FLAPSH);
-falls back to `SUBGRAPH_URL` (1MEME tokens).
+Full detail for a single token.
+Lookup order: AGGREGATOR → MAIN → all 6 DEX protocol subgraphs (parallel).
 
 **Request**
 ```
@@ -261,14 +265,15 @@ GET /api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
     "decimals": 18,
     "platforms": ["FOURMEME"],
     "bondingPhase": true,
-    "bondingCurve": "0xd1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a6f7e8d9c0",
+    "bondingCurve": null,
     "pairAddress": null,
     "currentPriceBNB": "0.000000812",
     "currentPriceUSD": "0.000497",
     "currentMarketCapBNB": "8.12",
     "currentMarketCapUSD": "4972.54",
     "currentLiquidityBNB": "12.48",
-    "totalVolumeBNB": "241.83",
+    "totalVolumeBNB": "841200000000000000000",
+    "dexVolumeBNB": "12.48",
     "tradeCount": 1847,
     "createdAtTimestamp": 1745001234,
     "source": "aggregator"
@@ -297,6 +302,32 @@ GET /api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
     "tradeCount": 412,
     "createdAtTimestamp": 1745020100,
     "source": "main"
+  }
+}
+```
+
+**Response — DEX protocol token (e.g. PANCAKESWAP-V2)**
+```json
+{
+  "data": {
+    "address": "0x55d398326f99059ff775485246999027b3197955",
+    "name": "Tether USD",
+    "symbol": "USDT",
+    "decimals": 18,
+    "platforms": ["PANCAKESWAP-V2"],
+    "bondingPhase": false,
+    "bondingCurve": null,
+    "pairAddress": null,
+    "currentPriceBNB": null,
+    "currentPriceUSD": null,
+    "currentMarketCapBNB": null,
+    "currentMarketCapUSD": null,
+    "currentLiquidityBNB": null,
+    "totalVolumeBNB": null,
+    "dexVolumeBNB": null,
+    "tradeCount": 248193,
+    "createdAtTimestamp": 0,
+    "source": "dex"
   }
 }
 ```

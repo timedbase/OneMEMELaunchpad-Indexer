@@ -17,17 +17,18 @@ interface AggToken {
   name:                string | null;
   symbol:              string | null;
   decimals:            string;
-  platforms:           string[];
-  currentPriceBNB:     string | null;
-  currentPriceUSD:     string | null;
-  currentMarketCapBNB: string | null;
-  currentMarketCapUSD: string | null;
-  currentLiquidityBNB: string | null;
-  totalVolumeBNB:      string;
-  tradeCount:          string;
-  bondingPhase:        boolean;
-  bondingCurve:        string | null;
-  pairAddress:         string | null;
+  launchPlatform:      string | null;
+  graduated:           boolean;
+  currentPriceBNB:     string;
+  currentPriceUSD:     string;
+  currentMarketCapBNB: string;
+  currentMarketCapUSD: string;
+  currentLiquidityBNB: string;
+  bondingVolumeBNB:    string;
+  dexVolumeBNB:        string;
+  bondingBuysCount:    string;
+  bondingSellsCount:   string;
+  dexTradesCount:      string;
   createdAtTimestamp:  string;
 }
 
@@ -135,9 +136,10 @@ interface V3Pool {
 const AGG_TOKENS_QUERY = /* GraphQL */ `
   query AggTokens($first: Int!, $skip: Int!, $orderBy: Token_orderBy!, $orderDirection: OrderDirection!, $where: Token_filter) {
     tokens(first: $first, skip: $skip, orderBy: $orderBy, orderDirection: $orderDirection, where: $where) {
-      id name symbol decimals platforms
+      id name symbol decimals launchPlatform graduated
       currentPriceBNB currentPriceUSD currentMarketCapBNB currentMarketCapUSD currentLiquidityBNB
-      totalVolumeBNB tradeCount bondingPhase bondingCurve pairAddress createdAtTimestamp
+      bondingVolumeBNB dexVolumeBNB bondingBuysCount bondingSellsCount dexTradesCount
+      createdAtTimestamp
     }
   }
 `;
@@ -145,9 +147,10 @@ const AGG_TOKENS_QUERY = /* GraphQL */ `
 const AGG_TOKEN_QUERY = /* GraphQL */ `
   query AggToken($id: ID!) {
     token(id: $id) {
-      id name symbol decimals platforms
+      id name symbol decimals launchPlatform graduated
       currentPriceBNB currentPriceUSD currentMarketCapBNB currentMarketCapUSD currentLiquidityBNB
-      totalVolumeBNB tradeCount bondingPhase bondingCurve pairAddress createdAtTimestamp
+      bondingVolumeBNB dexVolumeBNB bondingBuysCount bondingSellsCount dexTradesCount
+      createdAtTimestamp
     }
   }
 `;
@@ -322,22 +325,25 @@ function dexNameFor(endpoint: DexEndpoint): string {
 // ─── Normalizers ──────────────────────────────────────────────────────────────
 
 function normalizeAggToken(t: AggToken) {
+  const bondingTrades = parseInt(t.bondingBuysCount) + parseInt(t.bondingSellsCount);
+  const dexTrades     = parseInt(t.dexTradesCount);
   return {
     address:             t.id,
     name:                t.name   ?? null,
     symbol:              t.symbol ?? null,
     decimals:            parseInt(t.decimals),
-    platforms:           t.platforms,
-    bondingPhase:        t.bondingPhase,
-    bondingCurve:        t.bondingCurve ?? null,
-    pairAddress:         t.pairAddress  ?? null,
-    currentPriceBNB:     t.currentPriceBNB     ?? null,
-    currentPriceUSD:     t.currentPriceUSD     ?? null,
-    currentMarketCapBNB: t.currentMarketCapBNB ?? null,
-    currentMarketCapUSD: t.currentMarketCapUSD ?? null,
-    currentLiquidityBNB: t.currentLiquidityBNB ?? null,
-    totalVolumeBNB:      t.totalVolumeBNB,
-    tradeCount:          parseInt(t.tradeCount),
+    platforms:           t.launchPlatform ? [t.launchPlatform] : [],
+    bondingPhase:        !t.graduated,
+    bondingCurve:        null as string | null,
+    pairAddress:         null as string | null,
+    currentPriceBNB:     t.currentPriceBNB,
+    currentPriceUSD:     t.currentPriceUSD,
+    currentMarketCapBNB: t.currentMarketCapBNB,
+    currentMarketCapUSD: t.currentMarketCapUSD,
+    currentLiquidityBNB: t.currentLiquidityBNB,
+    totalVolumeBNB:      t.bondingVolumeBNB,
+    dexVolumeBNB:        t.dexVolumeBNB,
+    tradeCount:          bondingTrades + dexTrades,
     createdAtTimestamp:  parseInt(t.createdAtTimestamp),
     source:              "aggregator" as const,
   };
@@ -491,8 +497,8 @@ function normalizeSwap(s: AggSwap) {
 
 const TOKEN_ORDER_MAP: Record<string, string> = {
   createdAtTimestamp:  "createdAtTimestamp",
-  totalVolumeBNB:      "totalVolumeBNB",
-  tradeCount:          "tradeCount",
+  totalVolumeBNB:      "bondingVolumeBNB",
+  tradeCount:          "bondingBuysCount",
   currentMarketCapBNB: "currentMarketCapBNB",
   currentLiquidityBNB: "currentLiquidityBNB",
 };
@@ -570,9 +576,9 @@ export class DexService {
     if (bonding === "true") mainWhere["migration"]               = null;
 
     const aggWhere: Record<string, unknown> = {};
-    if (platform)            aggWhere["platforms_contains"]    = [platform];
-    if (bonding === "true")  aggWhere["bondingPhase"]          = true;
-    if (bonding === "false") aggWhere["bondingPhase"]          = false;
+    if (platform === "FOURMEME" || platform === "FLAPSH") aggWhere["launchPlatform"] = platform;
+    if (bonding === "true")  aggWhere["graduated"]             = false;
+    if (bonding === "false") aggWhere["graduated"]             = true;
     if (search)              aggWhere["symbol_contains_nocase"] = search;
 
     const [mainResult, aggResult] = await Promise.all([
