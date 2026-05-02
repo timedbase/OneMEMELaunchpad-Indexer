@@ -55,16 +55,21 @@ export async function subgraphFetch<T>(
  * results under the given `key`. Pages are fetched until a partial page is
  * returned (fewer than `pageSize` items).
  */
+const MAX_FETCH_PAGES = 100;
+
 export async function subgraphFetchAll<T>(
   key:        string,
   query:      string,
   variables?: Record<string, unknown>,
   pageSize  = 1000,
+  maxPages  = MAX_FETCH_PAGES,
 ): Promise<T[]> {
   const results: T[] = [];
-  let skip = 0;
+  let skip  = 0;
+  let pages = 0;
 
   for (;;) {
+    if (pages >= maxPages) break;
     const page = await subgraphFetch<Record<string, T[]>>(query, {
       ...variables,
       first: pageSize,
@@ -72,6 +77,7 @@ export async function subgraphFetchAll<T>(
     });
     const items = page[key] ?? [];
     results.push(...items);
+    pages++;
     if (items.length < pageSize) break;
     skip += pageSize;
   }

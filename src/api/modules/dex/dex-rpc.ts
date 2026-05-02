@@ -17,6 +17,7 @@ import {
   encodeAbiParameters,
   parseAbiParameters,
   encodeFunctionData,
+  recoverAddress,
   defineChain,
   type Hex,
 } from "viem";
@@ -47,17 +48,23 @@ export function getDexPublicClient() {
   return _dexPublicClient;
 }
 
-/** Creates a wallet client for the relayer account (required only for relay execution). */
-function getDexWalletClient() {
+let _dexWalletClient: ReturnType<typeof createWalletClient> | null = null;
+let _dexAccount:      ReturnType<typeof privateKeyToAccount>  | null = null;
+
+/** Lazily-initialised wallet client for relay execution. Cached for the lifetime of the process. */
+function getDexWalletClient(): { wallet: ReturnType<typeof createWalletClient>; account: ReturnType<typeof privateKeyToAccount> } {
   if (!process.env.RELAYER_PRIVATE_KEY) {
     throw new Error("RELAYER_PRIVATE_KEY is not configured. Meta-tx relay requires a funded relayer account.");
   }
-  const account = privateKeyToAccount(process.env.RELAYER_PRIVATE_KEY as Hex);
-  return createWalletClient({
-    account,
-    chain:     dexChain(),
-    transport: http(process.env.BSC_RPC_URL, { timeout: 30_000, retryCount: 2, retryDelay: 500 }),
-  });
+  if (!_dexWalletClient || !_dexAccount) {
+    _dexAccount      = privateKeyToAccount(process.env.RELAYER_PRIVATE_KEY as Hex);
+    _dexWalletClient = createWalletClient({
+      account:   _dexAccount,
+      chain:     dexChain(),
+      transport: http(process.env.BSC_RPC_URL, { timeout: 30_000, retryCount: 2, retryDelay: 500 }),
+    });
+  }
+  return { wallet: _dexWalletClient, account: _dexAccount };
 }
 
 // ─── Contract addresses ───────────────────────────────────────────────────────
@@ -566,6 +573,8 @@ export async function quoteFlapShSell(
  * @param tickSpacing Pool tick spacing — auto-derived from fee if 0
  * @param hooks       Hooks contract address (zero address for vanilla pools)
  */
+const UINT128_MAX = 2n ** 128n - 1n;
+
 export async function quoteV4(
   adapter:     "PANCAKE_V4" | "UNISWAP_V4",
   tokenIn:     Hex,
@@ -575,6 +584,7 @@ export async function quoteV4(
   tickSpacing: number,
   hooks:       Hex,
 ): Promise<bigint> {
+  if (amountIn > UINT128_MAX) throw new Error("amountIn exceeds uint128 maximum for V4 quoter");
   const ts          = tickSpacing || defaultTickSpacing(fee);
   const zeroForOne  = v4ZeroForOne(tokenIn, tokenOut);
   const currency0   = zeroForOne ? tokenIn  : tokenOut;
@@ -624,6 +634,7 @@ export async function quoteV4Multi(
   tickSpacings: number[],
   hooksArr:     Hex[],
 ): Promise<bigint> {
+  if (amountIn > UINT128_MAX) throw new Error("amountIn exceeds uint128 maximum for V4 quoter");
   const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as Hex;
 
   // PathKey[i] describes hop i: the pool between tokens[i] and tokens[i+1].
@@ -756,8 +767,10 @@ export async function relayMetaTx(
   sig:    Hex,
   permit: PermitData,
 ): Promise<Hex> {
-  const wallet = getDexWalletClient();
+  const { wallet, account } = getDexWalletClient();
   return wallet.writeContract({
+    chain:        null,
+    account,
     address:      metaTxAddress(),
     abi:          METATX_ABI,
     functionName: "executeMetaTx",
@@ -831,13 +844,31 @@ export async function getBatchOrderDigest(order: BatchMetaTxOrder): Promise<Hex>
   }) as Promise<Hex>;
 }
 
+/**
+ * Verifies that `sig` was produced by `order.user` over the on-chain EIP-712 digest.
+ * Returns true if valid. Call this before relaying to avoid burning gas on bad sigs.
+ */
+export async function verifyOrderSignature(order: MetaTxOrder, sig: Hex): Promise<boolean> {
+  const digest   = await getOrderDigest(order);
+  const recovered = await recoverAddress({ hash: digest, signature: sig });
+  return recovered.toLowerCase() === order.user.toLowerCase();
+}
+
+export async function verifyBatchOrderSignature(order: BatchMetaTxOrder, sig: Hex): Promise<boolean> {
+  const digest    = await getBatchOrderDigest(order);
+  const recovered = await recoverAddress({ hash: digest, signature: sig });
+  return recovered.toLowerCase() === order.user.toLowerCase();
+}
+
 export async function relayBatchMetaTx(
   order:  BatchMetaTxOrder,
   sig:    Hex,
   permit: PermitData,
 ): Promise<Hex> {
-  const wallet = getDexWalletClient();
+  const { wallet, account } = getDexWalletClient();
   return wallet.writeContract({
+    chain:        null,
+    account,
     address:      metaTxAddress(),
     abi:          BATCH_METATX_ABI,
     functionName: "batchExecuteMetaTx",

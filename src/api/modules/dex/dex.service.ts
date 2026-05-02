@@ -584,16 +584,19 @@ export class DexService {
     if (bonding === "false") aggWhere["graduated"]             = true;
     if (search)              aggWhere["symbol_contains_nocase"] = search;
 
+    // Fetch enough items to satisfy the requested page. Capped at 1000 per source.
+    const fetchLimit = Math.min(Math.max(200, offset + limit), 1000);
+
     const [mainResult, aggResult] = await Promise.all([
       useMain ? mainFetch<{ tokens: MainToken[] }>(MAIN_TOKENS_QUERY, {
-        first: 200, skip: 0,
+        first: fetchLimit, skip: 0,
         orderBy:        MAIN_ORDER_MAP[orderKey] ?? "createdAtBlock",
         orderDirection: orderDir,
         where: Object.keys(mainWhere).length ? mainWhere : undefined,
       }).catch(() => ({ tokens: [] as MainToken[] })) : Promise.resolve({ tokens: [] as MainToken[] }),
 
       useAgg ? dexFetch<{ tokens: AggToken[] }>(AGG_TOKENS_QUERY, {
-        first: 200, skip: 0,
+        first: fetchLimit, skip: 0,
         orderBy:        TOKEN_ORDER_MAP[orderKey] ?? "createdAtTimestamp",
         orderDirection: orderDir,
         where: Object.keys(aggWhere).length ? aggWhere : undefined,

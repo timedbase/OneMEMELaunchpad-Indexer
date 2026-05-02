@@ -351,11 +351,13 @@ export class TokensService {
     const orderDir = parseOrderDir(query);
     const addr     = normalizeAddress(address);
 
-    // Fetch all trades for this token and aggregate per-trader in JS.
+    // Fetch trades for this token and aggregate per-trader in JS (capped at 10k trades).
     const allTrades = await subgraphFetchAll<{ trader: string; type: "BUY" | "SELL"; bnbAmount: string }>(
       "trades",
       ALL_TRADES_FOR_TOKEN_QUERY,
       { where: { token: addr } },
+      1000, // pageSize
+      10,   // maxPages → 10 × 1000 = 10k trades max
     );
 
     // Aggregate

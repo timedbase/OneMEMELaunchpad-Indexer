@@ -46,9 +46,15 @@ async function bootstrap() {
   app.setGlobalPrefix(apiPrefix, { exclude: ["/health"] });
 
   // ── CORS ───────────────────────────────────────────────────────────────────
-  // Origin enforcement is handled by Cloudflare WAF — no in-app allowlist needed.
+  // Set ALLOWED_ORIGINS as a comma-separated list (e.g. "https://app.1coin.meme,https://staging.1coin.meme").
+  // Leave unset only in development — production must set an explicit allowlist.
+  const rawOrigins = process.env.ALLOWED_ORIGINS;
+  const corsOrigin: boolean | string[] = rawOrigins
+    ? rawOrigins.split(",").map(o => o.trim()).filter(Boolean)
+    : true; // dev fallback — Cloudflare WAF gates this in prod
+
   app.enableCors({
-    origin:         true,
+    origin:         corsOrigin,
     methods:        ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type"],
     exposedHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After"],

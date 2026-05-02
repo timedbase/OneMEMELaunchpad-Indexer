@@ -58,7 +58,11 @@ export class AppModule implements NestModule {
     // Quote routes — 20 req/min (each triggers a live RPC call to BSC)
     consumer
       .apply(QuoteRateLimitMiddleware)
-      .forRoutes({ path: "tokens/*/quote/*", method: RequestMethod.GET });
+      .forRoutes(
+        { path: "tokens/*/quote/*", method: RequestMethod.GET },
+        { path: "dex/quote",        method: RequestMethod.GET },
+        { path: "dex/route",        method: RequestMethod.GET },
+      );
 
     // Stats — 10 req/min (runs 6 parallel aggregation queries)
     consumer

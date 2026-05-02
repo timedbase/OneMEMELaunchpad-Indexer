@@ -98,6 +98,12 @@ function getEndpointHeaders(endpoint: DexEndpoint): Record<string, string> {
 
 // ─── Core fetch ───────────────────────────────────────────────────────────────
 
+/** Strips the The Graph API key from a URL before using it in error messages. */
+function redactUrl(url: string): string {
+  const key = process.env.THE_GRAPH_API_KEY;
+  return key ? url.replace(key, "***") : url;
+}
+
 async function fetchFrom<T>(
   url:       string,
   headers:   Record<string, string>,
@@ -119,12 +125,12 @@ async function fetchFrom<T>(
     clearTimeout(timer);
   }
 
-  if (!res.ok) throw new Error(`${url} HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`${redactUrl(url)} HTTP ${res.status}`);
 
   const body = await res.json() as { data?: T; errors?: { message: string }[] };
 
   if (body.errors?.length) throw new Error(body.errors[0]!.message);
-  if (!body.data) throw new Error(`${url} returned no data`);
+  if (!body.data) throw new Error(`${redactUrl(url)} returned no data`);
 
   return body.data;
 }
@@ -167,6 +173,8 @@ export async function mainFetch<T>(
 /**
  * Paginated fetch — iterates pages until fewer than pageSize results are returned.
  */
+const MAX_FETCH_PAGES = 100;
+
 export async function dexFetchAll<T>(
   endpoint:   DexEndpoint,
   key:        string,
@@ -175,9 +183,11 @@ export async function dexFetchAll<T>(
   pageSize  = 1000,
 ): Promise<T[]> {
   const results: T[] = [];
-  let skip = 0;
+  let skip  = 0;
+  let pages = 0;
 
   for (;;) {
+    if (pages >= MAX_FETCH_PAGES) break;
     const page = await dexFetchFrom<Record<string, T[]>>(endpoint, query, {
       ...variables,
       first: pageSize,
@@ -185,6 +195,7 @@ export async function dexFetchAll<T>(
     });
     const items = page[key] ?? [];
     results.push(...items);
+    pages++;
     if (items.length < pageSize) break;
     skip += pageSize;
   }

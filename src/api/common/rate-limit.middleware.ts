@@ -18,19 +18,11 @@
 
 import { Injectable, NestMiddleware } from "@nestjs/common";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { clientIp } from "./client-ip";
 
 interface WindowEntry {
   count:   number;
   resetAt: number; // Unix ms
-}
-
-function clientIp(req: IncomingMessage): string {
-  const xRealIp       = req.headers["x-real-ip"];
-  const xForwardedFor = req.headers["x-forwarded-for"];
-
-  if (xRealIp)       return (Array.isArray(xRealIp)       ? xRealIp[0]       : xRealIp).trim();
-  if (xForwardedFor) return (Array.isArray(xForwardedFor) ? xForwardedFor[0] : xForwardedFor).split(",")[0].trim();
-  return (req.socket as { remoteAddress?: string }).remoteAddress ?? "unknown";
 }
 
 export function createRateLimitMiddleware(max: number, windowMs = 60_000) {
@@ -75,9 +67,8 @@ export function createRateLimitMiddleware(max: number, windowMs = 60_000) {
         res.end(
           JSON.stringify({
             error:       "Too Many Requests",
-            message:     `Rate limit of ${max} req/min exceeded for your IP. Retry in ${retryAfter}s.`,
+            message:     `Rate limit of ${max} req/min exceeded. Retry in ${retryAfter}s.`,
             retryAfter,
-            ip,
           })
         );
         return;

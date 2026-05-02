@@ -73,32 +73,31 @@ export class ChatService implements OnModuleInit {
     const clean = [...text.trim()].slice(0, MAX_TEXT_LENGTH).join("");
     if (!clean) return null;
 
-    const now = Math.floor(Date.now() / 1000);
+    const now       = Math.floor(Date.now() / 1000);
+    const tokenAddr = token.toLowerCase();
 
-    const [row] = await sql`
-      INSERT INTO chat_message (token, sender, text, timestamp)
-      VALUES (${token.toLowerCase()}, ${sender.toLowerCase()}, ${clean}, ${now})
-      RETURNING id::text, token, sender, text, timestamp::int
-    `;
-
-    // Prune oldest messages beyond the cap — efficient delete using min id of top-N rows.
-    try {
-      await sql`
+    // Single atomic statement: insert + prune in one round-trip, no race condition.
+    const rows = await sql`
+      WITH inserted AS (
+        INSERT INTO chat_message (token, sender, text, timestamp)
+        VALUES (${tokenAddr}, ${sender.toLowerCase()}, ${clean}, ${now})
+        RETURNING id::text, token, sender, text, timestamp::int
+      ),
+      pruned AS (
         DELETE FROM chat_message
-        WHERE token = ${token.toLowerCase()}
+        WHERE token = ${tokenAddr}
           AND id < (
             SELECT MIN(id) FROM (
               SELECT id FROM chat_message
-              WHERE token = ${token.toLowerCase()}
+              WHERE token = ${tokenAddr}
               ORDER BY id DESC
               LIMIT ${MAX_MESSAGES_PER_TOKEN}
             ) top
           )
-      `;
-    } catch (err: unknown) {
-      this.logger.warn(`Chat prune failed: ${(err as Error).message}`);
-    }
+      )
+      SELECT * FROM inserted
+    `;
 
-    return row as ChatMessage;
+    return (rows[0] ?? null) as ChatMessage | null;
   }
 }

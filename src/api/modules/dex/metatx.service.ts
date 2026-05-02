@@ -34,6 +34,8 @@ import {
   getBatchOrderDigest,
   relayMetaTx,
   relayBatchMetaTx,
+  verifyOrderSignature,
+  verifyBatchOrderSignature,
   aggregatorAddress,
   metaTxAddress,
 } from "./dex-rpc";
@@ -64,11 +66,15 @@ function requireAddress(val: unknown, name: string): Hex {
 }
 
 function requireBigInt(val: unknown, name: string): bigint {
-  if (typeof val !== "string" && typeof val !== "number") {
+  if (typeof val === "number") {
+    if (!Number.isInteger(val)) {
+      throw new BadRequestException(`${name} must be an integer (wei), not a float`);
+    }
+  } else if (typeof val !== "string") {
     throw new BadRequestException(`${name} must be a numeric string (wei)`);
   }
   try {
-    const n = BigInt(val);
+    const n = BigInt(val as string | number);
     if (n < 0n) throw new Error();
     return n;
   } catch {
@@ -312,7 +318,10 @@ export class MetaTxService {
     const tokenIn   = toWbnbIfNative(rawTokenIn);
     const tokenOut  = toWbnbIfNative(rawTokenOut);
 
-    const slippageBps = BigInt(query["slippage"] ?? "100");
+    // Parse slippage before entering the quote try/catch so errors are clean 400s
+    let slippageBps: bigint;
+    try { slippageBps = BigInt(query["slippage"] ?? "100"); }
+    catch { throw new BadRequestException("slippage must be a numeric basis-point value (e.g. 100 for 1%)"); }
     if (slippageBps < 0n || slippageBps > 5000n) {
       throw new BadRequestException("slippage must be between 0 and 5000 basis points");
     }
@@ -511,6 +520,8 @@ export class MetaTxService {
     if (isNative(rawTokenIn) && isNative(rawTokenOut)) {
       throw new BadRequestException("tokenIn and tokenOut cannot both be native BNB");
     }
+    const nowSec = BigInt(Math.floor(Date.now() / 1000));
+    if (deadline <= nowSec) throw new BadRequestException("deadline has already passed");
 
     const nativeIn  = isNative(rawTokenIn);
     const nativeOut = isNative(rawTokenOut);
@@ -701,18 +712,30 @@ export class MetaTxService {
       throw new BadRequestException("sig must be a 65-byte hex signature (0x + 130 hex chars)");
     }
 
-    const permitType = parsePermitType(body["permitType"]);
+    const permitType    = parsePermitType(body["permitType"]);
     const rawPermitData = body["permitData"] ?? "0x";
     if (typeof rawPermitData !== "string" || !/^0x[0-9a-fA-F]*$/.test(rawPermitData)) {
       throw new BadRequestException("permitData must be a hex string");
     }
+    if (rawPermitData.length > 1026) {
+      throw new BadRequestException("permitData exceeds maximum length (512 bytes)");
+    }
 
     const permit: PermitData = { permitType, data: rawPermitData as Hex };
 
-    // Verify deadline not expired
     const nowSec = BigInt(Math.floor(Date.now() / 1000));
-    if (order.deadline < nowSec) {
-      throw new BadRequestException("Meta-tx deadline has expired");
+    if (order.deadline < nowSec) throw new BadRequestException("Meta-tx deadline has expired");
+
+    let sigValid: boolean;
+    try { sigValid = await verifyOrderSignature(order, sig as Hex); }
+    catch { sigValid = false; }
+    if (!sigValid) throw new BadRequestException("Signature does not match order.user");
+
+    const currentNonce = await getUserNonce(order.user).catch(() => null);
+    if (currentNonce !== null && currentNonce !== order.nonce) {
+      throw new BadRequestException(
+        `Nonce mismatch: on-chain nonce is ${currentNonce}, order has ${order.nonce}. Re-fetch the digest.`,
+      );
     }
 
     let txHash: Hex;
@@ -720,24 +743,24 @@ export class MetaTxService {
       txHash = await relayMetaTx(order, sig as Hex, permit);
     } catch (err: unknown) {
       const msg = String(err);
-      // Distinguish on-chain reverts (user error) from infra failures
-      if (
-        msg.includes("timeout") || msg.includes("TIMEOUT") ||
-        msg.includes("ECONNREFUSED") || msg.includes("ENOTFOUND") ||
-        msg.includes("fetch failed")
-      ) {
-        throw new ServiceUnavailableException(`Relay RPC unavailable: ${msg}`);
+      if (msg.includes("timeout") || msg.includes("TIMEOUT") ||
+          msg.includes("ECONNREFUSED") || msg.includes("ENOTFOUND") ||
+          msg.includes("fetch failed")) {
+        throw new ServiceUnavailableException("Relay RPC unavailable — try again shortly");
       }
-      // Contract reverts and invalid signature errors are user-facing 400s
-      throw new BadRequestException(`Relay failed: ${msg}`);
+      if (msg.includes("invalid signature") || msg.includes("ECDSA")) {
+        throw new BadRequestException("Transaction reverted: invalid signature");
+      }
+      if (msg.includes("deadline") || msg.includes("expired")) {
+        throw new BadRequestException("Transaction reverted: swap deadline expired");
+      }
+      if (msg.includes("slippage") || msg.includes("minOut") || msg.includes("insufficient output")) {
+        throw new BadRequestException("Transaction reverted: slippage exceeded");
+      }
+      throw new BadRequestException("Transaction reverted");
     }
 
-    return {
-      data: {
-        txHash,
-        status: "submitted",
-      },
-    };
+    return { data: { txHash, status: "submitted" } };
   }
 
   /**
@@ -767,8 +790,10 @@ export class MetaTxService {
     const tokenIn   = toWbnbIfNative(rawTokenIn);
     const tokenOut  = toWbnbIfNative(rawTokenOut);
 
-    const slippageBps = BigInt(query["slippage"] ?? "100");
-    if (slippageBps > 5000n) {
+    let slippageBps: bigint;
+    try { slippageBps = BigInt(query["slippage"] ?? "100"); }
+    catch { throw new BadRequestException("slippage must be a numeric basis-point value (e.g. 100 for 1%)"); }
+    if (slippageBps < 0n || slippageBps > 5000n) {
       throw new BadRequestException("slippage must be between 0 and 5000 basis points");
     }
 
@@ -938,6 +963,9 @@ export class MetaTxService {
     const deadline    = requireBigInt(body["deadline"],    "deadline");
 
     if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
+    if (deadline <= BigInt(Math.floor(Date.now() / 1000))) {
+      throw new BadRequestException("deadline has already passed");
+    }
 
     // Normalize native BNB in first/last step; inner hops must already use WBNB
     const nativeIn  = isNative(steps[0]!.tokenIn);
@@ -1079,9 +1107,24 @@ export class MetaTxService {
     if (typeof rawPermitData !== "string" || !/^0x[0-9a-fA-F]*$/.test(rawPermitData)) {
       throw new BadRequestException("permitData must be a hex string");
     }
+    if (rawPermitData.length > 1026) {
+      throw new BadRequestException("permitData exceeds maximum length (512 bytes)");
+    }
 
     const nowSec = BigInt(Math.floor(Date.now() / 1000));
     if (order.deadline < nowSec) throw new BadRequestException("Meta-tx deadline has expired");
+
+    let sigValid: boolean;
+    try { sigValid = await verifyBatchOrderSignature(order, sig as Hex); }
+    catch { sigValid = false; }
+    if (!sigValid) throw new BadRequestException("Signature does not match order.user");
+
+    const currentNonce = await getUserNonce(order.user).catch(() => null);
+    if (currentNonce !== null && currentNonce !== order.nonce) {
+      throw new BadRequestException(
+        `Nonce mismatch: on-chain nonce is ${currentNonce}, order has ${order.nonce}. Re-fetch the digest.`,
+      );
+    }
 
     let txHash: `0x${string}`;
     try {
@@ -1091,11 +1134,20 @@ export class MetaTxService {
       });
     } catch (err: unknown) {
       const msg = String(err);
-      if (
-        msg.includes("timeout") || msg.includes("TIMEOUT") ||
-        msg.includes("ECONNREFUSED") || msg.includes("fetch failed")
-      ) throw new ServiceUnavailableException(`Relay RPC unavailable: ${msg}`);
-      throw new BadRequestException(`Relay failed: ${msg}`);
+      if (msg.includes("timeout") || msg.includes("TIMEOUT") ||
+          msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
+        throw new ServiceUnavailableException("Relay RPC unavailable — try again shortly");
+      }
+      if (msg.includes("invalid signature") || msg.includes("ECDSA")) {
+        throw new BadRequestException("Transaction reverted: invalid signature");
+      }
+      if (msg.includes("deadline") || msg.includes("expired")) {
+        throw new BadRequestException("Transaction reverted: swap deadline expired");
+      }
+      if (msg.includes("slippage") || msg.includes("minOut") || msg.includes("insufficient output")) {
+        throw new BadRequestException("Transaction reverted: slippage exceeded");
+      }
+      throw new BadRequestException("Transaction reverted");
     }
 
     return { data: { txHash, status: "submitted" } };

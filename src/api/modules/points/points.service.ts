@@ -215,7 +215,7 @@ export class PointsService implements OnModuleInit {
         VALUES (
           ${token.creator.toLowerCase()},
           'TOKEN_CREATED',
-          ${sql.unsafe(String(POINTS.TOKEN_CREATED))},
+          ${POINTS.TOKEN_CREATED},
           ${token.id.toLowerCase()},
           ${token.txHash.toLowerCase()},
           ${parseInt(token.createdAtTimestamp)}
@@ -234,9 +234,7 @@ export class PointsService implements OnModuleInit {
 
     for (const trade of trades) {
       const eventType = trade.type === "BUY" ? "BUY" : "SELL";
-      const points    = trade.type === "BUY"
-        ? sql.unsafe(String(POINTS.BUY))
-        : sql.unsafe(String(POINTS.SELL));
+      const points    = trade.type === "BUY" ? POINTS.BUY : POINTS.SELL;
 
       await sql`
         INSERT INTO point_event (wallet, event_type, points, token, source_id, timestamp)
@@ -266,7 +264,7 @@ export class PointsService implements OnModuleInit {
         VALUES (
           ${m.token.creator.toLowerCase()},
           'TOKEN_MIGRATED',
-          ${sql.unsafe(String(POINTS.TOKEN_MIGRATED))},
+          ${POINTS.TOKEN_MIGRATED},
           ${m.token.id.toLowerCase()},
           ${m.txHash.toLowerCase()},
           ${parseInt(m.timestamp)}
@@ -325,7 +323,7 @@ export class PointsService implements OnModuleInit {
           VALUES (
             ${row.referrer},
             'REFERRAL_BONUS',
-            ${sql.unsafe(String(POINTS.REFERRAL_BONUS))},
+            ${POINTS.REFERRAL_BONUS},
             NULL,
             ${sourceId},
             ${now}

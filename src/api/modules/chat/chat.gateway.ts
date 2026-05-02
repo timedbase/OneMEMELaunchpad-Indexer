@@ -30,8 +30,11 @@ import {
 } from "@nestjs/websockets";
 import type { IncomingMessage } from "node:http";
 import type { Server, WebSocket } from "ws";
+import { verifyMessage } from "viem";
+import type { Hex } from "viem";
 import { ChatService } from "./chat.service";
 import { isAddress } from "../../helpers";
+import { clientIp } from "../../common/client-ip";
 
 const KEEPALIVE_MS          = 15_000;
 const RATE_LIMIT_MS         = 3_000;   // minimum gap between messages per IP (global)
@@ -39,18 +42,16 @@ const MAX_CONNS_PER_IP      = 5;
 const MSG_WINDOW_MS         = 60_000;  // rolling window for per-token per-IP rate limit
 const MAX_MSGS_PER_WINDOW   = 5;       // max messages per IP per token per minute
 
-interface ConnState {
-  token:     string | null;
-  ip:        string;
-  keepalive: ReturnType<typeof setInterval>;
-}
+const AUTH_CHALLENGE_PREFIX = "OneMEME Chat Auth\nNonce: ";
 
-function clientIp(req: IncomingMessage): string {
-  const xff = req.headers["x-forwarded-for"];
-  if (xff) return (Array.isArray(xff) ? xff[0] : xff).split(",")[0].trim();
-  const xri = req.headers["x-real-ip"];
-  if (xri) return (Array.isArray(xri) ? xri[0] : xri).trim();
-  return (req.socket as { remoteAddress?: string }).remoteAddress ?? "unknown";
+interface ConnState {
+  token:           string | null;
+  ip:              string;
+  keepalive:       ReturnType<typeof setInterval>;
+  /** Pending nonce issued on connect — cleared after successful auth. */
+  challenge:       string | null;
+  /** Wallet address verified by EIP-191 signature. Null until authenticated. */
+  verifiedAddress: string | null;
 }
 
 function send(client: WebSocket, payload: object) {
@@ -106,7 +107,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       send(client, { type: "keepalive" });
     }, KEEPALIVE_MS);
 
-    this.connections.set(client, { token: null, ip, keepalive });
+    const challenge = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    this.connections.set(client, { token: null, ip, keepalive, challenge, verifiedAddress: null });
+
+    // Send challenge immediately — client must auth before sending messages
+    send(client, { type: "challenge", nonce: challenge,
+      message: `Sign: "${AUTH_CHALLENGE_PREFIX}${challenge}" to authenticate` });
 
     client.on("message", (raw) => {
       void this.handleFrame(client, ip, raw.toString());
@@ -138,6 +144,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       switch (frame["type"]) {
+        case "auth":      return await this.onAuth(client, frame);
         case "subscribe": return await this.onSubscribe(client, frame);
         case "message":   return await this.onMessage(client, ip, frame);
         default:
@@ -146,6 +153,46 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } catch {
       send(client, { type: "error", message: "Internal error — please try again" });
     }
+  }
+
+  // ─── Auth ─────────────────────────────────────────────────────────────────
+
+  private async onAuth(client: WebSocket, frame: Record<string, unknown>): Promise<void> {
+    const state = this.connections.get(client);
+    if (!state?.challenge) {
+      send(client, { type: "error", message: "No pending auth challenge" });
+      return;
+    }
+
+    const address = typeof frame["address"] === "string" ? frame["address"].toLowerCase() : null;
+    const sig     = typeof frame["sig"]     === "string" ? frame["sig"]     : null;
+
+    if (!address || !isAddress(address)) {
+      send(client, { type: "error", message: "auth.address must be a valid wallet address" });
+      return;
+    }
+    if (!sig || !/^0x[0-9a-fA-F]{130}$/.test(sig)) {
+      send(client, { type: "error", message: "auth.sig must be a 65-byte hex signature" });
+      return;
+    }
+
+    let valid = false;
+    try {
+      valid = await verifyMessage({
+        address:   address as Hex,
+        message:   AUTH_CHALLENGE_PREFIX + state.challenge,
+        signature: sig as Hex,
+      });
+    } catch { /* malformed sig */ }
+
+    if (!valid) {
+      send(client, { type: "error", message: "Invalid signature — authentication failed" });
+      return;
+    }
+
+    state.verifiedAddress = address;
+    state.challenge       = null;
+    send(client, { type: "authenticated", address });
   }
 
   // ─── Subscribe ─────────────────────────────────────────────────────────────
@@ -180,7 +227,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private async onMessage(client: WebSocket, ip: string, frame: Record<string, unknown>): Promise<void> {
     const state = this.connections.get(client);
-    if (!state?.token) {
+    if (!state?.verifiedAddress) {
+      send(client, { type: "error", message: "Authenticate first — send { type: 'auth', address, sig }" });
+      return;
+    }
+    if (!state.token) {
       send(client, { type: "error", message: "Subscribe to a token before sending messages" });
       return;
     }
@@ -209,12 +260,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     timestamps.push(now);
     this.tokenMsgTimestamps.set(tokenKey, timestamps);
 
-    // Validate sender address
-    const sender = typeof frame["sender"] === "string" ? frame["sender"] : null;
-    if (!sender || !isAddress(sender)) {
-      send(client, { type: "error", message: "message.sender must be a valid wallet address" });
-      return;
-    }
+    // Sender is the server-verified address — never trust frame.sender
+    const sender = state.verifiedAddress!;
 
     // Validate text
     const text = typeof frame["text"] === "string" ? frame["text"].trim() : "";
