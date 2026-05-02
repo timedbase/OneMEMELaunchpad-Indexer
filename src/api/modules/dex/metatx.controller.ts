@@ -107,4 +107,93 @@ export class MetaTxController {
   relay(@Body() body: Record<string, unknown>) {
     return this.metatx.relay(body);
   }
+
+  /**
+   * GET /dex/route
+   * Computes the optimal swap route, detecting whether a WBNB bridge hop is needed.
+   *
+   * For bonding-curve adapters (ONEMEME_BC, FOURMEME, FLAPSH) with a non-WBNB tokenIn,
+   * returns a two-step route: tokenIn→WBNB (PANCAKE_V3 500, fallback PANCAKE_V2) then
+   * WBNB→tokenOut via the target adapter. Otherwise returns a single-step route.
+   *
+   * Each step includes pre-encoded adapterData ready to use with POST /dex/batch-swap
+   * or POST /dex/metatx/batch-digest.
+   *
+   * Query params:
+   *   adapter   — target adapter (required)
+   *   tokenIn   — input token address (required)
+   *   amountIn  — input amount in wei (required)
+   *   tokenOut  — output token address (required)
+   *   fees      — fee tier(s) for V3 single-step route, e.g. 500 (required for V3)
+   *   slippage  — slippage tolerance in basis points, default 100 (1%)
+   */
+  @Get("route")
+  getRoute(@Query() query: Record<string, string>) {
+    return this.metatx.getRoute(query);
+  }
+
+  /**
+   * POST /dex/batch-swap
+   * Builds ABI-encoded calldata for OneMEMEAggregator.batchSwap().
+   * The caller broadcasts the transaction themselves — no relayer involved.
+   *
+   * Use steps from GET /dex/route or build them manually using /dex/quote outputs.
+   * Fee is charged only once on the initial amountIn.
+   *
+   * Body:
+   *   {
+   *     steps:       SwapStep[] (≥2) — each with adapterId, tokenIn, tokenOut, minOut, adapterData
+   *     amountIn:    gross input amount in wei
+   *     minFinalOut: minimum acceptable final output in wei
+   *     to:          recipient address
+   *     deadline:    unix timestamp (seconds)
+   *   }
+   * Returns: { to (aggregator address), calldata, steps, amountIn, feeEstimate, minFinalOut, deadline }
+   */
+  @Post("batch-swap")
+  buildBatchSwap(@Body() body: Record<string, unknown>) {
+    return this.metatx.buildBatchSwap(body);
+  }
+
+  /**
+   * POST /dex/metatx/batch-digest
+   * Computes the EIP-712 digest the user must sign for a gasless multi-hop swap.
+   *
+   * Flow:
+   *   1. GET /dex/route → get steps[] with pre-encoded adapterData
+   *   2. GET /dex/metatx/nonce/:user → get current nonce
+   *   3. POST /dex/metatx/batch-digest → get digest + BatchMetaTxOrder
+   *   4. User signs digest with their wallet
+   *   5. POST /dex/metatx/batch-relay with { order, sig }
+   *
+   * Body:
+   *   {
+   *     user, steps[] (≥2), grossAmountIn, minFinalOut,
+   *     recipient, deadline, swapDeadline, relayerFee
+   *   }
+   * Returns: { digest, metaTxContract, order, aggregatorFeeEstimate }
+   */
+  @Post("metatx/batch-digest")
+  buildBatchDigest(@Body() body: Record<string, unknown>) {
+    return this.metatx.buildBatchDigest(body);
+  }
+
+  /**
+   * POST /dex/metatx/batch-relay
+   * Submits a signed BatchMetaTxOrder to OneMEMEMetaTx.batchExecuteMetaTx() on-chain.
+   * The RELAYER_PRIVATE_KEY account pays gas; the user is reimbursed via relayerFee.
+   *
+   * Body:
+   *   {
+   *     order:      BatchMetaTxOrder (from /dex/metatx/batch-digest response),
+   *     sig:        "0x..." (65-byte EIP-712 signature),
+   *     permitType: 0 | 1 | 2  (default 0 = PERMIT_NONE),
+   *     permitData: "0x..."     (required if permitType > 0)
+   *   }
+   * Returns: { txHash, status: "submitted" }
+   */
+  @Post("metatx/batch-relay")
+  relayBatch(@Body() body: Record<string, unknown>) {
+    return this.metatx.relayBatch(body);
+  }
 }

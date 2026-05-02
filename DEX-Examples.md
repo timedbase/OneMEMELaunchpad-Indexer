@@ -1125,6 +1125,277 @@ POST /api/v1/bsc/dex/metatx/relay
 
 ---
 
+## GET /dex/route
+
+Returns an optimally routed swap plan with pre-encoded `adapterData` for each step.
+When the target adapter is a bonding-curve protocol (ONEMEME_BC, FOURMEME, FLAPSH) and
+`tokenIn` is not WBNB, a two-step bridge route is automatically constructed:
+`tokenIn → WBNB` via PANCAKE_V3 (fee 500, fallback PANCAKE_V2), then `WBNB → tokenOut`
+via the bonding-curve adapter.
+
+### Single-step — WBNB directly into a 1MEME token
+
+```
+GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xMEME&slippage=100
+```
+
+```json
+{
+  "data": {
+    "singleStep": true,
+    "steps": [
+      {
+        "adapter": "ONEMEME_BC",
+        "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
+        "tokenIn": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "tokenOut": "0x000000000000000000000000000000000000meme",
+        "amountIn": "1000000000000000000",
+        "amountOut": "412800000000000000000000",
+        "minOut": "408672000000000000000000",
+        "adapterData": "0x000000000000000000...000000000000000000..."
+      }
+    ],
+    "amountIn": "1000000000000000000",
+    "minFinalOut": "408672000000000000000000",
+    "aggregatorFee": "10000000000000000",
+    "slippageBps": "100"
+  }
+}
+```
+
+### Two-step bridge — USDC into a 1MEME token
+
+```
+GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d&amountIn=5000000000000000000&tokenOut=0xMEME&slippage=150
+```
+
+```json
+{
+  "data": {
+    "singleStep": false,
+    "steps": [
+      {
+        "adapter": "PANCAKE_V3",
+        "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+        "tokenIn": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+        "tokenOut": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "amountIn": "5000000000000000000",
+        "amountOut": "8621500000000000",
+        "minOut": "8492277500000000",
+        "adapterData": "0x..."
+      },
+      {
+        "adapter": "ONEMEME_BC",
+        "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
+        "tokenIn": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "tokenOut": "0x000000000000000000000000000000000000meme",
+        "amountIn": "8621500000000000",
+        "amountOut": "3558900000000000000000",
+        "minOut": "3505576500000000000000",
+        "adapterData": "0x..."
+      }
+    ],
+    "amountIn": "5000000000000000000",
+    "minFinalOut": "3505576500000000000000",
+    "aggregatorFee": "50000000000000000",
+    "slippageBps": "150"
+  }
+}
+```
+
+---
+
+## POST /dex/batch-swap
+
+Builds ABI-encoded calldata for `OneMEMEAggregator.batchSwap()`.
+Use steps from `GET /dex/route` or compose them manually from `/dex/quote` outputs.
+The aggregator fee (1%) is charged once on the initial `amountIn`.
+
+**Request** (two-step USDC → 1MEME token):
+```json
+{
+  "steps": [
+    {
+      "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+      "tokenIn":   "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+      "tokenOut":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "minOut":    "8492277500000000",
+      "adapterData": "0x..."
+    },
+    {
+      "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
+      "tokenIn":   "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "tokenOut":  "0x000000000000000000000000000000000000meme",
+      "minOut":    "3505576500000000000000",
+      "adapterData": "0x..."
+    }
+  ],
+  "amountIn":    "5000000000000000000",
+  "minFinalOut": "3505576500000000000000",
+  "to":          "0xUserWalletAddress",
+  "deadline":    1746400000
+}
+```
+
+**Response:**
+```json
+{
+  "data": {
+    "to":          "0xOneMEMEAggregatorAddress",
+    "calldata":    "0x...",
+    "steps": [
+      {
+        "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+        "tokenIn":   "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+        "tokenOut":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "minOut":    "8492277500000000",
+        "adapterData": "0x..."
+      },
+      {
+        "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
+        "tokenIn":   "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "tokenOut":  "0x000000000000000000000000000000000000meme",
+        "minOut":    "3505576500000000000000",
+        "adapterData": "0x..."
+      }
+    ],
+    "amountIn":    "5000000000000000000",
+    "feeEstimate": "50000000000000000",
+    "minFinalOut": "3505576500000000000000",
+    "deadline":    "1746400000"
+  }
+}
+```
+
+---
+
+## POST /dex/metatx/batch-digest
+
+Computes the EIP-712 digest the user must sign for a gasless multi-hop swap.
+
+### Gasless batch swap flow
+
+**Step 1** — get route:
+```
+GET /dex/route?adapter=ONEMEME_BC&tokenIn=0xUSDC&amountIn=5000000000000000000&tokenOut=0xMEME
+```
+Save `steps[]` from the response.
+
+**Step 2** — get nonce:
+```
+GET /dex/metatx/nonce/0xUserWallet
+```
+
+**Step 3** — POST /dex/metatx/batch-digest:
+
+**Request:**
+```json
+{
+  "user":          "0xUserWalletAddress",
+  "steps": [
+    {
+      "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+      "tokenIn":   "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+      "tokenOut":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "minOut":    "8492277500000000",
+      "adapterData": "0x..."
+    },
+    {
+      "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
+      "tokenIn":   "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "tokenOut":  "0x000000000000000000000000000000000000meme",
+      "minOut":    "3505576500000000000000",
+      "adapterData": "0x..."
+    }
+  ],
+  "grossAmountIn": "5000000000000000000",
+  "minFinalOut":   "3505576500000000000000",
+  "recipient":     "0xUserWalletAddress",
+  "deadline":      1746403600,
+  "swapDeadline":  1746400000,
+  "relayerFee":    "3000000000000000"
+}
+```
+
+**Response:**
+```json
+{
+  "data": {
+    "digest":          "0xabcdef...",
+    "metaTxContract":  "0xOneMEMEMetaTxAddress",
+    "order": {
+      "user":          "0xUserWalletAddress",
+      "nonce":         "7",
+      "deadline":      "1746403600",
+      "steps": [
+        {
+          "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+          "tokenIn":   "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+          "tokenOut":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+          "minOut":    "8492277500000000",
+          "adapterData": "0x..."
+        },
+        {
+          "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
+          "tokenIn":   "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+          "tokenOut":  "0x000000000000000000000000000000000000meme",
+          "minOut":    "3505576500000000000000",
+          "adapterData": "0x..."
+        }
+      ],
+      "grossAmountIn": "5000000000000000000",
+      "minFinalOut":   "3505576500000000000000",
+      "recipient":     "0xUserWalletAddress",
+      "swapDeadline":  "1746400000",
+      "relayerFee":    "3000000000000000"
+    },
+    "aggregatorFeeEstimate": "50000000000000000"
+  }
+}
+```
+
+**Step 4** — sign `digest` client-side with the user's wallet, then:
+
+**Step 5** — POST /dex/metatx/batch-relay:
+
+---
+
+## POST /dex/metatx/batch-relay
+
+Submits a signed `BatchMetaTxOrder` on-chain. The relayer pays gas; the user pays `relayerFee` from their token balance.
+
+**Request:**
+```json
+{
+  "order": { "...": "BatchMetaTxOrder from batch-digest response" },
+  "sig":        "0x...(65-byte EIP-712 signature)...",
+  "permitType": 0,
+  "permitData": "0x"
+}
+```
+
+**Response:**
+```json
+{
+  "data": {
+    "txHash": "0x...",
+    "status": "submitted"
+  }
+}
+```
+
+**Error — steps path broken (tokenOut[i] ≠ tokenIn[i+1])**
+```json
+{ "statusCode": 400, "message": "steps[0].tokenOut (0xWBNB) must equal steps[1].tokenIn (0xOtherToken)" }
+```
+
+**Error — fewer than 2 steps**
+```json
+{ "statusCode": 400, "message": "steps must be an array of at least 2 swap steps" }
+```
+
+---
+
 ## Error Reference
 
 | Status | Cause |

@@ -5,6 +5,8 @@ import {
   AdapterName,
   MetaTxOrder,
   PermitData,
+  SwapStep,
+  BatchMetaTxOrder,
   encodeV2AdapterData,
   encodeV3SingleHopAdapterData,
   encodeV3MultiHopAdapterData,
@@ -14,6 +16,7 @@ import {
   encodeFourMemeAdapterData,
   encodeFlapShAdapterData,
   buildSwapCalldata,
+  buildBatchSwapCalldata,
   buildV3PackedPath,
   quoteV2,
   quoteV3,
@@ -28,7 +31,9 @@ import {
   defaultTickSpacing,
   getUserNonce,
   getOrderDigest,
+  getBatchOrderDigest,
   relayMetaTx,
+  relayBatchMetaTx,
   aggregatorAddress,
   metaTxAddress,
 } from "./dex-rpc";
@@ -215,6 +220,51 @@ function buildAdapterData(
 
   // Should never be reached — requireAdapter() validates adapter names
   throw new BadRequestException(`Unknown adapter: ${adapterName}`);
+}
+
+// ─── Batch helpers ────────────────────────────────────────────────────────────
+
+function parseSteps(raw: unknown, prefix: string): SwapStep[] {
+  if (!Array.isArray(raw) || raw.length < 2) {
+    throw new BadRequestException(`${prefix} must be an array of at least 2 swap steps`);
+  }
+  return raw.map((s, idx) => {
+    if (!s || typeof s !== "object") {
+      throw new BadRequestException(`${prefix}[${idx}] must be an object`);
+    }
+    const step = s as Record<string, unknown>;
+    const adapterId = (() => {
+      const v = step["adapterId"];
+      if (typeof v !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(v)) {
+        throw new BadRequestException(`${prefix}[${idx}].adapterId must be a 32-byte hex string`);
+      }
+      return v as Hex;
+    })();
+    const adapterData = (() => {
+      const v = step["adapterData"] ?? "0x";
+      if (typeof v !== "string" || !/^0x[0-9a-fA-F]*$/.test(v)) {
+        throw new BadRequestException(`${prefix}[${idx}].adapterData must be a hex string`);
+      }
+      return v as Hex;
+    })();
+    return {
+      adapterId,
+      tokenIn:     requireAddress(step["tokenIn"],  `${prefix}[${idx}].tokenIn`),
+      tokenOut:    requireAddress(step["tokenOut"], `${prefix}[${idx}].tokenOut`),
+      minOut:      requireBigInt(step["minOut"],    `${prefix}[${idx}].minOut`),
+      adapterData,
+    };
+  });
+}
+
+function validatePathContinuity(steps: SwapStep[]): void {
+  for (let i = 0; i < steps.length - 1; i++) {
+    if (steps[i]!.tokenOut.toLowerCase() !== steps[i + 1]!.tokenIn.toLowerCase()) {
+      throw new BadRequestException(
+        `steps[${i}].tokenOut (${steps[i]!.tokenOut}) must equal steps[${i + 1}].tokenIn (${steps[i + 1]!.tokenIn})`,
+      );
+    }
+  }
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -655,6 +705,340 @@ export class MetaTxService {
         status: "submitted",
       },
     };
+  }
+
+  /**
+   * GET /dex/route
+   * Returns a routed swap plan — single-step for direct pairs, two-step when a bridge
+   * hop is needed (e.g. USDC → WBNB → 1MEME token).
+   *
+   * Bridge logic: if the target adapter is a bonding-curve adapter (ONEMEME_BC, FOURMEME,
+   * FLAPSH) and tokenIn is not WBNB, we prepend a PANCAKE_V3 (fee 500) bridge step,
+   * falling back to PANCAKE_V2.
+   *
+   * Each step includes pre-encoded adapterData ready to pass into POST /dex/batch-swap.
+   */
+  async getRoute(query: Record<string, string | undefined>) {
+    const adapter     = requireAdapter(query["adapter"]);
+    const tokenIn     = requireAddress(query["tokenIn"],  "tokenIn");
+    const tokenOut    = requireAddress(query["tokenOut"], "tokenOut");
+    const amountIn    = requireBigInt(query["amountIn"],  "amountIn");
+
+    if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
+
+    const slippageBps = BigInt(query["slippage"] ?? "100");
+    if (slippageBps > 5000n) {
+      throw new BadRequestException("slippage must be between 0 and 5000 basis points");
+    }
+
+    const nowSec   = BigInt(Math.floor(Date.now() / 1000));
+    const deadline = nowSec + 1800n;
+    const WBNB     = WBNB_BSC as `0x${string}`;
+
+    const isBcAdapter  = adapter === "ONEMEME_BC" || adapter === "FOURMEME" || adapter === "FLAPSH";
+    const needsBridge  = isBcAdapter && tokenIn.toLowerCase() !== WBNB_BSC;
+    const aggregatorFee = amountIn / 100n;
+
+    const wrapQuoteError = (err: unknown, label: string): never => {
+      if (err instanceof BadRequestException || err instanceof ServiceUnavailableException) throw err;
+      const msg = String(err);
+      if (
+        msg.includes("not configured") || msg.includes("timeout") ||
+        msg.includes("ECONNREFUSED") || msg.includes("fetch failed")
+      ) throw new ServiceUnavailableException(`${label} unavailable: ${msg}`);
+      throw new BadRequestException(`${label} failed: ${msg}`);
+    };
+
+    if (!needsBridge) {
+      let amountOut: bigint;
+      try {
+        if (adapter === "ONEMEME_BC") {
+          const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
+          const token = isBuy ? tokenOut : tokenIn;
+          const r     = isBuy ? await quoteBcBuy(token, amountIn) : await quoteBcSell(token, amountIn);
+          amountOut   = r.amountOut;
+        } else if (adapter === "FOURMEME") {
+          const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
+          const token = isBuy ? tokenOut : tokenIn;
+          const r     = isBuy ? await quoteFourMemeBuy(token, amountIn) : await quoteFourMemeSell(token, amountIn);
+          amountOut   = r.amountOut;
+        } else if (adapter === "FLAPSH") {
+          const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
+          const token = isBuy ? tokenOut : tokenIn;
+          amountOut   = isBuy ? await quoteFlapShBuy(token, amountIn) : await quoteFlapShSell(token, amountIn);
+        } else if (adapter === "PANCAKE_V2" || adapter === "UNISWAP_V2") {
+          amountOut = await quoteV2(adapter, [tokenIn, tokenOut], amountIn);
+        } else if (adapter === "PANCAKE_V3" || adapter === "UNISWAP_V3") {
+          const rawFees = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)) ?? [];
+          if (rawFees.length === 0) throw new BadRequestException("V3 route requires ?fees= query param (e.g. ?fees=500)");
+          amountOut = await quoteV3(adapter, buildV3PackedPath([tokenIn, tokenOut], rawFees), amountIn);
+        } else {
+          throw new BadRequestException("V4 routing: use GET /dex/quote and build batch steps manually");
+        }
+      } catch (err) { wrapQuoteError(err, "Quote"); }
+
+      const minOut      = (amountOut! * (10_000n - slippageBps)) / 10_000n;
+      const rawFees     = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)) ?? [];
+      const adapterBody = rawFees.length ? { fees: rawFees } : {};
+      const adapterData = buildAdapterData(adapter, tokenIn, tokenOut, adapterBody, deadline);
+
+      return {
+        data: {
+          singleStep:    true,
+          steps: [{
+            adapter,
+            adapterId:   ADAPTER_IDS[adapter],
+            tokenIn,
+            tokenOut,
+            amountIn:    amountIn.toString(),
+            amountOut:   amountOut!.toString(),
+            minOut:      minOut.toString(),
+            adapterData,
+          }],
+          amountIn:      amountIn.toString(),
+          minFinalOut:   minOut.toString(),
+          aggregatorFee: aggregatorFee.toString(),
+          slippageBps:   slippageBps.toString(),
+        },
+      };
+    }
+
+    // ── Two-step bridge route: tokenIn → WBNB → tokenOut ─────────────────────
+    let bridgeAmountOut: bigint;
+    let bridgeAdapter:   "PANCAKE_V3" | "PANCAKE_V2";
+    let step1Data:       `0x${string}`;
+
+    try {
+      bridgeAmountOut = await quoteV3("PANCAKE_V3", buildV3PackedPath([tokenIn, WBNB], [500]), amountIn);
+      bridgeAdapter   = "PANCAKE_V3";
+      step1Data       = encodeV3SingleHopAdapterData(500);
+    } catch {
+      try {
+        bridgeAmountOut = await quoteV2("PANCAKE_V2", [tokenIn, WBNB], amountIn);
+        bridgeAdapter   = "PANCAKE_V2";
+        step1Data       = encodeV2AdapterData([tokenIn, WBNB], deadline);
+      } catch (err2) {
+        wrapQuoteError(
+          new BadRequestException(`No PANCAKE_V3/V2 bridge path from tokenIn to WBNB: ${String(err2)}`),
+          "Bridge quote",
+        );
+      }
+    }
+
+    const bridgeMinOut = (bridgeAmountOut! * (10_000n - slippageBps)) / 10_000n;
+    const wbnbIn       = bridgeAmountOut!;
+
+    let finalAmountOut: bigint;
+    try {
+      if (adapter === "ONEMEME_BC") {
+        finalAmountOut = (await quoteBcBuy(tokenOut, wbnbIn)).amountOut;
+      } else if (adapter === "FOURMEME") {
+        finalAmountOut = (await quoteFourMemeBuy(tokenOut, wbnbIn)).amountOut;
+      } else {
+        finalAmountOut = await quoteFlapShBuy(tokenOut, wbnbIn);
+      }
+    } catch (err) { wrapQuoteError(err, "BC quote"); }
+
+    const finalMinOut  = (finalAmountOut! * (10_000n - slippageBps)) / 10_000n;
+    const step2Data    = buildAdapterData(adapter, WBNB, tokenOut, {}, deadline);
+
+    return {
+      data: {
+        singleStep: false,
+        steps: [
+          {
+            adapter:   bridgeAdapter!,
+            adapterId: ADAPTER_IDS[bridgeAdapter!],
+            tokenIn,
+            tokenOut:  WBNB,
+            amountIn:  amountIn.toString(),
+            amountOut: bridgeAmountOut!.toString(),
+            minOut:    bridgeMinOut.toString(),
+            adapterData: step1Data!,
+          },
+          {
+            adapter,
+            adapterId: ADAPTER_IDS[adapter],
+            tokenIn:   WBNB,
+            tokenOut,
+            amountIn:  wbnbIn.toString(),
+            amountOut: finalAmountOut!.toString(),
+            minOut:    finalMinOut.toString(),
+            adapterData: step2Data,
+          },
+        ],
+        amountIn:      amountIn.toString(),
+        minFinalOut:   finalMinOut.toString(),
+        aggregatorFee: aggregatorFee.toString(),
+        slippageBps:   slippageBps.toString(),
+      },
+    };
+  }
+
+  /**
+   * POST /dex/batch-swap
+   * Builds ABI-encoded calldata for OneMEMEAggregator.batchSwap().
+   * Use steps returned by GET /dex/route (or build manually from /dex/quote outputs).
+   *
+   * Body: { steps[], amountIn, minFinalOut, to, deadline }
+   * Returns: { to, calldata, steps, amountIn, feeEstimate, minFinalOut, deadline }
+   */
+  async buildBatchSwap(body: Record<string, unknown>) {
+    const steps       = parseSteps(body["steps"], "steps");
+    const amountIn    = requireBigInt(body["amountIn"],    "amountIn");
+    const minFinalOut = requireBigInt(body["minFinalOut"], "minFinalOut");
+    const to          = requireAddress(body["to"],         "to");
+    const deadline    = requireBigInt(body["deadline"],    "deadline");
+
+    if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
+
+    validatePathContinuity(steps);
+
+    const feeEstimate = amountIn / 100n;
+    const calldata    = buildBatchSwapCalldata(steps, amountIn, minFinalOut, to, deadline);
+
+    return {
+      data: {
+        to:          aggregatorAddress(),
+        calldata,
+        steps:       steps.map(s => ({ ...s, minOut: s.minOut.toString() })),
+        amountIn:    amountIn.toString(),
+        feeEstimate: feeEstimate.toString(),
+        minFinalOut: minFinalOut.toString(),
+        deadline:    deadline.toString(),
+      },
+    };
+  }
+
+  /**
+   * POST /dex/metatx/batch-digest
+   * Computes the EIP-712 digest the user must sign for a gasless multi-hop swap.
+   *
+   * Flow:
+   *   1. GET /dex/route → get steps[]
+   *   2. POST /dex/metatx/batch-digest → get digest + BatchMetaTxOrder
+   *   3. User signs digest
+   *   4. POST /dex/metatx/batch-relay with { order, sig }
+   *
+   * Body: { user, steps[], grossAmountIn, minFinalOut, recipient, deadline, swapDeadline, relayerFee }
+   */
+  async buildBatchDigest(body: Record<string, unknown>) {
+    const user          = requireAddress(body["user"],          "user");
+    const grossAmountIn = requireBigInt(body["grossAmountIn"],  "grossAmountIn");
+    const minFinalOut   = requireBigInt(body["minFinalOut"],    "minFinalOut");
+    const recipient     = requireAddress(body["recipient"],     "recipient");
+    const deadline      = requireBigInt(body["deadline"],       "deadline");
+    const swapDeadline  = requireBigInt(body["swapDeadline"],   "swapDeadline");
+    const relayerFee    = requireBigInt(body["relayerFee"],     "relayerFee");
+
+    if (grossAmountIn === 0n) throw new BadRequestException("grossAmountIn must be greater than 0");
+    if (relayerFee >= grossAmountIn) throw new BadRequestException("relayerFee must be less than grossAmountIn");
+
+    const steps = parseSteps(body["steps"], "steps");
+    validatePathContinuity(steps);
+
+    let nonce: bigint;
+    try {
+      nonce = await getUserNonce(user);
+    } catch (err: unknown) {
+      const msg = String(err);
+      if (msg.includes("METATX_ADDRESS")) throw new ServiceUnavailableException("METATX_ADDRESS is not configured");
+      throw err;
+    }
+
+    const order: BatchMetaTxOrder = {
+      user, nonce, deadline, steps, grossAmountIn, minFinalOut, recipient, swapDeadline, relayerFee,
+    };
+
+    let digest: `0x${string}`;
+    try {
+      digest = await getBatchOrderDigest(order);
+    } catch (err: unknown) {
+      const msg = String(err);
+      if (msg.includes("METATX_ADDRESS")) throw new ServiceUnavailableException("METATX_ADDRESS is not configured");
+      throw err;
+    }
+
+    return {
+      data: {
+        digest,
+        metaTxContract: metaTxAddress(),
+        order: {
+          ...order,
+          nonce:         order.nonce.toString(),
+          deadline:      order.deadline.toString(),
+          grossAmountIn: order.grossAmountIn.toString(),
+          minFinalOut:   order.minFinalOut.toString(),
+          swapDeadline:  order.swapDeadline.toString(),
+          relayerFee:    order.relayerFee.toString(),
+          steps:         order.steps.map(s => ({ ...s, minOut: s.minOut.toString() })),
+        },
+        aggregatorFeeEstimate: (grossAmountIn / 100n).toString(),
+      },
+    };
+  }
+
+  /**
+   * POST /dex/metatx/batch-relay
+   * Submits a signed BatchMetaTxOrder to OneMEMEMetaTx.batchExecuteMetaTx().
+   * The RELAYER_PRIVATE_KEY account pays gas.
+   *
+   * Body: { order: BatchMetaTxOrder, sig: "0x...", permitType?: 0|1|2, permitData?: "0x..." }
+   */
+  async relayBatch(body: Record<string, unknown>) {
+    if (!process.env.RELAYER_PRIVATE_KEY) {
+      throw new BadRequestException("Meta-tx relay is not enabled on this node (RELAYER_PRIVATE_KEY not set)");
+    }
+
+    const rawOrder = body["order"];
+    if (!rawOrder || typeof rawOrder !== "object") throw new BadRequestException("order is required");
+    const o = rawOrder as Record<string, unknown>;
+
+    const steps = parseSteps(o["steps"], "order.steps");
+    validatePathContinuity(steps);
+
+    const order: BatchMetaTxOrder = {
+      user:          requireAddress(o["user"],          "order.user"),
+      nonce:         requireBigInt(o["nonce"],          "order.nonce"),
+      deadline:      requireBigInt(o["deadline"],       "order.deadline"),
+      steps,
+      grossAmountIn: requireBigInt(o["grossAmountIn"],  "order.grossAmountIn"),
+      minFinalOut:   requireBigInt(o["minFinalOut"],    "order.minFinalOut"),
+      recipient:     requireAddress(o["recipient"],     "order.recipient"),
+      swapDeadline:  requireBigInt(o["swapDeadline"],   "order.swapDeadline"),
+      relayerFee:    requireBigInt(o["relayerFee"],     "order.relayerFee"),
+    };
+
+    const sig = body["sig"];
+    if (typeof sig !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(sig)) {
+      throw new BadRequestException("sig must be a 65-byte hex signature (0x + 130 hex chars)");
+    }
+
+    const permitType    = parsePermitType(body["permitType"]);
+    const rawPermitData = body["permitData"] ?? "0x";
+    if (typeof rawPermitData !== "string" || !/^0x[0-9a-fA-F]*$/.test(rawPermitData)) {
+      throw new BadRequestException("permitData must be a hex string");
+    }
+
+    const nowSec = BigInt(Math.floor(Date.now() / 1000));
+    if (order.deadline < nowSec) throw new BadRequestException("Meta-tx deadline has expired");
+
+    let txHash: `0x${string}`;
+    try {
+      txHash = await relayBatchMetaTx(order, sig as `0x${string}`, {
+        permitType,
+        data: rawPermitData as `0x${string}`,
+      });
+    } catch (err: unknown) {
+      const msg = String(err);
+      if (
+        msg.includes("timeout") || msg.includes("TIMEOUT") ||
+        msg.includes("ECONNREFUSED") || msg.includes("fetch failed")
+      ) throw new ServiceUnavailableException(`Relay RPC unavailable: ${msg}`);
+      throw new BadRequestException(`Relay failed: ${msg}`);
+    }
+
+    return { data: { txHash, status: "submitted" } };
   }
 
   /**

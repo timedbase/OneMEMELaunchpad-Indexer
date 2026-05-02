@@ -662,6 +662,28 @@ export async function quoteV4Multi(
   }
 }
 
+// ─── Batch types ─────────────────────────────────────────────────────────────
+
+export interface SwapStep {
+  adapterId:   Hex;
+  tokenIn:     Hex;
+  tokenOut:    Hex;
+  minOut:      bigint;
+  adapterData: Hex;
+}
+
+export interface BatchMetaTxOrder {
+  user:          Hex;
+  nonce:         bigint;
+  deadline:      bigint;
+  steps:         SwapStep[];
+  grossAmountIn: bigint;
+  minFinalOut:   bigint;
+  recipient:     Hex;
+  swapDeadline:  bigint;
+  relayerFee:    bigint;
+}
+
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
 
 export const AGGREGATOR_ABI = parseAbi([
@@ -670,12 +692,19 @@ export const AGGREGATOR_ABI = parseAbi([
 ]);
 
 export const METATX_ABI = parseAbi([
-  // executeMetaTx(MetaTxOrder order, bytes sig, PermitData permit)
   "function executeMetaTx((address user, uint256 nonce, uint256 deadline, bytes32 adapterId, address tokenIn, uint256 grossAmountIn, address tokenOut, uint256 minUserOut, address recipient, uint256 swapDeadline, bytes adapterData, uint256 relayerFee) order, bytes sig, (uint8 permitType, bytes data) permit) returns (uint256 amountOut)",
-  // orderDigest(MetaTxOrder order) view returns (bytes32)
   "function orderDigest((address user, uint256 nonce, uint256 deadline, bytes32 adapterId, address tokenIn, uint256 grossAmountIn, address tokenOut, uint256 minUserOut, address recipient, uint256 swapDeadline, bytes adapterData, uint256 relayerFee) order) view returns (bytes32)",
-  // nonces(address user) view returns (uint256)
   "function nonces(address user) view returns (uint256)",
+]);
+
+export const BATCH_AGGREGATOR_ABI = parseAbi([
+  "function batchSwap((bytes32 adapterId, address tokenIn, address tokenOut, uint256 minOut, bytes adapterData)[] steps, uint256 amountIn, uint256 minFinalOut, address to, uint256 deadline) payable returns (uint256 finalAmountOut)",
+  "event BatchSwapped(address indexed user, address tokenIn, address tokenOut, uint256 grossAmountIn, uint256 feeCharged, uint256 amountOut, uint256 stepCount)",
+]);
+
+export const BATCH_METATX_ABI = parseAbi([
+  "function batchExecuteMetaTx((address user, uint256 nonce, uint256 deadline, (bytes32 adapterId, address tokenIn, address tokenOut, uint256 minOut, bytes adapterData)[] steps, uint256 grossAmountIn, uint256 minFinalOut, address recipient, uint256 swapDeadline, uint256 relayerFee) order, bytes sig, (uint8 permitType, bytes data) permit) returns (uint256 amountOut)",
+  "function batchOrderDigest((address user, uint256 nonce, uint256 deadline, (bytes32 adapterId, address tokenIn, address tokenOut, uint256 minOut, bytes adapterData)[] steps, uint256 grossAmountIn, uint256 minFinalOut, address recipient, uint256 swapDeadline, uint256 relayerFee) order) view returns (bytes32)",
 ]);
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
@@ -771,6 +800,47 @@ export function buildMetaTxCalldata(
   return encodeFunctionData({
     abi:          METATX_ABI,
     functionName: "executeMetaTx",
+    args:         [order, sig, permit],
+  });
+}
+
+/**
+ * Builds calldata for OneMEMEAggregator.batchSwap().
+ * Chains multiple adapter hops atomically in one transaction.
+ */
+export function buildBatchSwapCalldata(
+  steps:       SwapStep[],
+  amountIn:    bigint,
+  minFinalOut: bigint,
+  to:          Hex,
+  deadline:    bigint,
+): Hex {
+  return encodeFunctionData({
+    abi:          BATCH_AGGREGATOR_ABI,
+    functionName: "batchSwap",
+    args:         [steps, amountIn, minFinalOut, to, deadline],
+  });
+}
+
+export async function getBatchOrderDigest(order: BatchMetaTxOrder): Promise<Hex> {
+  return getDexPublicClient().readContract({
+    address:      metaTxAddress(),
+    abi:          BATCH_METATX_ABI,
+    functionName: "batchOrderDigest",
+    args:         [order],
+  }) as Promise<Hex>;
+}
+
+export async function relayBatchMetaTx(
+  order:  BatchMetaTxOrder,
+  sig:    Hex,
+  permit: PermitData,
+): Promise<Hex> {
+  const wallet = getDexWalletClient();
+  return wallet.writeContract({
+    address:      metaTxAddress(),
+    abi:          BATCH_METATX_ABI,
+    functionName: "batchExecuteMetaTx",
     args:         [order, sig, permit],
   });
 }
