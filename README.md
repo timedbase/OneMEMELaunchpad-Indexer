@@ -483,7 +483,7 @@ Responses include computed fields: `claimable` (currently unlocked and unclaimed
 |---|---|---|
 | `GET` | `/api/v1/{chain}/price/bnb` | BNB/USDT aggregated from 6 exchanges |
 
-Sources: Binance, OKX, Bybit, CoinGecko, MEXC, GateIO. Refreshed every 10 seconds. Returns trimmed average with per-source breakdown.
+Sources: CoinGecko (free API) and PancakeSwap WBNB/USDT on-chain pair (via `getReserves()`). Refreshed every 10 seconds. Returns the average with a per-source breakdown.
 
 ---
 

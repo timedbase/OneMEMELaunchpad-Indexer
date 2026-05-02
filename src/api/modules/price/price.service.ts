@@ -1,28 +1,33 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from "@nestjs/common";
+import { createPublicClient, http, parseAbi, defineChain } from "viem";
 
-interface ExchangeResult {
-  exchange: string;
+interface SourceResult {
+  source:   string;
   price:    number;
   ok:       boolean;
-  cachedAt: number; // unix seconds — when this source last succeeded
+  cachedAt: number;
 }
 
 interface PriceCache {
   bnbUsdt:   number;
-  sources:   ExchangeResult[];
+  sources:   SourceResult[];
   updatedAt: number;
   stale:     boolean;
 }
 
-// Per-source TTL in seconds — if a source hasn't succeeded within TTL it is
-// considered stale and excluded from the average until it recovers.
+// PancakeSwap V2 WBNB/USDT pair on BSC mainnet.
+// token0 = USDT (0x55d398..., 18 dec), token1 = WBNB (0xbb4CdB..., 18 dec)
+// Override with WBNB_USDT_PAIR_ADDRESS env var for testnet or a different pool.
+const DEFAULT_WBNB_USDT_PAIR = "0x16b9a82891338f9bA80E2D6970FddA79D1eb0daE";
+
+const PAIR_ABI = parseAbi([
+  "function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)",
+]);
+
+// How long (seconds) to keep reusing a source's last good value after a failed fetch.
 const SOURCE_TTL: Record<string, number> = {
-  Binance:   30,
-  OKX:       30,
-  Bybit:     30,
-  CoinGecko: 60,  // CoinGecko free tier updates every 60s
-  MEXC:      30,
-  GateIO:    30,
+  CoinGecko:   90,
+  PancakeSwap: 30,
 };
 
 @Injectable()
@@ -30,130 +35,99 @@ export class PriceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PriceService.name);
   private cache: PriceCache | null = null;
   private timer: NodeJS.Timeout | null = null;
+  private lastGood = new Map<string, SourceResult>();
+  private rpcClient: ReturnType<typeof createPublicClient> | null = null;
 
-  // Each source keeps its last successful result so stale data can be reused
-  // within TTL even if the current fetch fails.
-  private lastGood: Map<string, ExchangeResult> = new Map();
+  private readonly REFRESH_MS = 10_000;
 
-  private readonly REFRESH_MS = 10_000; // 10 seconds
+  // ─── RPC client ─────────────────────────────────────────────────────────────
 
-  // ─── Exchange Fetchers ──────────────────────────────────────────────────────
-
-  private async fetchBinance(): Promise<ExchangeResult> {
-    try {
-      const res  = await fetch("https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT",
-        { signal: AbortSignal.timeout(5_000) });
-      const data = await res.json() as { price: string };
-      const price = parseFloat(data.price);
-      if (!isFinite(price) || price <= 0) throw new Error("invalid price");
-      return { exchange: "Binance", price, ok: true, cachedAt: Math.floor(Date.now() / 1000) };
-    } catch (err) {
-      this.logger.warn(`Binance fetch failed: ${(err as Error).message}`);
-      return { exchange: "Binance", price: 0, ok: false, cachedAt: 0 };
+  private getClient(): ReturnType<typeof createPublicClient> | null {
+    if (!process.env.BSC_RPC_URL) return null;
+    if (!this.rpcClient) {
+      const chainId = parseInt(process.env.CHAIN_ID ?? "56");
+      const chain   = defineChain({
+        id: chainId,
+        name: "EVM",
+        nativeCurrency: { name: "Native", symbol: "ETH", decimals: 18 },
+        rpcUrls: { default: { http: [process.env.BSC_RPC_URL] } },
+      });
+      this.rpcClient = createPublicClient({
+        chain,
+        transport: http(process.env.BSC_RPC_URL, { timeout: 8_000, retryCount: 1, retryDelay: 500 }),
+      });
     }
+    return this.rpcClient;
   }
 
-  private async fetchOKX(): Promise<ExchangeResult> {
-    try {
-      const res  = await fetch("https://www.okx.com/api/v5/market/ticker?instId=BNB-USDT",
-        { signal: AbortSignal.timeout(5_000) });
-      const data = await res.json() as { data: { last: string }[] };
-      const price = parseFloat(data.data[0].last);
-      if (!isFinite(price) || price <= 0) throw new Error("invalid price");
-      return { exchange: "OKX", price, ok: true, cachedAt: Math.floor(Date.now() / 1000) };
-    } catch (err) {
-      this.logger.warn(`OKX fetch failed: ${(err as Error).message}`);
-      return { exchange: "OKX", price: 0, ok: false, cachedAt: 0 };
-    }
-  }
+  // ─── Source fetchers ─────────────────────────────────────────────────────────
 
-  private async fetchBybit(): Promise<ExchangeResult> {
-    try {
-      const res  = await fetch("https://api.bybit.com/v5/market/tickers?category=spot&symbol=BNBUSDT",
-        { signal: AbortSignal.timeout(5_000) });
-      const data = await res.json() as { result: { list: { lastPrice: string }[] } };
-      const price = parseFloat(data.result.list[0].lastPrice);
-      if (!isFinite(price) || price <= 0) throw new Error("invalid price");
-      return { exchange: "Bybit", price, ok: true, cachedAt: Math.floor(Date.now() / 1000) };
-    } catch (err) {
-      this.logger.warn(`Bybit fetch failed: ${(err as Error).message}`);
-      return { exchange: "Bybit", price: 0, ok: false, cachedAt: 0 };
-    }
-  }
-
-  private async fetchCoinGecko(): Promise<ExchangeResult> {
+  private async fetchCoinGecko(): Promise<SourceResult> {
     try {
       const res  = await fetch(
         "https://api.coingecko.com/api/v3/simple/price?ids=binancecoin&vs_currencies=usd",
-        { signal: AbortSignal.timeout(8_000) });
+        { signal: AbortSignal.timeout(8_000) },
+      );
       const data = await res.json() as { binancecoin: { usd: number } };
       const price = data.binancecoin.usd;
       if (!isFinite(price) || price <= 0) throw new Error("invalid price");
-      return { exchange: "CoinGecko", price, ok: true, cachedAt: Math.floor(Date.now() / 1000) };
+      return { source: "CoinGecko", price, ok: true, cachedAt: Math.floor(Date.now() / 1000) };
     } catch (err) {
       this.logger.warn(`CoinGecko fetch failed: ${(err as Error).message}`);
-      return { exchange: "CoinGecko", price: 0, ok: false, cachedAt: 0 };
+      return { source: "CoinGecko", price: 0, ok: false, cachedAt: 0 };
     }
   }
 
-  private async fetchMEXC(): Promise<ExchangeResult> {
+  private async fetchPancakeSwap(): Promise<SourceResult> {
+    const client = this.getClient();
+    if (!client) {
+      return { source: "PancakeSwap", price: 0, ok: false, cachedAt: 0 };
+    }
     try {
-      const res  = await fetch("https://api.mexc.com/api/v3/ticker/price?symbol=BNBUSDT",
-        { signal: AbortSignal.timeout(5_000) });
-      const data = await res.json() as { price: string };
-      const price = parseFloat(data.price);
+      const pair = (process.env.WBNB_USDT_PAIR_ADDRESS ?? DEFAULT_WBNB_USDT_PAIR) as `0x${string}`;
+      const [reserve0, reserve1] = await client.readContract({
+        address:      pair,
+        abi:          PAIR_ABI,
+        functionName: "getReserves",
+      }) as [bigint, bigint, number];
+
+      if (reserve0 === 0n || reserve1 === 0n) throw new Error("empty reserves");
+
+      // token0 = USDT (18 dec), token1 = WBNB (18 dec)
+      // price (USDT per BNB) = reserve0 / reserve1
+      // Scale to 6 decimal places before converting to Number to preserve precision.
+      const priceScaled = (reserve0 * 1_000_000n) / reserve1;
+      const price = Number(priceScaled) / 1_000_000;
       if (!isFinite(price) || price <= 0) throw new Error("invalid price");
-      return { exchange: "MEXC", price, ok: true, cachedAt: Math.floor(Date.now() / 1000) };
+
+      return { source: "PancakeSwap", price, ok: true, cachedAt: Math.floor(Date.now() / 1000) };
     } catch (err) {
-      this.logger.warn(`MEXC fetch failed: ${(err as Error).message}`);
-      return { exchange: "MEXC", price: 0, ok: false, cachedAt: 0 };
+      this.logger.warn(`PancakeSwap fetch failed: ${(err as Error).message}`);
+      return { source: "PancakeSwap", price: 0, ok: false, cachedAt: 0 };
     }
   }
 
-  private async fetchGateIO(): Promise<ExchangeResult> {
-    try {
-      const res  = await fetch("https://api.gateio.ws/api/v4/spot/tickers?currency_pair=BNB_USDT",
-        { signal: AbortSignal.timeout(5_000) });
-      const data = await res.json() as { last: string }[];
-      const price = parseFloat(data[0].last);
-      if (!isFinite(price) || price <= 0) throw new Error("invalid price");
-      return { exchange: "GateIO", price, ok: true, cachedAt: Math.floor(Date.now() / 1000) };
-    } catch (err) {
-      this.logger.warn(`GateIO fetch failed: ${(err as Error).message}`);
-      return { exchange: "GateIO", price: 0, ok: false, cachedAt: 0 };
-    }
-  }
-
-  // ─── Aggregation ────────────────────────────────────────────────────────────
+  // ─── Aggregation ─────────────────────────────────────────────────────────────
 
   private async refresh(): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
 
     const fresh = await Promise.all([
-      this.fetchBinance(),
-      this.fetchOKX(),
-      this.fetchBybit(),
       this.fetchCoinGecko(),
-      this.fetchMEXC(),
-      this.fetchGateIO(),
+      this.fetchPancakeSwap(),
     ]);
 
-    // Update lastGood cache for any source that just succeeded
     for (const r of fresh) {
-      if (r.ok) this.lastGood.set(r.exchange, r);
+      if (r.ok) this.lastGood.set(r.source, r);
     }
 
-    // Build final source list: use fresh result if ok, else fall back to
-    // lastGood if within TTL, else treat as failed.
-    const sources: ExchangeResult[] = fresh.map((r) => {
+    // Use fresh result if ok, else fall back to lastGood within TTL.
+    const sources: SourceResult[] = fresh.map((r) => {
       if (r.ok) return r;
-      const last = this.lastGood.get(r.exchange);
-      const ttl  = SOURCE_TTL[r.exchange] ?? 30;
-      if (last && now - last.cachedAt <= ttl) {
-        // Within TTL — reuse last good value, mark ok so it contributes to avg
-        return { ...last, ok: true };
-      }
-      return r; // truly failed and expired
+      const last = this.lastGood.get(r.source);
+      const ttl  = SOURCE_TTL[r.source] ?? 30;
+      if (last && now - last.cachedAt <= ttl) return { ...last, ok: true };
+      return r;
     });
 
     const live = sources.filter((s) => s.ok);
@@ -161,9 +135,9 @@ export class PriceService implements OnModuleInit, OnModuleDestroy {
     if (live.length === 0) {
       if (this.cache) {
         this.cache = { ...this.cache, stale: true, sources, updatedAt: now };
-        this.logger.warn("All exchange fetches failed — serving stale BNB price");
+        this.logger.warn("All price fetches failed — serving stale BNB price");
       } else {
-        this.logger.error("All exchange fetches failed and no cache available");
+        this.logger.error("All price fetches failed and no cache available");
       }
       return;
     }
@@ -178,29 +152,28 @@ export class PriceService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  // ─── Lifecycle ──────────────────────────────────────────────────────────────
+  // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
   async onModuleInit() {
     await this.refresh();
     this.timer = setInterval(() => { void this.refresh(); }, this.REFRESH_MS).unref();
-    this.logger.log(`BNB price aggregator started (refresh every ${this.REFRESH_MS / 1000}s)`);
+    this.logger.log(`BNB price service started (refresh every ${this.REFRESH_MS / 1000}s)`);
   }
 
   onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
   }
 
-  // ─── Public ─────────────────────────────────────────────────────────────────
+  // ─── Public ──────────────────────────────────────────────────────────────────
 
   getPrice() {
     if (!this.cache) {
       return { error: "Price not yet available — try again in a few seconds" };
     }
-
     return {
       bnbUsdt:   this.cache.bnbUsdt,
       sources:   this.cache.sources.map((s) => ({
-        exchange: s.exchange,
+        source:   s.source,
         price:    s.ok ? s.price : null,
         ok:       s.ok,
         cachedAt: s.cachedAt || null,

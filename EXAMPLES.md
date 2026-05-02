@@ -1014,21 +1014,17 @@ curl 'https://api.1coin.meme/api/v1/bsc/price/bnb'
 
 ```json
 {
-  "bnbUsdt":   583.42,
+  "bnbUsdt":   583.35,
   "updatedAt": 1774058100,
   "stale":     false,
   "sources": [
-    { "exchange": "Binance",   "price": 583.50, "ok": true,  "cachedAt": 1774058095 },
-    { "exchange": "OKX",       "price": 583.38, "ok": true,  "cachedAt": 1774058094 },
-    { "exchange": "Bybit",     "price": 583.40, "ok": true,  "cachedAt": 1774058096 },
-    { "exchange": "CoinGecko", "price": 583.20, "ok": true,  "cachedAt": 1774058040 },
-    { "exchange": "MEXC",      "price": 583.55, "ok": true,  "cachedAt": 1774058093 },
-    { "exchange": "GateIO",    "price": null,   "ok": false, "cachedAt": null }
+    { "source": "CoinGecko",   "price": 583.20, "ok": true, "cachedAt": 1774058040 },
+    { "source": "PancakeSwap", "price": 583.50, "ok": true, "cachedAt": 1774058100 }
   ]
 }
 ```
 
-Aggregated from 6 sources: Binance, OKX, Bybit, CoinGecko, MEXC, GateIO. Refreshed every 10 seconds. Average is computed from sources that responded successfully within their TTL window.
+Averaged from CoinGecko (free API) and the PancakeSwap V2 WBNB/USDT on-chain pair (`getReserves()`). Refreshed every 10 seconds. If one source fails its result is reused within its TTL window (90 s for CoinGecko, 30 s for PancakeSwap) before being dropped from the average.
 
 ---
 

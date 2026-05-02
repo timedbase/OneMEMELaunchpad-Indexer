@@ -8,15 +8,14 @@ export class PriceController {
   /**
    * GET /api/v1/price/bnb
    *
-   * Returns the aggregated BNB/USDT price averaged across Binance, OKX, and Bybit.
-   * Refreshed every 10 seconds. Use this to convert all BNB wei amounts to USD
-   * on the frontend.
+   * Returns the BNB/USDT price averaged from CoinGecko and the PancakeSwap
+   * WBNB/USDT on-chain pair. Refreshed every 10 seconds.
    *
    * Response:
-   *   bnbUsdt    — aggregated price (average of available sources)
-   *   sources    — per-exchange breakdown
+   *   bnbUsdt    — averaged price
+   *   sources    — per-source breakdown (CoinGecko, PancakeSwap)
    *   updatedAt  — unix timestamp of last successful fetch
-   *   stale      — true if all exchanges failed on last refresh (cached value returned)
+   *   stale      — true if all sources failed on last refresh (cached value returned)
    */
   @Get("bnb")
   bnb() {
