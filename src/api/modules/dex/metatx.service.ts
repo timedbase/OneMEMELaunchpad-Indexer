@@ -42,7 +42,17 @@ import { isAddress, normalizeAddress } from "../../helpers";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const WBNB_BSC = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
+const WBNB_BSC  = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
+const NATIVE_BNB = "0x0000000000000000000000000000000000000000";
+
+function isNative(addr: string): boolean {
+  return addr.toLowerCase() === NATIVE_BNB;
+}
+
+/** Replace the zero address with WBNB so all downstream routing uses a real ERC-20. */
+function toWbnbIfNative(addr: Hex): Hex {
+  return isNative(addr) ? (WBNB_BSC as Hex) : addr;
+}
 
 // ─── Input validation helpers ─────────────────────────────────────────────────
 
@@ -287,12 +297,20 @@ export class MetaTxService {
    * Query params: adapter, tokenIn, amountIn, tokenOut, path? (comma-separated), fees? (comma-separated), slippage? (bps, default 100)
    */
   async getQuote(query: Record<string, string | undefined>) {
-    const adapter    = requireAdapter(query["adapter"]);
-    const tokenIn    = requireAddress(query["tokenIn"],  "tokenIn");
-    const tokenOut   = requireAddress(query["tokenOut"], "tokenOut");
-    const amountIn   = requireBigInt(query["amountIn"],  "amountIn");
+    const adapter       = requireAdapter(query["adapter"]);
+    const rawTokenIn    = requireAddress(query["tokenIn"],  "tokenIn");
+    const rawTokenOut   = requireAddress(query["tokenOut"], "tokenOut");
+    const amountIn      = requireBigInt(query["amountIn"],  "amountIn");
 
     if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
+    if (isNative(rawTokenIn) && isNative(rawTokenOut)) {
+      throw new BadRequestException("tokenIn and tokenOut cannot both be native BNB");
+    }
+
+    const nativeIn  = isNative(rawTokenIn);
+    const nativeOut = isNative(rawTokenOut);
+    const tokenIn   = toWbnbIfNative(rawTokenIn);
+    const tokenOut  = toWbnbIfNative(rawTokenOut);
 
     const slippageBps = BigInt(query["slippage"] ?? "100");
     if (slippageBps < 0n || slippageBps > 5000n) {
@@ -309,7 +327,7 @@ export class MetaTxService {
     const path: Hex[] = rawPath.length >= 2
       ? rawPath.map((p, i) => {
           if (!isAddress(p)) throw new BadRequestException(`path[${i}] is not a valid address`);
-          return normalizeAddress(p) as Hex;
+          return toWbnbIfNative(normalizeAddress(p) as Hex);
         })
       : [tokenIn, tokenOut];
 
@@ -437,8 +455,12 @@ export class MetaTxService {
     return {
       data: {
         adapter,
-        tokenIn,
-        tokenOut,
+        tokenIn:       nativeIn  ? NATIVE_BNB : tokenIn,
+        tokenOut:      nativeOut ? NATIVE_BNB : tokenOut,
+        nativeIn,
+        nativeOut,
+        // nativeIn: caller must send msg.value = amountIn
+        value:         nativeIn ? amountIn.toString() : "0",
         amountIn:      amountIn.toString(),
         amountOut:     amountOut.toString(),
         minOut:        minOut.toString(),
@@ -477,20 +499,27 @@ export class MetaTxService {
    *   adapterData? — (V4) raw hex adapterData
    */
   async buildSwap(body: Record<string, unknown>) {
-    const adapter    = requireAdapter(body["adapter"]);
-    const tokenIn    = requireAddress(body["tokenIn"],  "tokenIn");
-    const tokenOut   = requireAddress(body["tokenOut"], "tokenOut");
-    const amountIn   = requireBigInt(body["amountIn"],  "amountIn");
-    const minOut     = requireBigInt(body["minOut"],    "minOut");
-    const to         = requireAddress(body["to"], "to");
-    const deadline   = requireBigInt(body["deadline"], "deadline");
+    const adapter      = requireAdapter(body["adapter"]);
+    const rawTokenIn   = requireAddress(body["tokenIn"],  "tokenIn");
+    const rawTokenOut  = requireAddress(body["tokenOut"], "tokenOut");
+    const amountIn     = requireBigInt(body["amountIn"],  "amountIn");
+    const minOut       = requireBigInt(body["minOut"],    "minOut");
+    const to           = requireAddress(body["to"], "to");
+    const deadline     = requireBigInt(body["deadline"], "deadline");
 
     if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
+    if (isNative(rawTokenIn) && isNative(rawTokenOut)) {
+      throw new BadRequestException("tokenIn and tokenOut cannot both be native BNB");
+    }
+
+    const nativeIn  = isNative(rawTokenIn);
+    const nativeOut = isNative(rawTokenOut);
+    const tokenIn   = toWbnbIfNative(rawTokenIn);
+    const tokenOut  = toWbnbIfNative(rawTokenOut);
 
     const adapterId   = ADAPTER_IDS[adapter];
     const adapterData = buildAdapterData(adapter, tokenIn, tokenOut, body, deadline);
 
-    // 1% aggregator fee (informational — the contract deducts it)
     const feeEstimate = amountIn / 100n;
     const netAmountIn = amountIn - feeEstimate;
 
@@ -502,10 +531,14 @@ export class MetaTxService {
       data: {
         to:          aggregatorAddress(),
         calldata,
+        // nativeIn: caller must send this as msg.value; nativeOut: WBNB arrives, caller unwraps
+        value:       nativeIn ? amountIn.toString() : "0",
+        nativeIn,
+        nativeOut,
         adapter,
         adapterId,
-        tokenIn,
-        tokenOut,
+        tokenIn:       nativeIn  ? NATIVE_BNB : tokenIn,
+        tokenOut:      nativeOut ? NATIVE_BNB : tokenOut,
         amountIn:      amountIn.toString(),
         feeEstimate:   feeEstimate.toString(),
         netAmountIn:   netAmountIn.toString(),
@@ -719,12 +752,20 @@ export class MetaTxService {
    * Each step includes pre-encoded adapterData ready to pass into POST /dex/batch-swap.
    */
   async getRoute(query: Record<string, string | undefined>) {
-    const adapter     = requireAdapter(query["adapter"]);
-    const tokenIn     = requireAddress(query["tokenIn"],  "tokenIn");
-    const tokenOut    = requireAddress(query["tokenOut"], "tokenOut");
-    const amountIn    = requireBigInt(query["amountIn"],  "amountIn");
+    const adapter      = requireAdapter(query["adapter"]);
+    const rawTokenIn   = requireAddress(query["tokenIn"],  "tokenIn");
+    const rawTokenOut  = requireAddress(query["tokenOut"], "tokenOut");
+    const amountIn     = requireBigInt(query["amountIn"],  "amountIn");
 
     if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
+    if (isNative(rawTokenIn) && isNative(rawTokenOut)) {
+      throw new BadRequestException("tokenIn and tokenOut cannot both be native BNB");
+    }
+
+    const nativeIn  = isNative(rawTokenIn);
+    const nativeOut = isNative(rawTokenOut);
+    const tokenIn   = toWbnbIfNative(rawTokenIn);
+    const tokenOut  = toWbnbIfNative(rawTokenOut);
 
     const slippageBps = BigInt(query["slippage"] ?? "100");
     if (slippageBps > 5000n) {
@@ -784,7 +825,10 @@ export class MetaTxService {
 
       return {
         data: {
-          singleStep:    true,
+          singleStep: true,
+          nativeIn,
+          nativeOut,
+          value:      nativeIn ? amountIn.toString() : "0",
           steps: [{
             adapter,
             adapterId:   ADAPTER_IDS[adapter],
@@ -845,6 +889,9 @@ export class MetaTxService {
     return {
       data: {
         singleStep: false,
+        nativeIn,
+        nativeOut,
+        value:      nativeIn ? amountIn.toString() : "0",
         steps: [
           {
             adapter:   bridgeAdapter!,
@@ -892,6 +939,12 @@ export class MetaTxService {
 
     if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
 
+    // Normalize native BNB in first/last step; inner hops must already use WBNB
+    const nativeIn  = isNative(steps[0]!.tokenIn);
+    const nativeOut = isNative(steps[steps.length - 1]!.tokenOut);
+    if (nativeIn)  steps[0]!.tokenIn                     = WBNB_BSC as Hex;
+    if (nativeOut) steps[steps.length - 1]!.tokenOut     = WBNB_BSC as Hex;
+
     validatePathContinuity(steps);
 
     const feeEstimate = amountIn / 100n;
@@ -901,6 +954,9 @@ export class MetaTxService {
       data: {
         to:          aggregatorAddress(),
         calldata,
+        nativeIn,
+        nativeOut,
+        value:       nativeIn ? amountIn.toString() : "0",
         steps:       steps.map(s => ({ ...s, minOut: s.minOut.toString() })),
         amountIn:    amountIn.toString(),
         feeEstimate: feeEstimate.toString(),
@@ -935,6 +991,8 @@ export class MetaTxService {
     if (relayerFee >= grossAmountIn) throw new BadRequestException("relayerFee must be less than grossAmountIn");
 
     const steps = parseSteps(body["steps"], "steps");
+    if (isNative(steps[0]!.tokenIn))                     steps[0]!.tokenIn                 = WBNB_BSC as Hex;
+    if (isNative(steps[steps.length - 1]!.tokenOut))     steps[steps.length - 1]!.tokenOut = WBNB_BSC as Hex;
     validatePathContinuity(steps);
 
     let nonce: bigint;
@@ -995,6 +1053,8 @@ export class MetaTxService {
     const o = rawOrder as Record<string, unknown>;
 
     const steps = parseSteps(o["steps"], "order.steps");
+    if (isNative(steps[0]!.tokenIn))                     steps[0]!.tokenIn                 = WBNB_BSC as Hex;
+    if (isNative(steps[steps.length - 1]!.tokenOut))     steps[steps.length - 1]!.tokenOut = WBNB_BSC as Hex;
     validatePathContinuity(steps);
 
     const order: BatchMetaTxOrder = {
