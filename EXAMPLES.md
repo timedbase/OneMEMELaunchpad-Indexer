@@ -1125,32 +1125,50 @@ curl 'https://api.1coin.meme/api/v1/bsc/chat/0x7cff...1111/messages?limit=50'
 
 Messages support full Unicode including emoji. The 500-character limit counts Unicode code points, not UTF-16 units (so emoji count as 1 character each).
 
-**WebSocket (send + receive):**
+**WebSocket — full auth + send flow:**
+
+The chat WebSocket requires EIP-191 wallet authentication before messages can be sent. The server issues a challenge on connect; the client signs it and sends the signature back.
 
 ```typescript
+import { verifyMessage } from "viem"; // or any EIP-191 signer
+
 const ws = new WebSocket("wss://api.1coin.meme/api/v1/bsc/chat/ws");
 
-ws.onopen = () => {
-  // 1. Subscribe to a token room
-  ws.send(JSON.stringify({ type: "subscribe", token: "0x7cff...1111" }));
-};
-
-ws.onmessage = (msg) => {
+ws.onmessage = async (msg) => {
   const frame = JSON.parse(msg.data);
+
+  // Step 1 — server sends challenge immediately on connect
+  if (frame.type === "challenge") {
+    const { nonce } = frame;
+    const message = `OneMEME Chat Auth\nNonce: ${nonce}`;
+
+    // Step 2 — sign with the user's wallet (e.g. wagmi signMessage, ethers, viem)
+    const sig = await wallet.signMessage({ message });
+
+    // Step 3 — send auth
+    ws.send(JSON.stringify({ type: "auth", address: "0xMyWallet...", sig }));
+  }
+
+  // Step 4 — server confirms auth
+  if (frame.type === "authenticated") {
+    // Step 5 — subscribe to a token room
+    ws.send(JSON.stringify({ type: "subscribe", token: "0x7cff...1111" }));
+  }
+
   if (frame.type === "history") {
     console.log("history:", frame.messages);
   }
+
   if (frame.type === "message") {
-    console.log(frame.sender, ":", frame.text); // supports emoji
+    // sender is the server-verified wallet address — cannot be spoofed
+    console.log(frame.sender, ":", frame.text);
   }
 };
 
-// 2. Send a message (after subscribing)
-ws.send(JSON.stringify({
-  type:   "message",
-  sender: "0xmywallet...",
-  text:   "gm everyone 🌅",
-}));
+// Step 6 — send a message (after subscribing)
+function sendMessage(text: string) {
+  ws.send(JSON.stringify({ type: "message", text }));
+}
 ```
 
 Rate limits: 1 message per 3 s per IP globally; max 5 messages per minute per IP per token.

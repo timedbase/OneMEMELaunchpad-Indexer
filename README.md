@@ -193,6 +193,8 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 | Route pattern | Limit |
 |---|---|
 | `/api/v1/{chain}/tokens/*/quote/*` | 20 req / min (live RPC) |
+| `/api/v1/{chain}/dex/quote` | 20 req / min (live RPC) |
+| `/api/v1/{chain}/dex/route` | 20 req / min (live RPC) |
 | `/api/v1/{chain}/stats` | 10 req / min (heavy aggregation) |
 | `POST *` | 10 req / min |
 | Everything else (GET) | 60 req / min |
@@ -478,17 +480,34 @@ Messages support full Unicode including emoji. WebSocket connection via `wss://<
 
 **WebSocket protocol:**
 
-```jsonc
-// Client → server
-{ "type": "subscribe", "token": "0x..." }           // join token room
-{ "type": "message", "sender": "0x...", "text": "…" } // send message (must subscribe first)
+Connection requires EIP-191 wallet authentication before messages can be sent.
 
-// Server → client
-{ "type": "history", "messages": [...] }             // sent after subscribe
+```jsonc
+// 1. Server → client (immediately on connect)
+{ "type": "challenge", "nonce": "abc123", "message": "Sign: \"OneMEME Chat Auth\nNonce: abc123\" to authenticate" }
+
+// 2. Client → server (auth — sign the message with the user's wallet)
+{ "type": "auth", "address": "0xUser...", "sig": "0x65-byte-sig..." }
+
+// 3. Server → client (auth confirmed)
+{ "type": "authenticated", "address": "0xuser..." }
+
+// 4. Client → server (join a token room — after auth)
+{ "type": "subscribe", "token": "0x..." }
+
+// 5. Server → client (history replay after subscribe)
+{ "type": "history", "messages": [...] }
+
+// 6. Client → server (send a message — must be subscribed)
+{ "type": "message", "text": "…" }
+
+// Server → client (live message broadcast)
 { "type": "message", "id": "…", "token": "…", "sender": "…", "text": "…", "timestamp": 0 }
 { "type": "error", "message": "…" }
 { "type": "keepalive" }                              // every 15 s
 ```
+
+The `sender` in broadcast messages is the server-verified wallet address from step 2 — clients cannot spoof it.
 
 Chat rate limits: 1 message per 3 s per IP (global), 5 messages per minute per IP per token.
 
@@ -543,6 +562,86 @@ Must be called **before** the referred wallet makes any on-chain action.
 - Launches at least one token
 
 The bonus (10 pts) is awarded to the **referrer**. The check runs every 30 seconds in the background.
+
+---
+
+### DEX
+
+All DEX endpoints live under `/api/v1/{chain}/dex/`. They require the aggregator subgraph and DEX contract addresses to be configured — all return `503` when the DEX layer is not set up. See [DEX-Examples.md](DEX-Examples.md) for full request/response examples.
+
+**Data endpoints**
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/{chain}/dex/adapters` | Supported routing adapters and their on-chain `bytes32` IDs |
+| `GET` | `/api/v1/{chain}/dex/stats` | Aggregated DEX platform statistics |
+| `GET` | `/api/v1/{chain}/dex/tokens` | Paginated DEX token list (pools, volume, price) |
+| `GET` | `/api/v1/{chain}/dex/tokens/:address` | Single DEX token with pools and price |
+| `GET` | `/api/v1/{chain}/dex/tokens/:address/pools` | Liquidity pools for a token |
+| `GET` | `/api/v1/{chain}/dex/tokens/:address/trades` | Trade history for a DEX token |
+| `GET` | `/api/v1/{chain}/dex/swaps` | All DEX swap events, paginated |
+
+**Swap / quote endpoints**
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/{chain}/dex/quote` | Live on-chain quote (simulates expected output) |
+| `GET` | `/api/v1/{chain}/dex/route` | Optimal multi-hop route with pre-encoded adapter data |
+| `POST` | `/api/v1/{chain}/dex/swap` | Build `OneMEMEAggregator.swap()` calldata (self-broadcast) |
+| `POST` | `/api/v1/{chain}/dex/batch-swap` | Build `OneMEMEAggregator.batchSwap()` calldata (self-broadcast) |
+
+**Gasless / meta-transaction endpoints**
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/{chain}/dex/metatx/nonce/:user` | On-chain nonce for a user |
+| `POST` | `/api/v1/{chain}/dex/metatx/digest` | EIP-712 digest for a single-hop gasless swap |
+| `POST` | `/api/v1/{chain}/dex/metatx/relay` | Relay a signed `MetaTxOrder` on-chain |
+| `POST` | `/api/v1/{chain}/dex/metatx/batch-digest` | EIP-712 digest for a multi-hop gasless swap |
+| `POST` | `/api/v1/{chain}/dex/metatx/batch-relay` | Relay a signed `BatchMetaTxOrder` on-chain |
+
+**Native BNB support**
+
+Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in any swap/quote/route endpoint. The API automatically normalises it to WBNB for routing. Responses include:
+
+| Field | Description |
+|---|---|
+| `nativeIn` | `true` when the original `tokenIn` was the zero address — caller must send `msg.value = amountIn` |
+| `nativeOut` | `true` when the original `tokenOut` was the zero address — final output is unwrapped BNB |
+| `value` | ETH value to attach to the transaction (wei string, `"0"` when `nativeIn` is false) |
+
+**Supported adapters**
+
+| Name | Category | Notes |
+|---|---|---|
+| `ONEMEME_BC` | bonding-curve | OneMEME Launchpad bonding curve |
+| `FOURMEME` | bonding-curve | FourMEME bonding curve |
+| `FLAPSH` | bonding-curve | Flap.SH bonding curve |
+| `PANCAKE_V2` | amm-v2 | PancakeSwap V2 |
+| `PANCAKE_V3` | amm-v3 | PancakeSwap V3 (fee param required) |
+| `PANCAKE_V4` | amm-v4 | PancakeSwap V4 |
+| `UNISWAP_V2` | amm-v2 | Uniswap V2 on BSC |
+| `UNISWAP_V3` | amm-v3 | Uniswap V3 on BSC |
+| `UNISWAP_V4` | amm-v4 | Uniswap V4 on BSC |
+
+**Gasless swap flow (single-hop)**
+
+```
+1. GET  /dex/metatx/nonce/:user   → nonce
+2. POST /dex/metatx/digest        → { digest, order }
+3. wallet.signMessage(digest)     → sig
+4. POST /dex/metatx/relay         → { txHash }
+```
+
+**Gasless swap flow (multi-hop)**
+
+```
+1. GET  /dex/route                → { steps[] }
+2. GET  /dex/metatx/nonce/:user   → nonce
+3. POST /dex/metatx/batch-digest  → { digest, order }
+4. wallet.signMessage(digest)     → sig
+5. POST /dex/metatx/batch-relay   → { txHash }
+```
 
 ---
 
@@ -639,11 +738,15 @@ resumes from where it left off rather than re-syncing from the start block.
 
 ## Environment Variables
 
+**Core**
+
 | Variable | Required | Description |
 |---|---|---|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `BSC_RPC_URL` | Yes | BSC HTTP RPC endpoint |
 | `BSC_WSS_URL` | No | BSC WebSocket RPC |
+| `SUBGRAPH_URL` | Yes | The Graph subgraph GraphQL endpoint (primary on-chain data source) |
+| `SUBGRAPH_API_KEY` | No | Bearer auth token for self-hosted subgraph nodes |
 | `FACTORY_ADDRESS` | Yes | `LaunchpadFactory` contract address |
 | `BONDING_CURVE_ADDRESS` | Yes | `BondingCurve` contract address (required for quotes) |
 | `VESTING_WALLET_ADDRESS` | Yes | `VestingWallet` contract address |
@@ -651,14 +754,41 @@ resumes from where it left off rather than re-syncing from the start block.
 | `CHAIN_ID` | No | EVM chain ID, defaults to `56` |
 | `CHAIN_SLUG` | No | Chain name in API routes, defaults to `bsc` |
 | `API_PORT` | No | REST API port, defaults to `3001` |
-| `SSL_CERT_PATH` | No | TLS certificate path |
+| `ALLOWED_ORIGINS` | No | Comma-separated CORS origins (e.g. `https://app.1coin.meme`); unset = all origins allowed |
+| `TRUST_PROXY` | No | Set `true` when behind Cloudflare/nginx so rate limiter reads `X-Forwarded-For` |
+| `SSL_CERT_PATH` | No | TLS certificate path (omit when Cloudflare terminates TLS) |
 | `SSL_KEY_PATH` | No | TLS private key path |
-| `PINATA_JWT` | No | Required for metadata upload |
+| `PINATA_JWT` | No | Required for metadata upload endpoint |
 | `IPFS_GATEWAY` | No | Custom IPFS gateway URL |
 | `BETTERSTACK_TOKEN` | No | Better Stack log shipping token |
 | `POINTS_START_BLOCK` | No | Only award points for events at/after this block; falls back to `START_BLOCK` |
 | `ADMIN_SECRET` | No | Enables `GET /points/export` when set; pass as `X-Admin-Key` header |
 | `PONDER_SCHEMA` | No | Postgres schema for Ponder's internal tables (recommended: `onememe`) |
+
+**DEX layer** (all optional — omit to disable `/dex/*` endpoints)
+
+| Variable | Description |
+|---|---|
+| `AGGREGATOR_SUBGRAPH_URL` | Aggregator subgraph endpoint (FourMEME / Flap.SH / OneMEMEAggregator data) |
+| `AGGREGATOR_SUBGRAPH_API_KEY` | Bearer auth for the aggregator subgraph |
+| `THE_GRAPH_API_KEY` | The Graph decentralised network key for PancakeSwap V3/V4 and Uniswap subgraphs |
+| `PANCAKE_V2_SUBGRAPH_URL` | Override for PancakeSwap V2 subgraph |
+| `PANCAKE_V3_SUBGRAPH_URL` | Override for PancakeSwap V3 subgraph |
+| `PANCAKE_V4_SUBGRAPH_URL` | Override for PancakeSwap V4 subgraph |
+| `UNISWAP_V2_SUBGRAPH_URL` | Override for Uniswap V2 subgraph |
+| `UNISWAP_V3_SUBGRAPH_URL` | Override for Uniswap V3 subgraph |
+| `UNISWAP_V4_SUBGRAPH_URL` | Override for Uniswap V4 subgraph |
+| `AGGREGATOR_ADDRESS` | `OneMEMEAggregator` contract address (required for swap calldata) |
+| `METATX_ADDRESS` | `OneMEMEMetaTx` contract address (required for gasless relay) |
+| `RELAYER_PRIVATE_KEY` | 0x-prefixed EOA private key for the gas-paying relayer account |
+| `PANCAKE_V2_ROUTER_ADDRESS` | Override PancakeSwap V2 router (default: BSC mainnet) |
+| `PANCAKE_V3_QUOTER_ADDRESS` | Override PancakeSwap V3 quoter (default: BSC mainnet) |
+| `UNISWAP_V2_ROUTER_ADDRESS` | Override Uniswap V2 router (default: BSC mainnet) |
+| `UNISWAP_V3_QUOTER_ADDRESS` | Uniswap V3 quoter (no BSC default — set for your deployment) |
+| `PANCAKE_V4_QUOTER_ADDRESS` | PancakeSwap V4 quoter |
+| `UNISWAP_V4_QUOTER_ADDRESS` | Uniswap V4 quoter |
+| `FOURMEME_HELPER_ADDRESS` | Override FourMEME TokenManagerHelper3 (default: BSC mainnet) |
+| `FLAPSH_PORTAL_ADDRESS` | Override Flap.SH Portal contract (default: BSC mainnet) |
 
 ---
 
@@ -673,8 +803,12 @@ resumes from where it left off rather than re-syncing from the start block.
 │       ├── app.module.ts
 │       ├── db.ts
 │       ├── rpc.ts               # Viem client, bonding curve quotes, PancakeSwap price
+│       ├── subgraph.ts          # Launchpad subgraph GraphQL client + pagination
 │       ├── helpers.ts
 │       ├── metadata.ts
+│       ├── common/
+│       │   ├── client-ip.ts     # IP extraction (TRUST_PROXY-aware)
+│       │   └── rate-limit.middleware.ts
 │       └── modules/
 │           ├── tokens/          # /api/v1/{chain}/tokens, /creators/:addr/tokens
 │           ├── trades/          # /api/v1/{chain}/trades, /traders/:addr/trades
@@ -687,10 +821,17 @@ resumes from where it left off rather than re-syncing from the start block.
 │           ├── price/           # /api/v1/{chain}/price/bnb
 │           ├── leaderboard/     # /api/v1/{chain}/leaderboard/*
 │           ├── vesting/         # /api/v1/{chain}/vesting/:token, /creators/:addr/vesting
-│           ├── chat/            # /api/v1/{chain}/chat/:token/messages + WS
+│           ├── chat/            # /api/v1/{chain}/chat/:token/messages + WS (EIP-191 auth)
 │           ├── upload/          # /api/v1/{chain}/metadata/upload
 │           ├── points/          # /api/v1/{chain}/points/* (background poller + export)
 │           ├── referrals/       # /api/v1/{chain}/referrals/*
+│           ├── dex/             # /api/v1/{chain}/dex/* — aggregator, quotes, swap, meta-tx
+│           │   ├── dex.service.ts
+│           │   ├── dex.controller.ts
+│           │   ├── dex-subgraph.ts   # per-protocol subgraph clients
+│           │   ├── dex-rpc.ts        # viem quoters, swap builders, relay execution
+│           │   ├── metatx.service.ts # quote/route/swap/batch/gasless logic
+│           │   └── metatx.controller.ts
 │           └── index/           # GET /api/v1/{chain} — route index
 ├── ponder.config.ts
 ├── ponder.schema.ts

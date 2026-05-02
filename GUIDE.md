@@ -121,13 +121,31 @@ BONDING_CURVE_ADDRESS=0x...
 VESTING_WALLET_ADDRESS=0x...
 START_BLOCK=...
 
+# Subgraph
+SUBGRAPH_URL=https://api.studio.thegraph.com/query/<id>/<slug>/version/latest
+
 # API
 API_PORT=3001
+# Restrict CORS to your frontend domain(s). Comma-separated, no trailing slashes.
+ALLOWED_ORIGINS=https://app.1coin.meme
+# Set true when behind Cloudflare/nginx so rate limits read the real client IP
+TRUST_PROXY=true
+
 # Pinata (IPFS uploads)
 PINATA_JWT=...
 
 # BetterStack (logs)
 BETTERSTACK_TOKEN=...
+
+# Points export — required for GET /points/export
+ADMIN_SECRET=your-strong-random-secret
+
+# DEX layer (optional — omit to disable /dex/* endpoints)
+AGGREGATOR_SUBGRAPH_URL=
+THE_GRAPH_API_KEY=
+AGGREGATOR_ADDRESS=0x...
+METATX_ADDRESS=0x...
+RELAYER_PRIVATE_KEY=0x...
 ```
 
 ---

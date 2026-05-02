@@ -5,6 +5,8 @@ Base URL: `https://your-api.example.com/api/v1/bsc/dex`
 All responses use JSON. Paginated responses wrap data in `{ data, pagination }`.
 Numeric amounts are always **strings in wei** unless noted otherwise.
 
+**Native BNB:** Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in any swap, quote, or route endpoint. The API normalises it to WBNB internally. Responses include `nativeIn: true` / `nativeOut: true` flags and a `value` field (wei string) indicating how much `msg.value` the caller must attach.
+
 ---
 
 ## Table of Contents
@@ -21,6 +23,10 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 10. [POST /dex/swap](#post-dexswap)
 11. [POST /dex/metatx/digest](#post-dexmetatxdigest)
 12. [POST /dex/metatx/relay](#post-dexmetatxrelay)
+13. [GET /dex/route](#get-dexroute)
+14. [POST /dex/batch-swap](#post-dexbatch-swap)
+15. [POST /dex/metatx/batch-digest](#post-dexmetatxbatch-digest)
+16. [POST /dex/metatx/batch-relay](#post-dexmetatxbatch-relay)
 
 ---
 
@@ -1143,6 +1149,9 @@ GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2
 {
   "data": {
     "singleStep": true,
+    "nativeIn": false,
+    "nativeOut": false,
+    "value": "0",
     "steps": [
       {
         "adapter": "ONEMEME_BC",
@@ -1163,6 +1172,43 @@ GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2
 }
 ```
 
+### Single-step — native BNB (zero address) directly into a 1MEME token
+
+Pass `0x0000000000000000000000000000000000000000` as `tokenIn`. The API routes via WBNB internally and returns `nativeIn: true` with the `value` to attach.
+
+```
+GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0x0000000000000000000000000000000000000000&amountIn=1000000000000000000&tokenOut=0xMEME&slippage=100
+```
+
+```json
+{
+  "data": {
+    "singleStep": true,
+    "nativeIn": true,
+    "nativeOut": false,
+    "value": "1000000000000000000",
+    "steps": [
+      {
+        "adapter": "ONEMEME_BC",
+        "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
+        "tokenIn": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "tokenOut": "0x000000000000000000000000000000000000meme",
+        "amountIn": "1000000000000000000",
+        "amountOut": "412800000000000000000000",
+        "minOut": "408672000000000000000000",
+        "adapterData": "0x..."
+      }
+    ],
+    "amountIn": "1000000000000000000",
+    "minFinalOut": "408672000000000000000000",
+    "aggregatorFee": "10000000000000000",
+    "slippageBps": "100"
+  }
+}
+```
+
+> When `nativeIn: true`, the caller must send `value` (wei) as `msg.value` with the transaction. When using `POST /dex/batch-swap` the `calldata` already encodes WBNB as `tokenIn`; the caller attaches native BNB as the transaction value.
+
 ### Two-step bridge — USDC into a 1MEME token
 
 ```
@@ -1173,6 +1219,9 @@ GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0x8ac76a51cc950d9822d68b83f
 {
   "data": {
     "singleStep": false,
+    "nativeIn": false,
+    "nativeOut": false,
+    "value": "0",
     "steps": [
       {
         "adapter": "PANCAKE_V3",
@@ -1243,6 +1292,9 @@ The aggregator fee (1%) is charged once on the initial `amountIn`.
   "data": {
     "to":          "0xOneMEMEAggregatorAddress",
     "calldata":    "0x...",
+    "nativeIn":    false,
+    "nativeOut":   false,
+    "value":       "0",
     "steps": [
       {
         "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
