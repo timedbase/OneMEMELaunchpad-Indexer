@@ -1,6 +1,6 @@
-# OneMEME Launchpad Indexer
+# OneMEME Launchpad API
 
-Blockchain indexer and REST API for the OneMEME Launchpad on BSC. Indexes all factory events in real time and exposes a typed HTTP API for the frontend.
+REST API for the OneMEME Launchpad on BSC. Reads all on-chain data from The Graph subgraph and exposes a typed HTTP API for the frontend.
 
 ---
 
@@ -12,7 +12,6 @@ Blockchain indexer and REST API for the OneMEME Launchpad on BSC. Indexes all fa
 | API | NestJS + Node.js |
 | Database | PostgreSQL (Neon) — off-chain data only |
 | Chain | BSC Mainnet (chainId 56) |
-| Contract | `LaunchpadFactory.sol` |
 
 ---
 
@@ -34,40 +33,23 @@ The Graph Subgraph  ────────────────────
                            points, referrals, chat)
 ```
 
-The API is a single process running under PM2. On-chain data comes entirely from the subgraph over GraphQL. PostgreSQL stores only the three off-chain tables that don't exist on-chain.
+The API is a single process running under PM2. On-chain data comes entirely from the subgraph over GraphQL. PostgreSQL stores only the three off-chain tables that have no on-chain equivalent.
 
 ---
 
-## Events Indexed
+## Subgraph Schema
 
-| Event | Table Updated |
-|---|---|
-| `TokenCreated` | `token` (insert, including metaURI + metadata fields fetched via RPC + IPFS at index time) |
-| `TokenBought` | `token` (buyCount, volumeBNB, raisedBNB), `trade` (insert), `token_snapshot` (upsert) |
-| `TokenSold` | `token` (sellCount, volumeBNB, raisedBNB), `trade` (insert), `token_snapshot` (upsert) |
-| `TokenMigrated` | `token` (migrated, pairAddress), `migration` (insert) |
-| `Transfer` | `holder` (upsert balance, lastUpdatedBlock, lastUpdatedTimestamp) — skipped after migration |
-| `VestingAdded` | `vesting` (insert), `token` (creatorTokens) |
-| `Claimed` | `vesting` (claimed) |
-| `VestingVoided` | `vesting` (voided, burned) |
-| `TWAPUpdated` | logged only |
-| `DefaultParamsUpdated` | logged only |
-| `FeesWithdrawn` | logged only |
-| `RouterUpdated` | logged only |
-
----
-
-## Database Schema
+The API queries these entities from the subgraph. All numeric fields are `BigInt` in GraphQL, returned as strings in the API.
 
 ### `token`
 
-| Column | Type | Description |
+| Field | Type | Description |
 |---|---|---|
 | `id` | hex | Token contract address (PK) |
 | `tokenType` | text | `"Standard"` \| `"Tax"` \| `"Reflection"` |
 | `creator` | hex | Address that called `createToken` |
 | `totalSupply` | bigint | Total supply at launch (wei) |
-| `virtualBNB` | bigint | Base virtual BNB liquidity — constant set at creation (wei). Virtual liquidity at any point = `virtualBNB + raisedBNB` |
+| `virtualBNB` | bigint | Base virtual BNB liquidity — constant set at creation (wei) |
 | `antibotEnabled` | boolean | Whether antibot penalty was enabled at launch |
 | `tradingBlock` | bigint | Block after which normal trading began |
 | `createdAtBlock` | bigint | Block of `TokenCreated` event |
@@ -78,21 +60,23 @@ The API is a single process running under PM2. On-chain data comes entirely from
 | `buyCount` | integer | Total bonding-curve buy transactions |
 | `sellCount` | integer | Total bonding-curve sell transactions |
 | `volumeBNB` | bigint | Total BNB traded (buys + sells, wei) |
-| `raisedBNB` | bigint | Current cumulative BNB raised on bonding curve (wei) |
+| `raisedBNB` | bigint | Cumulative BNB raised on bonding curve (wei) |
 | `migrationTarget` | bigint | BNB required to trigger migration (wei) |
 | `creatorTokens` | bigint | Creator vesting allocation (wei, 5% of supply if enabled) |
 | `metaUri` | text | Raw `metaURI` string from the token contract (nullable) |
-| `name` | text | Token display name from metadata JSON (nullable) |
-| `symbol` | text | Token symbol from metadata JSON (nullable) |
-| `description` | text | Token description from metadata JSON (nullable) |
-| `image` | text | IPFS CID of the token image (e.g. `QmXxx...` — resolve via your preferred gateway, nullable) |
-| `website` | text | Token website URL (nullable) |
+| `name` | text | Token display name (nullable) |
+| `symbol` | text | Token ticker (nullable) |
+| `description` | text | Token description (nullable) |
+| `image` | text | IPFS CID of the token image — resolve via your preferred gateway (nullable) |
+| `website` | text | Project website URL (nullable) |
 | `twitter` | text | Twitter / X link (nullable) |
 | `telegram` | text | Telegram link (nullable) |
 
+Virtual liquidity at any point = `virtualBNB + raisedBNB`. The API exposes this as the `virtualLiquidityBNB` computed field.
+
 ### `trade`
 
-| Column | Type | Description |
+| Field | Type | Description |
 |---|---|---|
 | `id` | text | `{txHash}-{logIndex}` (PK) |
 | `token` | hex | Token contract address |
@@ -108,19 +92,19 @@ The API is a single process running under PM2. On-chain data comes entirely from
 
 ### `holder`
 
-| Column | Type | Description |
+| Field | Type | Description |
 |---|---|---|
 | `token` | hex | Token contract address |
 | `address` | hex | Wallet address |
 | `balance` | bigint | Current token balance (wei) |
-| `lastUpdatedBlock` | bigint | Block number of the most recent Transfer that touched this row |
-| `lastUpdatedTimestamp` | integer | Unix timestamp of the most recent Transfer that touched this row |
+| `lastUpdatedBlock` | bigint | Block of the most recent Transfer touching this row |
+| `lastUpdatedTimestamp` | integer | Unix timestamp of the most recent Transfer |
 
-Composite PK: `(token, address)`. Rows with zero balance are retained. Only populated while the token is on the bonding curve — Transfer tracking stops after migration.
+Composite PK: `(token, address)`. Only populated while the token is on the bonding curve — Transfer tracking stops after migration.
 
 ### `migration`
 
-| Column | Type | Description |
+| Field | Type | Description |
 |---|---|---|
 | `id` | hex | Token address (PK) |
 | `token` | hex | Token address |
@@ -133,12 +117,12 @@ Composite PK: `(token, address)`. Rows with zero balance are retained. Only popu
 
 ### `vesting`
 
-| Column | Type | Description |
+| Field | Type | Description |
 |---|---|---|
 | `token` | hex | Token address |
 | `beneficiary` | hex | Creator wallet (vesting recipient) |
 | `amount` | bigint | Total tokens locked at start (wei) |
-| `blockNumber` | bigint | Block number of the `VestingAdded` event |
+| `blockNumber` | bigint | Block of the `VestingAdded` event |
 | `start` | integer | Unix timestamp vesting began |
 | `claimed` | bigint | Tokens claimed so far (wei) |
 | `voided` | boolean | Whether schedule was voided early |
@@ -146,11 +130,11 @@ Composite PK: `(token, address)`. Rows with zero balance are retained. Only popu
 
 Composite PK: `(token, beneficiary)`.
 
-### `token_snapshot`
+### `tokenSnapshot`
 
-One row per `(token, block)`. Written on every bonding-curve trade. Stores the AMM state at each block so historical price charts can be rendered accurately using the bonding-curve formula rather than raw per-trade price ratios.
+One row per `(token, block)` — written on every bonding-curve trade. Used by the TradingView chart endpoints.
 
-| Column | Type | Description |
+| Field | Type | Description |
 |---|---|---|
 | `id` | text | `{tokenAddress}-{blockNumber}` (PK) |
 | `token` | hex | Token contract address |
@@ -166,7 +150,42 @@ AMM spot price at any snapshot (BNB/token):
 - `virtualLiquidity = virtualBNB + raisedBNB`
 - `price = virtualLiquidity² / (virtualBNB × totalSupply)`
 
-The API exposes `virtualLiquidityBNB` (= `virtualBNB + raisedBNB`) as a pre-computed field on every token and snapshot response.
+---
+
+## Off-chain Database Schema
+
+PostgreSQL stores only data that has no on-chain equivalent. These tables persist independently of the subgraph.
+
+### `point_event`
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | bigserial | PK |
+| `wallet` | text | Wallet address |
+| `event_type` | text | `TOKEN_CREATED` \| `BUY` \| `SELL` \| `TOKEN_MIGRATED` \| `REFERRAL_BONUS` |
+| `points` | numeric | Points awarded |
+| `token` | text | Token address (null for referral bonus) |
+| `source_id` | text | Internal dedup key — never exposed |
+| `timestamp` | bigint | Unix timestamp |
+
+### `referral`
+
+| Column | Type | Description |
+|---|---|---|
+| `wallet` | text | Referred wallet address (PK) |
+| `referrer` | text | Referrer wallet address |
+| `registered_at` | bigint | Unix timestamp of registration |
+| `credited` | boolean | Whether the referral bonus has been awarded |
+
+### `chat_message`
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | bigserial | PK |
+| `token` | text | Token address the message belongs to |
+| `sender` | text | Verified wallet address of the sender |
+| `text` | text | Message content (max 500 Unicode code points) |
+| `timestamp` | bigint | Unix timestamp |
 
 ---
 
@@ -174,7 +193,7 @@ The API exposes `virtualLiquidityBNB` (= `virtualBNB + raisedBNB`) as a pre-comp
 
 **Base URL:** `https://api.1coin.meme/api/v1/bsc`
 
-The `bsc` segment is the chain slug, set via the `CHAIN_SLUG` environment variable (default: `bsc`). All routes are served under `/api/v1/<chain>/` — deploying a second chain means spinning up a new instance with a different `CHAIN_SLUG`.
+The `bsc` segment is the chain slug, set via the `CHAIN_SLUG` environment variable (default: `bsc`). All routes are served under `/api/v1/<chain>/`.
 
 All paginated endpoints return:
 ```json
@@ -190,7 +209,7 @@ All paginated endpoints return:
 }
 ```
 
-Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **strings** to preserve precision.
+All `bigint` / `numeric` fields are returned as **strings** to preserve precision.
 
 ### Rate Limits
 
@@ -244,8 +263,8 @@ Numeric fields stored as `bigint` or `numeric` in Postgres are returned as **str
 
 | Field | Description |
 |---|---|
-| `virtualLiquidityBNB` | Current virtual liquidity = `virtualBNB + raisedBNB` (wei string). Represents the effective BNB depth of the bonding curve at this moment. |
-| `priceBnb` | BNB per token. Bonding curve: `virtualLiquidity² / (virtualBNB × totalSupply)`. Migrated (list): migration-time liquidity ratio. Migrated (single token): live `getReserves()` from PancakeSwap. |
+| `virtualLiquidityBNB` | `virtualBNB + raisedBNB` (wei string) — effective BNB depth of the bonding curve |
+| `priceBnb` | BNB per token. Bonding curve: `virtualLiquidity² / (virtualBNB × totalSupply)`. Migrated (list): migration-time liquidity ratio. Migrated (single): live `getReserves()` from PancakeSwap. |
 | `priceUsd` | `priceBnb × bnbSpotPrice` (10 decimal string, null if price feed unavailable) |
 | `marketCapBnb` | `priceBnb × totalSupply` in BNB |
 | `marketCapUsd` | `marketCapBnb × bnbSpotPrice` (2 decimal string) |
@@ -433,7 +452,7 @@ Returns: `totalTokens`, `migratedTokens`, `activeTokens`, `tokensByType`, `total
 | `GET` | `/api/v1/{chain}/charts/history` | OHLCV bars |
 | `GET` | `/api/v1/{chain}/charts/search?query=:addr` | Symbol search |
 
-OHLCV price is computed from the bonding-curve AMM formula using `token_snapshot` data — not raw per-trade ratios. This gives accurate market price at each point in time.
+OHLCV price is computed from the bonding-curve AMM formula using `tokenSnapshot` data — not raw per-trade ratios.
 
 **`GET /api/v1/{chain}/charts/history` query params:**
 
@@ -490,7 +509,7 @@ Connection requires EIP-191 wallet authentication before messages can be sent.
 // 1. Server → client (immediately on connect)
 { "type": "challenge", "nonce": "abc123", "message": "Sign: \"OneMEME Chat Auth\nNonce: abc123\" to authenticate" }
 
-// 2. Client → server (auth — sign the message with the user's wallet)
+// 2. Client → server (sign the message with the user's wallet)
 { "type": "auth", "address": "0xUser...", "sig": "0x65-byte-sig..." }
 
 // 3. Server → client (auth confirmed)
@@ -511,7 +530,7 @@ Connection requires EIP-191 wallet authentication before messages can be sent.
 { "type": "keepalive" }                              // every 15 s
 ```
 
-The `sender` in broadcast messages is the server-verified wallet address from step 2 — clients cannot spoof it.
+The `sender` in broadcast messages is the server-verified wallet address — clients cannot spoof it.
 
 Chat rate limits: 1 message per 3 s per IP (global), 5 messages per minute per IP per token.
 
@@ -537,7 +556,7 @@ Points are awarded automatically by a background poller every 30 seconds:
 
 Set `POINTS_START_BLOCK` to start a new season — only events at or after that block earn points. Falls back to `START_BLOCK` if unset.
 
-The export endpoint requires the `X-Admin-Key: <ADMIN_SECRET>` header and returns every wallet's full breakdown for reward issuance. Disabled when `ADMIN_SECRET` is not set.
+The export endpoint requires the `X-Admin-Key: <ADMIN_SECRET>` header. Disabled when `ADMIN_SECRET` is not set.
 
 ---
 
@@ -714,9 +733,7 @@ TRUST_PROXY=true
 
 ### TLS / SSL
 
-TLS is terminated externally by Cloudflare. Do **not** set `SSL_CERT_PATH` or
-`SSL_KEY_PATH` unless you are running without Cloudflare; setting them to a
-path that doesn't exist will crash the API on startup.
+TLS is terminated externally by Cloudflare. Do **not** set `SSL_CERT_PATH` or `SSL_KEY_PATH` unless you are running without Cloudflare; setting them to a path that doesn't exist will crash the API on startup.
 
 ### Updating on VPS
 
@@ -743,15 +760,11 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 
 | Variable | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `BSC_RPC_URL` | Yes | BSC HTTP RPC endpoint |
-| `BSC_WSS_URL` | No | BSC WebSocket RPC |
-| `SUBGRAPH_URL` | Yes | The Graph subgraph GraphQL endpoint (primary on-chain data source) |
+| `SUBGRAPH_URL` | Yes | The Graph subgraph GraphQL endpoint — primary on-chain data source |
 | `SUBGRAPH_API_KEY` | No | Bearer auth token for self-hosted subgraph nodes |
-| `FACTORY_ADDRESS` | Yes | `LaunchpadFactory` contract address |
-| `BONDING_CURVE_ADDRESS` | Yes | `BondingCurve` contract address (required for quotes) |
-| `VESTING_WALLET_ADDRESS` | Yes | `VestingWallet` contract address |
-| `START_BLOCK` | Yes | Block number to start indexing from |
+| `BSC_RPC_URL` | Yes | BSC HTTP RPC — used for live quote simulation and PancakeSwap price reads |
+| `BONDING_CURVE_ADDRESS` | Yes | `BondingCurve` contract address (required for `/quote/*` endpoints) |
+| `DATABASE_URL` | Yes | PostgreSQL connection string (off-chain tables only) |
 | `CHAIN_ID` | No | EVM chain ID, defaults to `56` |
 | `CHAIN_SLUG` | No | Chain name in API routes, defaults to `bsc` |
 | `API_PORT` | No | REST API port, defaults to `3001` |
@@ -762,8 +775,9 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 | `PINATA_JWT` | No | Required for metadata upload endpoint |
 | `IPFS_GATEWAY` | No | Custom IPFS gateway URL |
 | `BETTERSTACK_TOKEN` | No | Better Stack log shipping token |
-| `POINTS_START_BLOCK` | No | Only award points for events at/after this block; falls back to `START_BLOCK` |
-| `ADMIN_SECRET` | No | Enables `GET /points/export` when set; pass as `X-Admin-Key` header |
+| `POINTS_START_BLOCK` | No | Only award points for events at/after this block (season start) |
+| `START_BLOCK` | No | Fallback for `POINTS_START_BLOCK` when that var is unset |
+| `ADMIN_SECRET` | No | Enables `GET /points/export`; pass as `X-Admin-Key` header |
 
 **DEX layer** (all optional — omit to disable `/dex/*` endpoints)
 
