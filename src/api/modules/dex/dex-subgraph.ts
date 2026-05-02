@@ -98,10 +98,17 @@ function getEndpointHeaders(endpoint: DexEndpoint): Record<string, string> {
 
 // ─── Core fetch ───────────────────────────────────────────────────────────────
 
-/** Strips the The Graph API key from a URL before using it in error messages. */
+/** Strips all known API keys from a URL before using it in error messages. */
 function redactUrl(url: string): string {
-  const key = process.env.THE_GRAPH_API_KEY;
-  return key ? url.replace(key, "***") : url;
+  let redacted = url;
+  for (const key of [
+    process.env.THE_GRAPH_API_KEY,
+    process.env.SUBGRAPH_API_KEY,
+    process.env.AGGREGATOR_SUBGRAPH_API_KEY,
+  ]) {
+    if (key) redacted = redacted.split(key).join("***");
+  }
+  return redacted;
 }
 
 async function fetchFrom<T>(

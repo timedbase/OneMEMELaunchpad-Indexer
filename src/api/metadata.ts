@@ -77,13 +77,13 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-// Purge stale entries every 10 minutes.
+// Purge stale entries on the same cadence as the TTL.
 setInterval(() => {
   const now = Date.now();
   for (const [uri, entry] of cache) {
     if (entry.expiresAt < now) cache.delete(uri);
   }
-}, 10 * 60_000).unref();
+}, METADATA_TTL).unref();
 
 // ─── URI helpers ──────────────────────────────────────────────────────────────
 

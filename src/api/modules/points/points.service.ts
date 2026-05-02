@@ -17,15 +17,24 @@ export const POINTS = {
 // ── Season / start-block gate ─────────────────────────────────────────────────
 // Falls back to START_BLOCK (indexer start) when POINTS_START_BLOCK is unset.
 
-function getStartBlock(): string {
-  const raw = process.env.POINTS_START_BLOCK ?? process.env.START_BLOCK;
+function parseStartBlock(raw: string | undefined, varName: string, logger: Logger): string {
   if (!raw) return "0";
   try {
     const n = BigInt(raw);
-    return n > 0n ? n.toString() : "0";
+    if (n > 0n) return n.toString();
+    logger.warn(`${varName}="${raw}" is not a positive integer — defaulting to 0 (all blocks)`);
+    return "0";
   } catch {
+    logger.warn(`${varName}="${raw}" is not a valid integer — defaulting to 0 (all blocks)`);
     return "0";
   }
+}
+
+function getStartBlock(logger: Logger): string {
+  if (process.env.POINTS_START_BLOCK !== undefined) {
+    return parseStartBlock(process.env.POINTS_START_BLOCK, "POINTS_START_BLOCK", logger);
+  }
+  return parseStartBlock(process.env.START_BLOCK, "START_BLOCK", logger);
 }
 
 const POLL_INTERVAL_MS = 30_000;
@@ -179,7 +188,8 @@ export class PointsService implements OnModuleInit {
       await sql`CREATE INDEX IF NOT EXISTS point_event_wallet_idx ON point_event (wallet)`;
       await sql`CREATE INDEX IF NOT EXISTS point_event_ts_idx     ON point_event (timestamp DESC)`;
 
-      this.logger.log(`Points tables ready — start block: ${getStartBlock() === "0" ? "all" : getStartBlock()}`);
+      const startBlock = getStartBlock(this.logger);
+      this.logger.log(`Points tables ready — start block: ${startBlock === "0" ? "all" : startBlock}`);
     } catch (err: unknown) {
       this.logger.error(`Failed to initialise points tables: ${String(err)}`);
     }
@@ -192,7 +202,7 @@ export class PointsService implements OnModuleInit {
 
   private async poll(): Promise<void> {
     try {
-      const startBlock = getStartBlock();
+      const startBlock = getStartBlock(this.logger);
       await this.awardTokenCreated(startBlock);
       await this.awardTrades(startBlock);
       await this.awardMigrations(startBlock);
@@ -395,7 +405,7 @@ export class PointsService implements OnModuleInit {
   // ── Internal export ────────────────────────────────────────────────────────
 
   async exportAll() {
-    const startBlock = getStartBlock();
+    const startBlock = getStartBlock(this.logger);
 
     const rows = await sql`
       SELECT
