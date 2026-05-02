@@ -1,7 +1,7 @@
 {
   "name": "onememelaunchpad-indexer",
   "version": "1.0.3.215",
-  "description": "Real-time on-chain indexer for the OneMEME Launchpad (BSC) — built with Ponder",
+  "description": "REST API for the OneMEME Launchpad (BSC) — powered by The Graph subgraph",
   "license": "MIT",
   "author": "OneMEME Launchpad Contributors",
   "repository": {
@@ -10,11 +10,6 @@
   },
   "private": true,
   "scripts": {
-    "dev": "ponder dev",
-    "start": "ponder start",
-    "codegen": "ponder codegen",
-    "db:generate": "ponder db generate",
-    "db:migrate": "ponder db migrate",
     "api": "node dist/api/main.js",
     "api:dev": "ts-node --project tsconfig.api.json src/api/main.ts",
     "api:build": "tsc --project tsconfig.api.json"
@@ -30,7 +25,6 @@
     "compression": "^1.8.1",
     "dotenv": "^16.4.7",
     "nest-winston": "^1.10.2",
-    "ponder": "^0.8.17",
     "postgres": "^3.4.5",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

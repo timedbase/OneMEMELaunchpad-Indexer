@@ -12,10 +12,12 @@ Vercel Domain (e.g. api.1coin.meme)
 Cloudflare (TLS, WAF, DDoS protection)
         ↓
 VPS — Ubuntu server
-  ├── Ponder   (indexer, port 42069 — internal only)
-  └── NestJS   (API, port 3001)
-        ↓
-Neon PostgreSQL (external DB)
+  └── NestJS API (port 3001)
+        ↓                    ↓
+Neon PostgreSQL         The Graph subgraph
+(off-chain data:         (on-chain data:
+ points, referrals,       tokens, trades,
+ chat)                    migrations, etc.)
         ↓
 BetterStack (logs + uptime monitoring)
 ```
@@ -59,7 +61,7 @@ sudo ufw enable
 sudo ufw status
 ```
 
-> Port 42069 (Ponder) stays closed — internal only, never exposed publicly.
+> Only port 3001 (NestJS API) needs to be open — Cloudflare proxies it.
 
 ---
 
@@ -280,13 +282,13 @@ Once running, all NestJS logs (startup, warnings, errors) ship to Better Stack L
 curl https://api.1coin.meme/health
 
 # Token list
-curl https://api.1coin.meme/api/v1/tokens
+curl https://api.1coin.meme/api/v1/bsc/tokens
 
 # BNB price
-curl https://api.1coin.meme/api/v1/price/bnb
+curl https://api.1coin.meme/api/v1/bsc/price/bnb
 
-# Confirm indexer is syncing blocks
-docker compose -f docker-compose.prod.yml logs ponder -f
+# API logs
+docker compose -f docker-compose.prod.yml logs api -f
 ```
 
 ---
@@ -301,7 +303,7 @@ git pull
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-Ponder resumes from its last checkpoint — no full re-index needed unless the schema changed.
+The API is stateless — no re-sync needed. On-chain data is served by the subgraph.
 
 ---
 

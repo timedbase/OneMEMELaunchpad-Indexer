@@ -8,9 +8,9 @@ Blockchain indexer and REST API for the OneMEME Launchpad on BSC. Indexes all fa
 
 | Layer | Technology |
 |---|---|
-| Indexer | [Ponder](https://ponder.sh) v0.8.x |
+| On-chain data | [The Graph](https://thegraph.com) subgraph (GraphQL) |
 | API | NestJS + Node.js |
-| Database | PostgreSQL (Neon) |
+| Database | PostgreSQL (Neon) — off-chain data only |
 | Chain | BSC Mainnet (chainId 56) |
 | Contract | `LaunchpadFactory.sol` |
 
@@ -19,18 +19,22 @@ Blockchain indexer and REST API for the OneMEME Launchpad on BSC. Indexes all fa
 ## Architecture
 
 ```
-BSC RPC
-  │
-  ▼
-Ponder Indexer  ──────────────────────►  PostgreSQL (Neon)
-  (src/index.ts)                               │
-  12 event handlers                            │
-  token / trade / holder /                     ▼
-  migration / vesting /             NestJS REST API (port 3001)
-  token_snapshot tables               └─ /api/v1/<chain>/*
+BSC chain events
+      │
+      ▼
+The Graph Subgraph  ────────────────────►  Subgraph GraphQL endpoint
+  (SUBGRAPH_URL)                                     │
+  token / trade / holder /                           │
+  migration / vesting / snapshot                     ▼
+                                        NestJS REST API (port 3001)
+                                          └─ /api/v1/<chain>/*
+                                          │
+                          PostgreSQL ◄────┘
+                          (off-chain only:
+                           points, referrals, chat)
 ```
 
-Both processes run in the same Docker container under PM2. The indexer writes to Postgres; the API reads from it via raw SQL.
+The API is a single process running under PM2. On-chain data comes entirely from the subgraph over GraphQL. PostgreSQL stores only the three off-chain tables that don't exist on-chain.
 
 ---
 
@@ -673,10 +677,9 @@ Returns `{ metaURI, ipfsHash, gatewayUrl, imageUri }`. Pass `metaURI` to `tokenC
 git clone https://github.com/timedbase/OneMEMELaunchpad-Indexer
 cd OneMEMELaunchpad-Indexer
 npm install
-cp .env.example .env   # fill in required vars
-docker compose up -d   # start local Postgres
-npm run dev            # indexer
-npm run api:dev        # API (separate terminal)
+cp .env.example .env   # fill in SUBGRAPH_URL, BSC_RPC_URL, DATABASE_URL at minimum
+docker compose up -d   # start local Postgres (for points, referrals, chat)
+npm run api:dev        # API on http://localhost:3001
 ```
 
 ---
@@ -692,7 +695,6 @@ docker run -d \
   --name onememe-launchpad \
   --restart unless-stopped \
   -p 3001:3001 \
-  -v ponder_cache:/app/.ponder \
   --env-file .env \
   onememe-launchpad
 ```
@@ -700,13 +702,14 @@ docker run -d \
 ### Required env additions for production
 
 ```env
-# Isolates Ponder's internal metadata so it doesn't conflict with other
-# Ponder apps sharing the same Postgres schema (required on first run or
-# if you see "Schema 'public' was previously used by a different Ponder app").
-PONDER_SCHEMA=onememe
-
 # Points export — set a strong random secret
 ADMIN_SECRET=your-strong-random-secret
+
+# Restrict CORS to your frontend
+ALLOWED_ORIGINS=https://app.1coin.meme
+
+# Rate limiter reads real client IP from Cloudflare headers
+TRUST_PROXY=true
 ```
 
 ### TLS / SSL
@@ -725,14 +728,12 @@ docker run -d \
   --name onememe-launchpad \
   --restart unless-stopped \
   -p 3001:3001 \
-  -v ponder_cache:/app/.ponder \
   --env-file .env \
   onememe-launchpad
 docker logs -f onememe-launchpad
 ```
 
-The named volume `ponder_cache` persists Ponder's checkpoint so the indexer
-resumes from where it left off rather than re-syncing from the start block.
+The API is stateless — no volumes needed. All persistent state is in PostgreSQL (off-chain tables) and The Graph subgraph (on-chain data).
 
 ---
 
@@ -763,7 +764,6 @@ resumes from where it left off rather than re-syncing from the start block.
 | `BETTERSTACK_TOKEN` | No | Better Stack log shipping token |
 | `POINTS_START_BLOCK` | No | Only award points for events at/after this block; falls back to `START_BLOCK` |
 | `ADMIN_SECRET` | No | Enables `GET /points/export` when set; pass as `X-Admin-Key` header |
-| `PONDER_SCHEMA` | No | Postgres schema for Ponder's internal tables (recommended: `onememe`) |
 
 **DEX layer** (all optional — omit to disable `/dex/*` endpoints)
 
@@ -795,49 +795,47 @@ resumes from where it left off rather than re-syncing from the start block.
 ## Project Structure
 
 ```
-├── abis/LaunchpadFactory.json
-├── src/
-│   ├── index.ts                 # Ponder event handlers (12 events)
-│   └── api/
-│       ├── main.ts
-│       ├── app.module.ts
-│       ├── db.ts
-│       ├── rpc.ts               # Viem client, bonding curve quotes, PancakeSwap price
-│       ├── subgraph.ts          # Launchpad subgraph GraphQL client + pagination
-│       ├── helpers.ts
-│       ├── metadata.ts
-│       ├── common/
-│       │   ├── client-ip.ts     # IP extraction (TRUST_PROXY-aware)
-│       │   └── rate-limit.middleware.ts
-│       └── modules/
-│           ├── tokens/          # /api/v1/{chain}/tokens, /creators/:addr/tokens
-│           ├── trades/          # /api/v1/{chain}/trades, /traders/:addr/trades
-│           ├── migrations/      # /api/v1/{chain}/migrations
-│           ├── activity/        # /api/v1/{chain}/activity — GET + SSE + WebSocket
-│           ├── discover/        # /api/v1/{chain}/discover/*
-│           ├── stats/           # /api/v1/{chain}/stats
-│           ├── charts/          # /api/v1/{chain}/charts/* — TradingView UDF
-│           ├── quotes/          # /api/v1/{chain}/tokens/:addr/quote/*
-│           ├── price/           # /api/v1/{chain}/price/bnb
-│           ├── leaderboard/     # /api/v1/{chain}/leaderboard/*
-│           ├── vesting/         # /api/v1/{chain}/vesting/:token, /creators/:addr/vesting
-│           ├── chat/            # /api/v1/{chain}/chat/:token/messages + WS (EIP-191 auth)
-│           ├── upload/          # /api/v1/{chain}/metadata/upload
-│           ├── points/          # /api/v1/{chain}/points/* (background poller + export)
-│           ├── referrals/       # /api/v1/{chain}/referrals/*
-│           ├── dex/             # /api/v1/{chain}/dex/* — aggregator, quotes, swap, meta-tx
-│           │   ├── dex.service.ts
-│           │   ├── dex.controller.ts
-│           │   ├── dex-subgraph.ts   # per-protocol subgraph clients
-│           │   ├── dex-rpc.ts        # viem quoters, swap builders, relay execution
-│           │   ├── metatx.service.ts # quote/route/swap/batch/gasless logic
-│           │   └── metatx.controller.ts
-│           └── index/           # GET /api/v1/{chain} — route index
-├── ponder.config.ts
-├── ponder.schema.ts
-├── docker-compose.yml
+├── abis/                        # Contract ABIs (used by rpc.ts + dex-rpc.ts)
+├── src/api/
+│   ├── main.ts
+│   ├── app.module.ts
+│   ├── db.ts                    # postgres.js client (off-chain tables only)
+│   ├── rpc.ts                   # Viem client, bonding curve quotes, PancakeSwap price
+│   ├── subgraph.ts              # Launchpad subgraph GraphQL client + pagination
+│   ├── helpers.ts
+│   ├── metadata.ts
+│   ├── common/
+│   │   ├── client-ip.ts         # IP extraction (TRUST_PROXY-aware)
+│   │   └── rate-limit.middleware.ts
+│   └── modules/
+│       ├── tokens/              # /api/v1/{chain}/tokens, /creators/:addr/tokens
+│       ├── trades/              # /api/v1/{chain}/trades, /traders/:addr/trades
+│       ├── migrations/          # /api/v1/{chain}/migrations
+│       ├── activity/            # /api/v1/{chain}/activity — GET + SSE + WebSocket
+│       ├── discover/            # /api/v1/{chain}/discover/*
+│       ├── stats/               # /api/v1/{chain}/stats
+│       ├── charts/              # /api/v1/{chain}/charts/* — TradingView UDF
+│       ├── quotes/              # /api/v1/{chain}/tokens/:addr/quote/*
+│       ├── price/               # /api/v1/{chain}/price/bnb
+│       ├── leaderboard/         # /api/v1/{chain}/leaderboard/*
+│       ├── vesting/             # /api/v1/{chain}/vesting/:token, /creators/:addr/vesting
+│       ├── chat/                # /api/v1/{chain}/chat/:token/messages + WS (EIP-191 auth)
+│       ├── upload/              # /api/v1/{chain}/metadata/upload
+│       ├── points/              # /api/v1/{chain}/points/* (background poller + export)
+│       ├── referrals/           # /api/v1/{chain}/referrals/*
+│       ├── dex/                 # /api/v1/{chain}/dex/* — aggregator, quotes, swap, meta-tx
+│       │   ├── dex.service.ts
+│       │   ├── dex.controller.ts
+│       │   ├── dex-subgraph.ts  # per-protocol subgraph clients
+│       │   ├── dex-rpc.ts       # viem quoters, swap builders, relay execution
+│       │   ├── metatx.service.ts
+│       │   └── metatx.controller.ts
+│       └── index/               # GET /api/v1/{chain} — route index
+├── docker-compose.yml           # local Postgres for off-chain tables
 ├── Dockerfile
 ├── ecosystem.config.js
+├── tsconfig.json
+├── tsconfig.api.json
 └── .env.example
 ```
 
