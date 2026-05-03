@@ -16,14 +16,18 @@ export class RouteController {
 
   /**
    * GET /dex/quote
-   * Live on-chain quote from a specific adapter.
+   *
+   * Aggregation mode (no adapter): queries all liquidity sources in parallel and
+   * returns the best price. Response includes `sources[]` sorted best-first.
+   *
+   * Specific adapter mode (adapter provided): quotes that single adapter only.
+   * V3/V4 require `fees`; V4 also accepts `tickSpacing` and `hooks`.
    *
    * Query params:
-   *   adapter      — adapter name (required)
    *   tokenIn      — input token address (required)
-   *   amountIn     — input amount in wei (required)
+   *   amountIn     — input amount in wei string (required)
    *   tokenOut     — output token address (required)
-   *   path         — comma-separated token addresses for multi-hop (optional)
+   *   adapter      — adapter name (optional; omit for aggregation mode)
    *   fees         — comma-separated fee tiers, e.g. 500,3000 (required for V3/V4)
    *   tickSpacing  — comma-separated tick spacings for V4 (optional, auto-derived)
    *   hooks        — comma-separated hook addresses for V4 (optional)
@@ -67,8 +71,12 @@ export class RouteController {
    * Builds ABI-encoded calldata for OneMEMEAggregator.swap().
    * The caller broadcasts the transaction — no relayer, no gasless.
    *
-   * Body: { adapter, tokenIn, amountIn, tokenOut, minOut, to, deadline, path?, fees? }
-   * Returns: { to, calldata, value, nativeIn, nativeOut, adapter, amountIn, feeEstimate, ... }
+   * Auto-route (no adapter): { tokenIn, amountIn, tokenOut, to, deadline, slippage? }
+   *   Aggregates all sources, picks the best, computes minOut from slippage.
+   *   Returns `sources[]` showing all sources tried.
+   *
+   * Specific adapter: { adapter, tokenIn, amountIn, tokenOut, minOut, to, deadline, path?, fees? }
+   *   Routes through that adapter; caller supplies explicit minOut.
    */
   @Post("swap")
   buildSwap(@Body() body: Record<string, unknown>) {

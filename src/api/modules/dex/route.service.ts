@@ -318,14 +318,18 @@ export class RouteService {
 
   /**
    * GET /dex/quote
-   * Live on-chain quote for a specific adapter. Returns expected output,
-   * slippage-adjusted minimum, and suggested calldata parameters.
+   *
+   * Aggregation mode (no adapter param): discovers all liquidity sources for
+   * the pair and returns the best on-chain quote. `sources` lists every source
+   * that returned a valid price, sorted best-first.
+   *
+   * Specific adapter mode (adapter param provided): quotes that single adapter.
+   * V3 and V4 require `?fees=` (and optionally `?tickSpacing=`, `?hooks=`).
    */
   async getQuote(query: Record<string, string | undefined>) {
-    const adapter       = requireAdapter(query["adapter"]);
-    const rawTokenIn    = requireAddress(query["tokenIn"],  "tokenIn");
-    const rawTokenOut   = requireAddress(query["tokenOut"], "tokenOut");
-    const amountIn      = requireBigInt(query["amountIn"],  "amountIn");
+    const rawTokenIn  = requireAddress(query["tokenIn"],  "tokenIn");
+    const rawTokenOut = requireAddress(query["tokenOut"], "tokenOut");
+    const amountIn    = requireBigInt(query["amountIn"],  "amountIn");
 
     if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
     if (isNative(rawTokenIn) && isNative(rawTokenOut)) {
@@ -344,6 +348,42 @@ export class RouteService {
       throw new BadRequestException("slippage must be between 0 and 5000 basis points");
     }
 
+    const aggregatorFee = amountIn / AGGREGATOR_FEE_DIVISOR;
+
+    // ── Aggregation mode: no adapter specified ─────────────────────────────
+    if (!query["adapter"]) {
+      const nowSec   = BigInt(Math.floor(Date.now() / 1000));
+      const deadline = nowSec + 1800n;
+      const result   = await this.aggregateRoute(
+        tokenIn, tokenOut, amountIn, slippageBps, deadline, nativeIn, nativeOut, aggregatorFee,
+      );
+      const best = result.data.steps[0]!;
+      return {
+        data: {
+          adapter:       best.adapter,
+          tokenIn:       nativeIn  ? NATIVE_BNB : tokenIn,
+          tokenOut:      nativeOut ? NATIVE_BNB : tokenOut,
+          nativeIn,
+          nativeOut,
+          value:         nativeIn ? amountIn.toString() : "0",
+          amountIn:      amountIn.toString(),
+          amountOut:     best.amountOut,
+          minOut:        best.minOut,
+          aggregatorFee: aggregatorFee.toString(),
+          bondingFee:    null,
+          slippageBps:   slippageBps.toString(),
+          quotedBy:      "aggregation",
+          path:          [tokenIn, tokenOut],
+          fees:          best.fees,
+          tickSpacing:   best.tickSpacing,
+          hooks:         best.hooks,
+          sources:       result.data.sources,
+        },
+      };
+    }
+
+    // ── Specific adapter mode ──────────────────────────────────────────────
+    const adapter         = requireAdapter(query["adapter"]);
     const rawPath         = query["path"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
     const rawFees         = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0 && n <= 1_000_000) ?? [];
     const rawTickSpacings = query["tickSpacing"]?.split(",").map(s => parseInt(s.trim(), 10) || 0) ?? [];
@@ -435,10 +475,9 @@ export class RouteService {
       throw new BadRequestException(`Quote simulation failed: ${msg}`);
     }
 
-    const aggregatorFee = amountIn / AGGREGATOR_FEE_DIVISOR;
-    const minOut        = (amountOut * (10_000n - slippageBps)) / 10_000n;
-    const isV4          = adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4";
-    const hopCount      = path.length - 1;
+    const minOut    = (amountOut * (10_000n - slippageBps)) / 10_000n;
+    const isV4      = adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4";
+    const hopCount  = path.length - 1;
 
     return {
       data: {
@@ -708,15 +747,19 @@ export class RouteService {
    * POST /dex/swap
    * Builds calldata for a direct OneMEMEAggregator.swap() call.
    * The caller broadcasts the transaction — no relayer involved.
+   *
+   * Auto-route mode (no adapter): runs aggregation to pick the best source,
+   * computes minOut from `slippage` (default 100 bps). `minOut` is not required.
+   *
+   * Specific adapter mode (adapter provided): routes through that adapter.
+   * `minOut` must be supplied explicitly; `slippage` is ignored.
    */
   async buildSwap(body: Record<string, unknown>) {
-    const adapter      = requireAdapter(body["adapter"]);
-    const rawTokenIn   = requireAddress(body["tokenIn"],  "tokenIn");
-    const rawTokenOut  = requireAddress(body["tokenOut"], "tokenOut");
-    const amountIn     = requireBigInt(body["amountIn"],  "amountIn");
-    const minOut       = requireBigInt(body["minOut"],    "minOut");
-    const to           = requireAddress(body["to"], "to");
-    const deadline     = requireBigInt(body["deadline"], "deadline");
+    const rawTokenIn  = requireAddress(body["tokenIn"],  "tokenIn");
+    const rawTokenOut = requireAddress(body["tokenOut"], "tokenOut");
+    const amountIn    = requireBigInt(body["amountIn"],  "amountIn");
+    const to          = requireAddress(body["to"],       "to");
+    const deadline    = requireBigInt(body["deadline"],  "deadline");
 
     if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
     if (isNative(rawTokenIn) && isNative(rawTokenOut)) {
@@ -726,15 +769,60 @@ export class RouteService {
       throw new BadRequestException("deadline has already passed");
     }
 
-    const nativeIn  = isNative(rawTokenIn);
-    const nativeOut = isNative(rawTokenOut);
-    const tokenIn   = toWbnbIfNative(rawTokenIn);
-    const tokenOut  = toWbnbIfNative(rawTokenOut);
+    const nativeIn    = isNative(rawTokenIn);
+    const nativeOut   = isNative(rawTokenOut);
+    const tokenIn     = toWbnbIfNative(rawTokenIn);
+    const tokenOut    = toWbnbIfNative(rawTokenOut);
+    const feeEstimate = amountIn / AGGREGATOR_FEE_DIVISOR;
 
+    // ── Auto-route mode: no adapter specified ──────────────────────────────
+    if (!body["adapter"]) {
+      let slippageBps: bigint;
+      try { slippageBps = BigInt(String(body["slippage"] ?? "100")); }
+      catch { throw new BadRequestException("slippage must be a numeric basis-point value (e.g. 100 for 1%)"); }
+      if (slippageBps < 0n || slippageBps > 5000n) {
+        throw new BadRequestException("slippage must be between 0 and 5000 basis points");
+      }
+
+      const nowSec   = BigInt(Math.floor(Date.now() / 1000));
+      const aggFee   = amountIn / AGGREGATOR_FEE_DIVISOR;
+      const route    = await this.aggregateRoute(
+        tokenIn, tokenOut, amountIn, slippageBps, deadline, nativeIn, nativeOut, aggFee,
+      );
+      const best     = route.data.steps[0]!;
+      const minOut   = BigInt(route.data.minFinalOut);
+      const calldata = buildSwapCalldata(
+        best.adapterId, tokenIn, amountIn, tokenOut, minOut, to, deadline, best.adapterData,
+      );
+
+      return {
+        data: {
+          to:          aggregatorAddress(),
+          calldata,
+          value:       nativeIn ? amountIn.toString() : "0",
+          nativeIn,
+          nativeOut,
+          adapter:     best.adapter,
+          adapterId:   best.adapterId,
+          tokenIn:     nativeIn  ? NATIVE_BNB : tokenIn,
+          tokenOut:    nativeOut ? NATIVE_BNB : tokenOut,
+          amountIn:    amountIn.toString(),
+          feeEstimate: feeEstimate.toString(),
+          netAmountIn: (amountIn - feeEstimate).toString(),
+          minOut:      route.data.minFinalOut,
+          slippageBps: slippageBps.toString(),
+          deadline:    deadline.toString(),
+          adapterData: best.adapterData,
+          sources:     route.data.sources,
+        },
+      };
+    }
+
+    // ── Specific adapter mode ──────────────────────────────────────────────
+    const adapter     = requireAdapter(body["adapter"]);
+    const minOut      = requireBigInt(body["minOut"], "minOut");
     const adapterId   = ADAPTER_IDS[adapter];
     const adapterData = buildAdapterData(adapter, tokenIn, tokenOut, body, deadline);
-    const feeEstimate = amountIn / AGGREGATOR_FEE_DIVISOR;
-    const netAmountIn = amountIn - feeEstimate;
     const calldata    = buildSwapCalldata(adapterId, tokenIn, amountIn, tokenOut, minOut, to, deadline, adapterData);
 
     return {
@@ -746,13 +834,13 @@ export class RouteService {
         nativeOut,
         adapter,
         adapterId,
-        tokenIn:       nativeIn  ? NATIVE_BNB : tokenIn,
-        tokenOut:      nativeOut ? NATIVE_BNB : tokenOut,
-        amountIn:      amountIn.toString(),
-        feeEstimate:   feeEstimate.toString(),
-        netAmountIn:   netAmountIn.toString(),
-        minOut:        minOut.toString(),
-        deadline:      deadline.toString(),
+        tokenIn:     nativeIn  ? NATIVE_BNB : tokenIn,
+        tokenOut:    nativeOut ? NATIVE_BNB : tokenOut,
+        amountIn:    amountIn.toString(),
+        feeEstimate: feeEstimate.toString(),
+        netAmountIn: (amountIn - feeEstimate).toString(),
+        minOut:      minOut.toString(),
+        deadline:    deadline.toString(),
         adapterData,
       },
     };

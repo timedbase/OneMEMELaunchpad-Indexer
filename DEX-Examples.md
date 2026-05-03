@@ -622,23 +622,62 @@ GET /api/v1/bsc/dex/metatx/nonce/0x71be63f3384f5fb98995aa9b7a5b6e1234567890
 Live on-chain quote — simulates expected output before committing to a swap.
 Use this to calculate `amountOut` and `minOut` before calling `POST /dex/swap` or `POST /dex/metatx/digest`.
 
-**Supported adapters:** `PANCAKE_V2`, `UNISWAP_V2`, `PANCAKE_V3`, `UNISWAP_V3`, `PANCAKE_V4`, `UNISWAP_V4`, `ONEMEME_BC`, `FOURMEME`, `FLAPSH`
+**Two modes — `adapter` is optional:**
+
+| Mode | When | Behaviour |
+|---|---|---|
+| Aggregation | `adapter` omitted | Queries all liquidity sources in parallel; returns the best price. `sources[]` shows every source tried, sorted best-first. |
+| Specific adapter | `adapter` provided | Quotes that adapter only. V3/V4 require `fees`. |
 
 **Query Parameters**
 
 | Parameter     | Type   | Required | Description |
 |---|---|---|---|
-| `adapter`     | string | Yes | Adapter name |
 | `tokenIn`     | string | Yes | Input token address |
-| `amountIn`    | string | Yes | Input amount in wei |
+| `amountIn`    | string | Yes | Input amount in wei (must be a string) |
 | `tokenOut`    | string | Yes | Output token address |
-| `path`        | string | No  | Comma-separated token addresses for multi-hop (V2/V3/V4 only; defaults to `tokenIn,tokenOut`) |
+| `adapter`     | string | No  | Adapter name — omit for aggregation mode |
 | `fees`        | string | No  | Comma-separated fee tiers — **required for V3 and V4** (e.g. `500` or `3000,500`) |
 | `slippage`    | number | No  | Slippage tolerance in basis points, default `100` (1%) |
 | `tickSpacing` | string | V4 only | Comma-separated tick spacings per hop — auto-derived from fee if omitted |
 | `hooks`       | string | V4 only | Comma-separated hooks addresses per hop — defaults to zero address |
 
-### V2 single-hop
+### Aggregation mode (best price across all sources)
+
+```
+GET /api/v1/bsc/dex/quote?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100
+```
+
+**Response**
+```json
+{
+  "data": {
+    "adapter":        "PANCAKE_V3",
+    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+    "amountIn":       "1000000000000000000",
+    "amountOut":      "1248300000000000000000000",
+    "minOut":         "1235817000000000000000000",
+    "aggregatorFee":  "10000000000000000",
+    "bondingFee":     null,
+    "slippageBps":    "100",
+    "quotedBy":       "aggregation",
+    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
+    "fees":           [500],
+    "tickSpacing":    null,
+    "hooks":          null,
+    "sources": [
+      { "adapter": "PANCAKE_V3", "fees": [500],  "amountOut": "1248300000000000000000000" },
+      { "adapter": "PANCAKE_V2", "fees": null,   "amountOut": "1231847000000000000000000" },
+      { "adapter": "UNISWAP_V3", "fees": [3000], "amountOut": "1219400000000000000000000" }
+    ]
+  }
+}
+```
+
+---
+
+### Specific adapter — V2 single-hop
 
 ```
 GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V2&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100
@@ -896,7 +935,55 @@ The caller broadcasts this transaction themselves — no relayer, not gasless.
 
 The aggregator charges a **1% protocol fee** on `amountIn`; the response includes an estimate.
 
-### V2 single-hop (PANCAKE_V2 / UNISWAP_V2)
+**`adapter` is optional:**
+
+| Mode | Body fields | Behaviour |
+|---|---|---|
+| Auto-route | No `adapter`; use `slippage` | Aggregates all sources, picks best, computes `minOut` from slippage. Response includes `sources[]`. |
+| Specific adapter | `adapter` + explicit `minOut` | Routes through that adapter only. |
+
+### Auto-route (best price, adapter chosen internally)
+
+```json
+POST /api/v1/bsc/dex/swap
+{
+  "tokenIn":   "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+  "amountIn":  "1000000000000000000",
+  "tokenOut":  "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+  "to":        "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+  "deadline":  1745130000,
+  "slippage":  "100"
+}
+```
+
+**Response**
+```json
+{
+  "data": {
+    "to":          "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+    "calldata":    "0x...",
+    "adapter":     "PANCAKE_V3",
+    "adapterId":   "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+    "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "tokenOut":    "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+    "amountIn":    "1000000000000000000",
+    "feeEstimate": "10000000000000000",
+    "netAmountIn": "990000000000000000",
+    "minOut":      "1235817000000000000000000",
+    "slippageBps": "100",
+    "deadline":    "1745130000",
+    "adapterData": "0x...",
+    "sources": [
+      { "adapter": "PANCAKE_V3", "fees": [500],  "amountOut": "1248300000000000000000000" },
+      { "adapter": "PANCAKE_V2", "fees": null,   "amountOut": "1231847000000000000000000" }
+    ]
+  }
+}
+```
+
+---
+
+### Specific adapter — V2 single-hop (PANCAKE_V2 / UNISWAP_V2)
 
 **Request**
 ```json
