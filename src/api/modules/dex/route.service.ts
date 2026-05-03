@@ -54,6 +54,15 @@ const BC_ADAPTERS: AdapterName[] = ["ONEMEME_BC", "FOURMEME", "FLAPSH"];
 // Protocol fee charged by OneMEMEAggregator on every swap (1% = 100 bps).
 const AGGREGATOR_FEE_DIVISOR = 100n;
 
+// Well-known intermediate tokens used for two-hop routing when no direct pair exists.
+// For each hub, the router tries tokenIn→hub→tokenOut across all discovered pools.
+const HUB_TOKENS: Hex[] = [
+  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", // WBNB
+  "0x55d398326f99059ff775485246999027b3197955", // USDT (BSC)
+  "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d", // USDC (BSC)
+  "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c", // BTCB
+];
+
 // Pool pair discovery query — works for V3 and V4 subgraphs.
 // V4 subgraphs expose tickSpacing explicitly; V3 subgraphs do not (derived from fee).
 const PAIR_POOLS_QUERY = /* GraphQL */ `
@@ -467,6 +476,32 @@ export class RouteService {
   }
 
   /**
+   * Discovers all AMM candidates for a pair across V2/V3/V4 on both PancakeSwap
+   * and Uniswap. Always includes V2 (quote fails gracefully if no pool).
+   * V3/V4 candidates are real pools with liquidity from their subgraphs.
+   * Does NOT include BC adapters — the caller adds those as needed.
+   */
+  private async discoverCandidates(
+    tokenIn:  Hex,
+    tokenOut: Hex,
+  ): Promise<{ adapter: AdapterName; fees: number[]; tickSpacings: number[] }[]> {
+    const [pancakeV3, uniswapV3, pancakeV4, uniswapV4] = await Promise.all([
+      this.discoverPools("PANCAKE_V3", tokenIn, tokenOut),
+      this.discoverPools("UNISWAP_V3", tokenIn, tokenOut),
+      this.discoverPools("PANCAKE_V4", tokenIn, tokenOut),
+      this.discoverPools("UNISWAP_V4", tokenIn, tokenOut),
+    ]);
+    return [
+      { adapter: "PANCAKE_V2" as AdapterName, fees: [], tickSpacings: [] },
+      { adapter: "UNISWAP_V2" as AdapterName, fees: [], tickSpacings: [] },
+      ...pancakeV3.map(p => ({ adapter: "PANCAKE_V3" as AdapterName, fees: [p.feeTier], tickSpacings: [] })),
+      ...uniswapV3.map(p => ({ adapter: "UNISWAP_V3" as AdapterName, fees: [p.feeTier], tickSpacings: [] })),
+      ...pancakeV4.map(p => ({ adapter: "PANCAKE_V4" as AdapterName, fees: [p.feeTier], tickSpacings: [p.tickSpacing] })),
+      ...uniswapV4.map(p => ({ adapter: "UNISWAP_V4" as AdapterName, fees: [p.feeTier], tickSpacings: [p.tickSpacing] })),
+    ];
+  }
+
+  /**
    * Quotes all relevant liquidity sources in parallel and returns the route
    * with the highest final output amount.
    *
@@ -476,7 +511,8 @@ export class RouteService {
    * (for V4) tick spacings. No hardcoded fee tier probing.
    * BC adapters are included when one side is WBNB (direct) or when neither
    * side is WBNB (bridge route: tokenIn→WBNB via V3/V2, then WBNB→tokenOut
-   * via BC adapter).
+   * via BC adapter). Hub-token two-hop routes are tried for all HUB_TOKENS
+   * that differ from both tokenIn and tokenOut.
    */
   private async aggregateRoute(
     tokenIn:       Hex,
@@ -491,31 +527,13 @@ export class RouteService {
     const isWbnbIn  = tokenIn.toLowerCase()  === WBNB_BSC;
     const isWbnbOut = tokenOut.toLowerCase() === WBNB_BSC;
 
-    // Discover V3/V4 pools in parallel while queuing V2/BC as fixed candidates
-    const [pancakeV3, uniswapV3, pancakeV4, uniswapV4] = await Promise.all([
-      this.discoverPools("PANCAKE_V3", tokenIn, tokenOut),
-      this.discoverPools("UNISWAP_V3", tokenIn, tokenOut),
-      this.discoverPools("PANCAKE_V4", tokenIn, tokenOut),
-      this.discoverPools("UNISWAP_V4", tokenIn, tokenOut),
-    ]);
+    // Discover single-step AMM candidates for the direct tokenIn/tokenOut pair
+    const candidates = await this.discoverCandidates(tokenIn, tokenOut);
 
-    type Candidate = { adapter: AdapterName; fees: number[]; tickSpacings: number[] };
-
-    const candidates: Candidate[] = [
-      // V2 — always try; quote call fails gracefully if no pool
-      { adapter: "PANCAKE_V2", fees: [], tickSpacings: [] },
-      { adapter: "UNISWAP_V2", fees: [], tickSpacings: [] },
-      // V3 — only discovered pools with real fee tiers
-      ...pancakeV3.map(p => ({ adapter: "PANCAKE_V3" as AdapterName, fees: [p.feeTier], tickSpacings: [] })),
-      ...uniswapV3.map(p => ({ adapter: "UNISWAP_V3" as AdapterName, fees: [p.feeTier], tickSpacings: [] })),
-      // V4 — discovered pools with real fee tiers + tick spacings
-      ...pancakeV4.map(p => ({ adapter: "PANCAKE_V4" as AdapterName, fees: [p.feeTier], tickSpacings: [p.tickSpacing] })),
-      ...uniswapV4.map(p => ({ adapter: "UNISWAP_V4" as AdapterName, fees: [p.feeTier], tickSpacings: [p.tickSpacing] })),
-      // BC adapters — direct when one side is WBNB
-      ...(isWbnbIn || isWbnbOut
-        ? BC_ADAPTERS.map(a => ({ adapter: a, fees: [], tickSpacings: [] }))
-        : []),
-    ];
+    // Add BC adapters for direct pairs when one side is WBNB
+    if (isWbnbIn || isWbnbOut) {
+      for (const a of BC_ADAPTERS) candidates.push({ adapter: a, fees: [], tickSpacings: [] });
+    }
 
     const singleStepTasks = candidates.map(c =>
       this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, tokenOut, amountIn, slippageBps, deadline),
@@ -528,7 +546,12 @@ export class RouteService {
         )
       : [];
 
-    const results = await Promise.allSettled([...singleStepTasks, ...bridgeTasks]);
+    // Two-hop routes through each hub token (tokenIn → hub → tokenOut)
+    const hubTasks = HUB_TOKENS
+      .filter(h => h.toLowerCase() !== tokenIn.toLowerCase() && h.toLowerCase() !== tokenOut.toLowerCase())
+      .map(hub => this.tryTwoHopRoute(hub, tokenIn, tokenOut, amountIn, slippageBps, deadline));
+
+    const results = await Promise.allSettled([...singleStepTasks, ...bridgeTasks, ...hubTasks]);
 
     const successful = results
       .filter((r): r is PromiseFulfilledResult<RouteCandidate> => r.status === "fulfilled")
@@ -720,6 +743,60 @@ export class RouteService {
           hooks:       null,
         },
       ],
+    };
+  }
+
+  /**
+   * Attempts a two-hop route: tokenIn → hub → tokenOut, where each hop picks
+   * the best available AMM pool across V2/V3/V4 on PancakeSwap and Uniswap.
+   * Both hops are discovered and quoted in parallel; hop2 uses hop1's output
+   * as its amountIn (sequential, not combinatorial). Throws if either hop has
+   * no valid pool — caller uses Promise.allSettled.
+   */
+  private async tryTwoHopRoute(
+    hub:         Hex,
+    tokenIn:     Hex,
+    tokenOut:    Hex,
+    amountIn:    bigint,
+    slippageBps: bigint,
+    deadline:    bigint,
+  ): Promise<RouteCandidate> {
+    // Discover AMM candidates for both hops in parallel
+    const [hop1Candidates, hop2Candidates] = await Promise.all([
+      this.discoverCandidates(tokenIn, hub),
+      this.discoverCandidates(hub, tokenOut),
+    ]);
+
+    // Quote all hop1 candidates in parallel; pick the one with the best output
+    const hop1Results = await Promise.allSettled(
+      hop1Candidates.map(c =>
+        this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, hub, amountIn, slippageBps, deadline),
+      ),
+    );
+    const hop1Best = hop1Results
+      .filter((r): r is PromiseFulfilledResult<RouteCandidate> => r.status === "fulfilled")
+      .map(r => r.value)
+      .sort((a, b) => (b.finalAmountOut > a.finalAmountOut ? 1 : -1))[0];
+
+    if (!hop1Best) throw new Error(`No liquidity for ${tokenIn}→${hub}`);
+
+    // Quote all hop2 candidates using hop1 output as input
+    const hop2Results = await Promise.allSettled(
+      hop2Candidates.map(c =>
+        this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, hub, tokenOut, hop1Best.finalAmountOut, slippageBps, deadline),
+      ),
+    );
+    const hop2Best = hop2Results
+      .filter((r): r is PromiseFulfilledResult<RouteCandidate> => r.status === "fulfilled")
+      .map(r => r.value)
+      .sort((a, b) => (b.finalAmountOut > a.finalAmountOut ? 1 : -1))[0];
+
+    if (!hop2Best) throw new Error(`No liquidity for ${hub}→${tokenOut}`);
+
+    return {
+      finalAmountOut: hop2Best.finalAmountOut,
+      minFinalOut:    hop2Best.minFinalOut,
+      steps:          [hop1Best.steps[0]!, hop2Best.steps[0]!],
     };
   }
 }
