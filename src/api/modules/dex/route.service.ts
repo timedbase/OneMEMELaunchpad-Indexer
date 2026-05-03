@@ -12,6 +12,7 @@
  */
 
 import { Injectable, BadRequestException, ServiceUnavailableException, Logger } from "@nestjs/common";
+import { dexFetchFrom } from "./dex-subgraph";
 import {
   ADAPTER_IDS,
   ADAPTER_NAMES,
@@ -50,11 +51,32 @@ const WBNB_BSC   = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
 const NATIVE_BNB = "0x0000000000000000000000000000000000000000";
 const ZERO_ADDR  = "0x0000000000000000000000000000000000000000" as Hex;
 
-// V3 fee tiers probed in aggregation mode (most common BSC pools).
-const V3_PROBE_FEES = [500, 2500, 3000] as const;
-
 // Bonding-curve adapters — require WBNB as one side; no fee tier needed.
 const BC_ADAPTERS: AdapterName[] = ["ONEMEME_BC", "FOURMEME", "FLAPSH"];
+
+// Pool pair discovery query — works for V3 and V4 subgraphs.
+// V4 subgraphs expose tickSpacing explicitly; V3 subgraphs do not (derived from fee).
+const PAIR_POOLS_QUERY = /* GraphQL */ `
+  query PairPools($addr0: String!, $addr1: String!, $first: Int!) {
+    ab: pools(
+      first: $first
+      where: { token0: $addr0, token1: $addr1 }
+      orderBy: liquidity
+      orderDirection: desc
+    ) { feeTier tickSpacing liquidity }
+    ba: pools(
+      first: $first
+      where: { token0: $addr1, token1: $addr0 }
+      orderBy: liquidity
+      orderDirection: desc
+    ) { feeTier tickSpacing liquidity }
+  }
+`;
+
+interface DiscoveredPool {
+  feeTier:     number;
+  tickSpacing: number; // derived from fee when not present in subgraph
+}
 
 // ─── Shared helpers (exported for MetaTxService) ──────────────────────────────
 
@@ -781,43 +803,96 @@ export class RouteService {
   // ── Private: aggregated routing ────────────────────────────────────────────
 
   /**
+   * Discovers real pools for a token pair from a V3 or V4 DEX subgraph.
+   * Returns fee tier + tick spacing for each pool that has liquidity.
+   * V3 subgraphs don't expose tickSpacing — it is derived from fee tier.
+   * V4 subgraphs expose it explicitly; falls back to derivation if absent.
+   */
+  private async discoverPools(
+    adapter: "PANCAKE_V3" | "PANCAKE_V4" | "UNISWAP_V3" | "UNISWAP_V4",
+    tokenIn: Hex,
+    tokenOut: Hex,
+  ): Promise<DiscoveredPool[]> {
+    try {
+      const addr0 = tokenIn.toLowerCase();
+      const addr1 = tokenOut.toLowerCase();
+      const data  = await dexFetchFrom<{
+        ab: { feeTier: string; tickSpacing?: string | null; liquidity: string }[];
+        ba: { feeTier: string; tickSpacing?: string | null; liquidity: string }[];
+      }>(adapter, PAIR_POOLS_QUERY, { addr0, addr1, first: 5 });
+
+      const seen   = new Set<number>();
+      const pools: DiscoveredPool[] = [];
+
+      for (const p of [...(data.ab ?? []), ...(data.ba ?? [])]) {
+        const fee = parseInt(p.feeTier);
+        if (isNaN(fee) || seen.has(fee)) continue;
+        if (BigInt(p.liquidity ?? "0") === 0n) continue;
+        seen.add(fee);
+        pools.push({
+          feeTier:     fee,
+          tickSpacing: p.tickSpacing ? parseInt(p.tickSpacing) : defaultTickSpacing(fee),
+        });
+      }
+
+      return pools;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Quotes all relevant liquidity sources in parallel and returns the route
    * with the highest final output amount.
    *
-   * V2 and bonding-curve adapters are always tried (no fee input required).
-   * V3 is tried with the three most common BSC fee tiers (500, 2500, 3000).
+   * V2 and bonding-curve adapters are always tried (no pool discovery needed).
+   * V3/V4 pools are discovered from their subgraphs first — only pools that
+   * actually exist with liquidity are quoted, using their real fee tiers and
+   * (for V4) tick spacings. No hardcoded fee tier probing.
    * BC adapters are only included when one side of the pair is WBNB.
-   * V4 is excluded from aggregation as it requires explicit fee+tickSpacing.
    */
   private async aggregateRoute(
-    tokenIn:      Hex,
-    tokenOut:     Hex,
-    amountIn:     bigint,
-    slippageBps:  bigint,
-    deadline:     bigint,
-    nativeIn:     boolean,
-    nativeOut:    boolean,
+    tokenIn:       Hex,
+    tokenOut:      Hex,
+    amountIn:      bigint,
+    slippageBps:   bigint,
+    deadline:      bigint,
+    nativeIn:      boolean,
+    nativeOut:     boolean,
     aggregatorFee: bigint,
   ) {
     const isWbnbIn  = tokenIn.toLowerCase()  === WBNB_BSC;
     const isWbnbOut = tokenOut.toLowerCase() === WBNB_BSC;
 
-    type Candidate = { adapter: AdapterName; fees: number[] };
+    // Discover V3/V4 pools in parallel while queuing V2/BC as fixed candidates
+    const [pancakeV3, uniswapV3, pancakeV4, uniswapV4] = await Promise.all([
+      this.discoverPools("PANCAKE_V3", tokenIn, tokenOut),
+      this.discoverPools("UNISWAP_V3", tokenIn, tokenOut),
+      this.discoverPools("PANCAKE_V4", tokenIn, tokenOut),
+      this.discoverPools("UNISWAP_V4", tokenIn, tokenOut),
+    ]);
+
+    type Candidate = { adapter: AdapterName; fees: number[]; tickSpacings: number[] };
 
     const candidates: Candidate[] = [
-      { adapter: "PANCAKE_V2", fees: [] },
-      { adapter: "UNISWAP_V2", fees: [] },
-      ...V3_PROBE_FEES.map(f => ({ adapter: "PANCAKE_V3" as AdapterName, fees: [f] })),
-      ...V3_PROBE_FEES.map(f => ({ adapter: "UNISWAP_V3" as AdapterName, fees: [f] })),
-      // Bonding-curve adapters require WBNB on one side
+      // V2 — always try; quote call fails gracefully if no pool
+      { adapter: "PANCAKE_V2", fees: [], tickSpacings: [] },
+      { adapter: "UNISWAP_V2", fees: [], tickSpacings: [] },
+      // V3 — only discovered pools with real fee tiers
+      ...pancakeV3.map(p => ({ adapter: "PANCAKE_V3" as AdapterName, fees: [p.feeTier], tickSpacings: [] })),
+      ...uniswapV3.map(p => ({ adapter: "UNISWAP_V3" as AdapterName, fees: [p.feeTier], tickSpacings: [] })),
+      // V4 — discovered pools with real fee tiers + tick spacings
+      ...pancakeV4.map(p => ({ adapter: "PANCAKE_V4" as AdapterName, fees: [p.feeTier], tickSpacings: [p.tickSpacing] })),
+      ...uniswapV4.map(p => ({ adapter: "UNISWAP_V4" as AdapterName, fees: [p.feeTier], tickSpacings: [p.tickSpacing] })),
+      // BC adapters — only when one side is WBNB
       ...(isWbnbIn || isWbnbOut
-        ? BC_ADAPTERS.map(a => ({ adapter: a, fees: [] }))
+        ? BC_ADAPTERS.map(a => ({ adapter: a, fees: [], tickSpacings: [] }))
         : []),
     ];
 
     const results = await Promise.allSettled(
       candidates.map(c =>
-        this.trySingleStepRoute(c.adapter, c.fees, tokenIn, tokenOut, amountIn, slippageBps, deadline),
+        this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, tokenOut, amountIn, slippageBps, deadline),
       ),
     );
 
@@ -845,7 +920,6 @@ export class RouteService {
         minFinalOut:   best.minFinalOut.toString(),
         aggregatorFee: aggregatorFee.toString(),
         slippageBps:   slippageBps.toString(),
-        // All sources that returned a valid quote, sorted best-first
         sources: successful.map(r => ({
           adapter:   r.steps[0]!.adapter,
           fees:      r.steps[0]!.fees,
@@ -857,20 +931,20 @@ export class RouteService {
 
   /**
    * Attempts a single-step quote + adapterData encoding for one candidate.
-   * Returns null (via rejection) if the source has no liquidity for this pair.
+   * Throws if the source has no liquidity — caller uses Promise.allSettled.
    */
   private async trySingleStepRoute(
-    adapter:     AdapterName,
-    fees:        number[],
-    tokenIn:     Hex,
-    tokenOut:    Hex,
-    amountIn:    bigint,
-    slippageBps: bigint,
-    deadline:    bigint,
+    adapter:      AdapterName,
+    fees:         number[],
+    tickSpacings: number[],
+    tokenIn:      Hex,
+    tokenOut:     Hex,
+    amountIn:     bigint,
+    slippageBps:  bigint,
+    deadline:     bigint,
   ): Promise<RouteCandidate> {
     let amountOut: bigint;
     let adapterData: Hex;
-    const usedFees = fees;
 
     if (adapter === "PANCAKE_V2" || adapter === "UNISWAP_V2") {
       amountOut   = await quoteV2(adapter, [tokenIn, tokenOut], amountIn);
@@ -880,6 +954,12 @@ export class RouteService {
       const fee   = fees[0]!;
       amountOut   = await quoteV3(adapter, buildV3PackedPath([tokenIn, tokenOut], [fee]), amountIn);
       adapterData = encodeV3SingleHopAdapterData(fee);
+
+    } else if (adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4") {
+      const fee = fees[0]!;
+      const ts  = tickSpacings[0] ?? defaultTickSpacing(fee);
+      amountOut   = await quoteV4(adapter, tokenIn, tokenOut, amountIn, fee, ts, ZERO_ADDR);
+      adapterData = encodeV4SingleHopAdapterData(tokenIn, tokenOut, fee, ts, ZERO_ADDR, "0x", deadline);
 
     } else if (adapter === "ONEMEME_BC") {
       const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
@@ -893,17 +973,16 @@ export class RouteService {
       amountOut   = (isBuy ? await quoteFourMemeBuy(token, amountIn) : await quoteFourMemeSell(token, amountIn)).amountOut;
       adapterData = encodeFourMemeAdapterData(token);
 
-    } else if (adapter === "FLAPSH") {
+    } else {
+      // FLAPSH
       const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
       const token = isBuy ? tokenOut : tokenIn;
       amountOut   = isBuy ? await quoteFlapShBuy(token, amountIn) : await quoteFlapShSell(token, amountIn);
       adapterData = encodeFlapShAdapterData();
-
-    } else {
-      throw new Error(`Adapter ${adapter} not supported in aggregation mode`);
     }
 
     const minOut = (amountOut * (10_000n - slippageBps)) / 10_000n;
+    const isV4   = adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4";
 
     return {
       finalAmountOut: amountOut,
@@ -917,8 +996,8 @@ export class RouteService {
         amountOut:   amountOut.toString(),
         minOut:      minOut.toString(),
         adapterData,
-        fees:        usedFees.length ? usedFees : null,
-        tickSpacing: null,
+        fees:        fees.length ? fees : null,
+        tickSpacing: isV4 && tickSpacings.length ? tickSpacings : null,
         hooks:       null,
       }],
     };
