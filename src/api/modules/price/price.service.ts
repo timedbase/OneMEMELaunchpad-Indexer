@@ -68,9 +68,10 @@ export class PriceService implements OnModuleInit, OnModuleDestroy {
         "https://api.coingecko.com/api/v3/simple/price?ids=binancecoin&vs_currencies=usd",
         { signal: AbortSignal.timeout(8_000) },
       );
-      const data = await res.json() as { binancecoin: { usd: number } };
-      const price = data.binancecoin.usd;
-      if (!isFinite(price) || price <= 0) throw new Error("invalid price");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data  = await res.json() as { binancecoin?: { usd?: number } };
+      const price = data.binancecoin?.usd;
+      if (typeof price !== "number" || !isFinite(price) || price <= 0) throw new Error("invalid price");
       return { source: "CoinGecko", price, ok: true, cachedAt: Math.floor(Date.now() / 1000) };
     } catch (err) {
       this.logger.warn(`CoinGecko fetch failed: ${(err as Error).message}`);
