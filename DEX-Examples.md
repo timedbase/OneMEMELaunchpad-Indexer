@@ -35,12 +35,10 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 Returns all supported routing adapters and their on-chain `bytes32` IDs.
 No configuration required — this is a static response.
 
-**Request**
-```
-GET https://api.1coin.com/api/v1/bsc/dex/adapters
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/adapters'
 ```
 
-**Response**
 ```json
 {
   "data": [
@@ -100,12 +98,10 @@ GET https://api.1coin.com/api/v1/bsc/dex/adapters
 Platform-level aggregator statistics.
 Requires `AGGREGATOR_SUBGRAPH_URL`.
 
-**Request**
-```
-GET https://api.1coin.com/api/v1/bsc/dex/stats
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/stats'
 ```
 
-**Response**
 ```json
 {
   "data": {
@@ -150,12 +146,12 @@ Tokens from the main launchpad subgraph (`source: "main"`) and DEX protocol subg
 | `page`       | number  | `1`                  | Page number |
 | `limit`      | number  | `20`                 | Items per page (max 100) |
 
-**Request — FOURMEME tokens on bonding curve**
-```
-GET https://api.1coin.com/api/v1/bsc/dex/tokens?platform=FOURMEME&bondingPhase=true&orderBy=totalVolumeBNB&limit=2
+**FOURMEME tokens on bonding curve**
+
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/tokens?platform=FOURMEME&bondingPhase=true&orderBy=totalVolumeBNB&limit=2'
 ```
 
-**Response**
 ```json
 {
   "data": [
@@ -210,12 +206,12 @@ GET https://api.1coin.com/api/v1/bsc/dex/tokens?platform=FOURMEME&bondingPhase=t
 }
 ```
 
-**Request — 1MEME tokens (main launchpad subgraph)**
-```
-GET https://api.1coin.com/api/v1/bsc/dex/tokens?platform=1MEME&bondingPhase=true&limit=1
+**1MEME tokens** — price/market-cap fields are `null` for MAIN-sourced tokens
+
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/tokens?platform=1MEME&bondingPhase=true&limit=1'
 ```
 
-**Response** — price/market-cap fields are `null` for MAIN-sourced tokens
 ```json
 {
   "data": [
@@ -256,9 +252,8 @@ GET https://api.1coin.com/api/v1/bsc/dex/tokens?platform=1MEME&bondingPhase=true
 Full detail for a single token.
 Lookup order: AGGREGATOR → MAIN → all 6 DEX protocol subgraphs (parallel).
 
-**Request**
-```
-GET https://api.1coin.com/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0'
 ```
 
 **Response — FOURMEME / FLAPSH token (from aggregator)**
@@ -368,12 +363,10 @@ Requires `THE_GRAPH_API_KEY` for V3/V4 endpoints unless per-protocol URL overrid
 | `volumeUSD`        | cumulative volume USD | cumulative volume USD |
 | `txCount`          | swap count            | swap count           |
 
-**Request**
-```
-GET https://api.1coin.com/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/pools
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/pools'
 ```
 
-**Response**
 ```json
 {
   "data": [
@@ -461,12 +454,10 @@ DEX swap (`source: "dex"`):
 id, user, adapterId, adapterName, tokenIn, tokenOut, grossAmountIn, feeCharged, amountOut, timestamp, txHash, source
 ```
 
-**Request**
-```
-GET https://api.1coin.com/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/trades?limit=2
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/trades?limit=2'
 ```
 
-**Response** — mixed bonding and DEX trades
 ```json
 {
   "data": [
@@ -535,12 +526,10 @@ Always reads from `AGGREGATOR_SUBGRAPH_URL`.
 | `page`     | number | `1`     | |
 | `limit`    | number | `20`    | Max 100 |
 
-**Request**
-```
-GET https://api.1coin.com/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2'
 ```
 
-**Response**
 ```json
 {
   "data": [
@@ -600,12 +589,10 @@ GET https://api.1coin.com/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2
 Returns the current nonce for a user on the OneMEMEMetaTx contract.
 Must be fetched before building a meta-tx digest to avoid replay failures.
 
-**Request**
-```
-GET https://api.1coin.com/api/v1/bsc/dex/metatx/nonce/0x71be63f3384f5fb98995aa9b7a5b6e1234567890
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/metatx/nonce/0x71be63f3384f5fb98995aa9b7a5b6e1234567890'
 ```
 
-**Response**
 ```json
 {
   "data": {
@@ -633,11 +620,10 @@ Queries all liquidity sources in parallel and returns the best price. `sources[]
 | `tokenOut` | string | Yes | Output token address |
 | `slippage` | number | No  | Slippage tolerance in basis points, default `100` (1%) |
 
-```
-GET https://api.1coin.com/api/v1/bsc/dex/quote?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/quote?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100'
 ```
 
-**Response**
 ```json
 {
   "data": {
@@ -683,16 +669,17 @@ Adapter selection is fully internal — the router picks the best source automat
 
 Aggregates all sources, picks the best, computes `minOut` from `slippage`. `sources[]` shows all tried. When the best route is a two-step bridge (tokenIn → WBNB → tokenOut via a BC adapter), `batchSwap` calldata is returned and `singleStep` is `false`.
 
-```json
-POST https://api.1coin.com/api/v1/bsc/dex/swap
-{
-  "tokenIn":   "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-  "amountIn":  "1000000000000000000",
-  "tokenOut":  "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-  "to":        "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-  "deadline":  "1745130000",
-  "slippage":  "100"
-}
+```bash
+curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/swap' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "tokenIn":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+  "amountIn": "1000000000000000000",
+  "tokenOut": "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+  "to":       "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+  "deadline": "1745130000",
+  "slippage": "100"
+}'
 ```
 
 **Response — single-step route**
@@ -790,10 +777,10 @@ Computes the EIP-712 digest the user must sign for a gasless meta-transaction.
 > `adapterId` and `adapterData` are opaque bytes taken directly from the `GET /dex/route`
 > step response — the server does not derive them from an adapter name here.
 
-**Request**
-```json
-POST https://api.1coin.com/api/v1/bsc/dex/metatx/digest
-{
+```bash
+curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/digest' \
+  -H 'Content-Type: application/json' \
+  -d '{
   "user":          "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
   "adapterId":     "0xc3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4",
   "adapterData":   "0x000000000000000000000000000000000000000000000000000000000001f4",
@@ -805,10 +792,9 @@ POST https://api.1coin.com/api/v1/bsc/dex/metatx/digest
   "deadline":      "1745133600",
   "swapDeadline":  "1745130000",
   "relayerFee":    "2000000000000000000000"
-}
+}'
 ```
 
-**Response**
 ```json
 {
   "data": {
@@ -850,10 +836,12 @@ POST https://api.1coin.com/api/v1/bsc/dex/metatx/digest
 Submits a signed MetaTxOrder to `OneMEMEMetaTx.executeMetaTx()` on-chain.
 Requires `RELAYER_PRIVATE_KEY` to be configured on the server.
 
-**Request — no permit (token already approved)**
-```json
-POST https://api.1coin.com/api/v1/bsc/dex/metatx/relay
-{
+**No permit (token already approved)**
+
+```bash
+curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/relay' \
+  -H 'Content-Type: application/json' \
+  -d '{
   "order": {
     "user":          "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
     "nonce":         "3",
@@ -871,21 +859,22 @@ POST https://api.1coin.com/api/v1/bsc/dex/metatx/relay
   "sig":        "0x4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b1b",
   "permitType": 0,
   "permitData": "0x"
-}
+}'
 ```
 
-**Request — EIP-2612 permit (single approve + swap)**
-```json
-POST https://api.1coin.com/api/v1/bsc/dex/metatx/relay
-{
-  "order": { ... },
+**EIP-2612 permit (single approve + swap)**
+
+```bash
+curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/relay' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "order":      { "...": "MetaTxOrder from digest response" },
   "sig":        "0x...",
   "permitType": 1,
   "permitData": "0x<abi-encoded EIP-2612 permit signature>"
-}
+}'
 ```
 
-**Response**
 ```json
 {
   "data": {
@@ -923,11 +912,10 @@ V3/V4 pool candidates are discovered from their subgraphs first so only real poo
 | `tokenOut` | Yes | Output token address |
 | `slippage` | No  | Slippage in basis points (default `100` = 1%) |
 
-```
-GET https://api.1coin.com/api/v1/bsc/dex/route?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/route?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100'
 ```
 
-**Response**
 ```json
 {
   "data": {
@@ -974,8 +962,8 @@ The winning source is returned as the first and only element of `steps[]`. `sour
 
 **Two-step bridge response** — when neither tokenIn nor tokenOut is WBNB and a bonding-curve adapter wins (e.g. USDC → 1MEME token), the router automatically prepends a tokenIn → WBNB hop:
 
-```
-GET https://api.1coin.com/api/v1/bsc/dex/route?tokenIn=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d&amountIn=5000000000000000000&tokenOut=0xMEME&slippage=150
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/route?tokenIn=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d&amountIn=5000000000000000000&tokenOut=0xMEME&slippage=150'
 ```
 
 ```json
@@ -1030,22 +1018,23 @@ Builds ABI-encoded calldata for `OneMEMEAggregator.batchSwap()`.
 Use steps from `GET /dex/route` or compose them manually from `/dex/quote` outputs.
 The aggregator fee (0.5%) is charged once on the initial `amountIn`.
 
-**Request** (two-step USDC → 1MEME token):
-```json
-{
+```bash
+curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/batch-swap' \
+  -H 'Content-Type: application/json' \
+  -d '{
   "steps": [
     {
-      "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
-      "tokenIn":   "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-      "tokenOut":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-      "minOut":    "8492277500000000",
+      "adapterId":   "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+      "tokenIn":     "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+      "tokenOut":    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "minOut":      "8492277500000000",
       "adapterData": "0x..."
     },
     {
-      "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
-      "tokenIn":   "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-      "tokenOut":  "0x000000000000000000000000000000000000meme",
-      "minOut":    "3505576500000000000000",
+      "adapterId":   "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
+      "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "tokenOut":    "0x000000000000000000000000000000000000meme",
+      "minOut":      "3505576500000000000000",
       "adapterData": "0x..."
     }
   ],
@@ -1053,10 +1042,9 @@ The aggregator fee (0.5%) is charged once on the initial `amountIn`.
   "minFinalOut": "3505576500000000000000",
   "to":          "0xUserWalletAddress",
   "deadline":    1746400000
-}
+}'
 ```
 
-**Response:**
 ```json
 {
   "data": {
@@ -1067,17 +1055,17 @@ The aggregator fee (0.5%) is charged once on the initial `amountIn`.
     "value":       "0",
     "steps": [
       {
-        "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
-        "tokenIn":   "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-        "tokenOut":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-        "minOut":    "8492277500000000",
+        "adapterId":   "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+        "tokenIn":     "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+        "tokenOut":    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "minOut":      "8492277500000000",
         "adapterData": "0x..."
       },
       {
-        "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
-        "tokenIn":   "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-        "tokenOut":  "0x000000000000000000000000000000000000meme",
-        "minOut":    "3505576500000000000000",
+        "adapterId":   "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
+        "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "tokenOut":    "0x000000000000000000000000000000000000meme",
+        "minOut":      "3505576500000000000000",
         "adapterData": "0x..."
       }
     ],
@@ -1098,35 +1086,36 @@ Computes the EIP-712 digest the user must sign for a gasless multi-hop swap.
 ### Gasless batch swap flow
 
 **Step 1** — get route:
-```
-GET /dex/route?tokenIn=0xUSDC&amountIn=5000000000000000000&tokenOut=0xMEME
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/route?tokenIn=0xUSDC&amountIn=5000000000000000000&tokenOut=0xMEME'
 ```
 Save `steps[]` from the response.
 
 **Step 2** — get nonce:
-```
-GET /dex/metatx/nonce/0xUserWallet
+```bash
+curl 'https://api.1coin.com/api/v1/bsc/dex/metatx/nonce/0xUserWallet'
 ```
 
-**Step 3** — POST /dex/metatx/batch-digest:
+**Step 3** — build batch digest:
 
-**Request:**
-```json
-{
-  "user":          "0xUserWalletAddress",
+```bash
+curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/batch-digest' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "user": "0xUserWalletAddress",
   "steps": [
     {
-      "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
-      "tokenIn":   "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-      "tokenOut":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-      "minOut":    "8492277500000000",
+      "adapterId":   "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+      "tokenIn":     "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+      "tokenOut":    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "minOut":      "8492277500000000",
       "adapterData": "0x..."
     },
     {
-      "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
-      "tokenIn":   "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-      "tokenOut":  "0x000000000000000000000000000000000000meme",
-      "minOut":    "3505576500000000000000",
+      "adapterId":   "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
+      "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "tokenOut":    "0x000000000000000000000000000000000000meme",
+      "minOut":      "3505576500000000000000",
       "adapterData": "0x..."
     }
   ],
@@ -1136,10 +1125,9 @@ GET /dex/metatx/nonce/0xUserWallet
   "deadline":      1746403600,
   "swapDeadline":  1746400000,
   "relayerFee":    "3000000000000000"
-}
+}'
 ```
 
-**Response:**
 ```json
 {
   "data": {
@@ -1151,17 +1139,17 @@ GET /dex/metatx/nonce/0xUserWallet
       "deadline":      "1746403600",
       "steps": [
         {
-          "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
-          "tokenIn":   "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-          "tokenOut":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-          "minOut":    "8492277500000000",
+          "adapterId":   "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+          "tokenIn":     "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+          "tokenOut":    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+          "minOut":      "8492277500000000",
           "adapterData": "0x..."
         },
         {
-          "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
-          "tokenIn":   "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-          "tokenOut":  "0x000000000000000000000000000000000000meme",
-          "minOut":    "3505576500000000000000",
+          "adapterId":   "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
+          "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+          "tokenOut":    "0x000000000000000000000000000000000000meme",
+          "minOut":      "3505576500000000000000",
           "adapterData": "0x..."
         }
       ],
@@ -1186,17 +1174,17 @@ GET /dex/metatx/nonce/0xUserWallet
 
 Submits a signed `BatchMetaTxOrder` on-chain. The relayer pays gas; the user pays `relayerFee` from their token balance.
 
-**Request:**
-```json
-{
-  "order": { "...": "BatchMetaTxOrder from batch-digest response" },
+```bash
+curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/batch-relay' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "order":      { "...": "BatchMetaTxOrder from batch-digest response" },
   "sig":        "0x...(65-byte EIP-712 signature)...",
   "permitType": 0,
   "permitData": "0x"
-}
+}'
 ```
 
-**Response:**
 ```json
 {
   "data": {
