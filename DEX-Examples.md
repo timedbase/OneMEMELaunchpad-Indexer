@@ -1,6 +1,6 @@
 # DEX API — Endpoint Reference & Examples
 
-Base URL: `https://api.1coin.com/api/v1/bsc/dex`
+Base URL: `https://api.1coin.meme/api/v1/bsc/dex`
 
 All responses use JSON. Paginated responses wrap data in `{ data, pagination }`.
 Numeric amounts are always **strings in wei** unless noted otherwise.
@@ -36,7 +36,7 @@ Returns all supported routing adapters and their on-chain `bytes32` IDs.
 No configuration required — this is a static response.
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/adapters'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/adapters'
 ```
 
 ```json
@@ -99,7 +99,7 @@ Platform-level aggregator statistics.
 Requires `AGGREGATOR_SUBGRAPH_URL`.
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/stats'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/stats'
 ```
 
 ```json
@@ -149,7 +149,7 @@ Tokens from the main launchpad subgraph (`source: "main"`) and DEX protocol subg
 **FOURMEME tokens on bonding curve**
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/tokens?platform=FOURMEME&bondingPhase=true&orderBy=totalVolumeBNB&limit=2'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/tokens?platform=FOURMEME&bondingPhase=true&orderBy=totalVolumeBNB&limit=2'
 ```
 
 ```json
@@ -209,7 +209,7 @@ curl 'https://api.1coin.com/api/v1/bsc/dex/tokens?platform=FOURMEME&bondingPhase
 **1MEME tokens** — price/market-cap fields are `null` for MAIN-sourced tokens
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/tokens?platform=1MEME&bondingPhase=true&limit=1'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/tokens?platform=1MEME&bondingPhase=true&limit=1'
 ```
 
 ```json
@@ -253,7 +253,7 @@ Full detail for a single token.
 Lookup order: AGGREGATOR → MAIN → all 6 DEX protocol subgraphs (parallel).
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0'
 ```
 
 **Response — FOURMEME / FLAPSH token (from aggregator)**
@@ -364,7 +364,7 @@ Requires `THE_GRAPH_API_KEY` for V3/V4 endpoints unless per-protocol URL overrid
 | `txCount`          | swap count            | swap count           |
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/pools'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/pools'
 ```
 
 ```json
@@ -455,7 +455,7 @@ id, user, adapterId, adapterName, tokenIn, tokenOut, grossAmountIn, feeCharged, 
 ```
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/trades?limit=2'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0/trades?limit=2'
 ```
 
 ```json
@@ -527,7 +527,7 @@ Always reads from `AGGREGATOR_SUBGRAPH_URL`.
 | `limit`    | number | `20`    | Max 100 |
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2'
 ```
 
 ```json
@@ -590,7 +590,7 @@ Returns the current nonce for a user on the OneMEMEMetaTx contract.
 Must be fetched before building a meta-tx digest to avoid replay failures.
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/metatx/nonce/0x71be63f3384f5fb98995aa9b7a5b6e1234567890'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/nonce/0x71be63f3384f5fb98995aa9b7a5b6e1234567890'
 ```
 
 ```json
@@ -621,7 +621,7 @@ Queries all liquidity sources in parallel and returns the best price. `sources[]
 | `slippage` | number | No  | Slippage tolerance in basis points, default `100` (1%) |
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/quote?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/quote?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100'
 ```
 
 ```json
@@ -670,7 +670,7 @@ Adapter selection is fully internal — the router picks the best source automat
 Aggregates all sources, picks the best, computes `minOut` from `slippage`. `sources[]` shows all tried. When the best route is a two-step bridge (tokenIn → WBNB → tokenOut via a BC adapter), `batchSwap` calldata is returned and `singleStep` is `false`.
 
 ```bash
-curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/swap' \
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
   -H 'Content-Type: application/json' \
   -d '{
   "tokenIn":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
@@ -778,7 +778,7 @@ Computes the EIP-712 digest the user must sign for a gasless meta-transaction.
 > step response — the server does not derive them from an adapter name here.
 
 ```bash
-curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/digest' \
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
   -H 'Content-Type: application/json' \
   -d '{
   "user":          "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
@@ -839,7 +839,7 @@ Requires `RELAYER_PRIVATE_KEY` to be configured on the server.
 **No permit (token already approved)**
 
 ```bash
-curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/relay' \
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relay' \
   -H 'Content-Type: application/json' \
   -d '{
   "order": {
@@ -865,7 +865,7 @@ curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/relay' \
 **EIP-2612 permit (single approve + swap)**
 
 ```bash
-curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/relay' \
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relay' \
   -H 'Content-Type: application/json' \
   -d '{
   "order":      { "...": "MetaTxOrder from digest response" },
@@ -913,7 +913,7 @@ V3/V4 pool candidates are discovered from their subgraphs first so only real poo
 | `slippage` | No  | Slippage in basis points (default `100` = 1%) |
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/route?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/route?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100'
 ```
 
 ```json
@@ -963,7 +963,7 @@ The winning source is returned as the first and only element of `steps[]`. `sour
 **Two-step bridge response** — when neither tokenIn nor tokenOut is WBNB and a bonding-curve adapter wins (e.g. USDC → 1MEME token), the router automatically prepends a tokenIn → WBNB hop:
 
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/route?tokenIn=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d&amountIn=5000000000000000000&tokenOut=0xMEME&slippage=150'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/route?tokenIn=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d&amountIn=5000000000000000000&tokenOut=0xMEME&slippage=150'
 ```
 
 ```json
@@ -1019,7 +1019,7 @@ Use steps from `GET /dex/route` or compose them manually from `/dex/quote` outpu
 The aggregator fee (0.5%) is charged once on the initial `amountIn`.
 
 ```bash
-curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/batch-swap' \
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
   -H 'Content-Type: application/json' \
   -d '{
   "steps": [
@@ -1087,19 +1087,19 @@ Computes the EIP-712 digest the user must sign for a gasless multi-hop swap.
 
 **Step 1** — get route:
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/route?tokenIn=0xUSDC&amountIn=5000000000000000000&tokenOut=0xMEME'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/route?tokenIn=0xUSDC&amountIn=5000000000000000000&tokenOut=0xMEME'
 ```
 Save `steps[]` from the response.
 
 **Step 2** — get nonce:
 ```bash
-curl 'https://api.1coin.com/api/v1/bsc/dex/metatx/nonce/0xUserWallet'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/nonce/0xUserWallet'
 ```
 
 **Step 3** — build batch digest:
 
 ```bash
-curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/batch-digest' \
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
   -H 'Content-Type: application/json' \
   -d '{
   "user": "0xUserWalletAddress",
@@ -1175,7 +1175,7 @@ curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/batch-digest' \
 Submits a signed `BatchMetaTxOrder` on-chain. The relayer pays gas; the user pays `relayerFee` from their token balance.
 
 ```bash
-curl -X POST 'https://api.1coin.com/api/v1/bsc/dex/metatx/batch-relay' \
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-relay' \
   -H 'Content-Type: application/json' \
   -d '{
   "order":      { "...": "BatchMetaTxOrder from batch-digest response" },
