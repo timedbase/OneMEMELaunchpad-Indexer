@@ -536,12 +536,17 @@ export class RouteService {
       this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, tokenOut, amountIn, slippageBps, deadline),
     );
 
-    // When neither side is WBNB, also try bridge routes for BC adapters
-    const bridgeTasks = (!isWbnbIn && !isWbnbOut)
-      ? BC_ADAPTERS.map(bcAdapter =>
-          this.tryBridgeRoute(bcAdapter, tokenIn, tokenOut, amountIn, slippageBps, deadline),
-        )
-      : [];
+    // When neither side is WBNB, build bridge routes: tokenIn→WBNB (best AMM) then WBNB→tokenOut (BC adapter).
+    // Step 1 is computed once across all BC adapters to avoid redundant pool discovery.
+    const bridgeTasks: Promise<RouteCandidate>[] = [];
+    if (!isWbnbIn && !isWbnbOut) {
+      const step1 = await this.bestSingleHop(tokenIn, WBNB_BSC as Hex, amountIn, slippageBps, deadline);
+      if (step1) {
+        for (const bcAdapter of BC_ADAPTERS) {
+          bridgeTasks.push(this.tryBcStep2(bcAdapter, step1, tokenOut, slippageBps, deadline));
+        }
+      }
+    }
 
     // Two-hop routes through each hub token (tokenIn → hub → tokenOut)
     const hubTasks = HUB_TOKENS
@@ -637,6 +642,8 @@ export class RouteService {
       adapterData = encodeFlapShAdapterData();
     }
 
+    if (amountOut === 0n) throw new Error(`${adapter} returned zero output`);
+
     const minOut = (amountOut * (10_000n - slippageBps)) / 10_000n;
     const isV4   = adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4";
 
@@ -660,39 +667,45 @@ export class RouteService {
   }
 
   /**
-   * Attempts a two-step bridge route: tokenIn → WBNB (via PANCAKE_V3 fee 500
-   * or PANCAKE_V2 fallback) then WBNB → tokenOut (via a bonding-curve adapter).
-   * Used when neither tokenIn nor tokenOut is WBNB and a BC adapter is a candidate.
-   * Throws if either hop fails — caller uses Promise.allSettled.
+   * Returns the best single-hop route from tokenIn to tokenOut across all AMM
+   * pools. Used to compute the step1 amount before trying BC bridge routes.
+   * Returns null if no AMM source has liquidity.
    */
-  private async tryBridgeRoute(
-    bcAdapter:   AdapterName,
+  private async bestSingleHop(
     tokenIn:     Hex,
     tokenOut:    Hex,
     amountIn:    bigint,
     slippageBps: bigint,
     deadline:    bigint,
+  ): Promise<RouteCandidate | null> {
+    const candidates = await this.discoverCandidates(tokenIn, tokenOut);
+    const results    = await Promise.allSettled(
+      candidates.map(c =>
+        this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, tokenOut, amountIn, slippageBps, deadline),
+      ),
+    );
+    return results
+      .filter((r): r is PromiseFulfilledResult<RouteCandidate> => r.status === "fulfilled")
+      .map(r => r.value)
+      .sort((a, b) => (b.finalAmountOut > a.finalAmountOut ? 1 : -1))[0] ?? null;
+  }
+
+  /**
+   * Builds the second step of a cross-platform bridge route: WBNB → tokenOut
+   * via a bonding-curve adapter. step1 is the already-computed first hop
+   * (tokenIn → WBNB). Throws if the BC adapter returns zero output.
+   */
+  private async tryBcStep2(
+    bcAdapter:   AdapterName,
+    step1:       RouteCandidate,
+    tokenOut:    Hex,
+    slippageBps: bigint,
+    deadline:    bigint,
   ): Promise<RouteCandidate> {
-    const WBNB = WBNB_BSC as Hex;
-
-    // Step 1: tokenIn → WBNB via PANCAKE_V3 (500 bps) or PANCAKE_V2 fallback
-    let bridgeAmountOut: bigint;
-    let bridgeAdapter:   "PANCAKE_V3" | "PANCAKE_V2";
-    let step1Data:       Hex;
-
-    try {
-      bridgeAmountOut = await quoteV3("PANCAKE_V3", buildV3PackedPath([tokenIn, WBNB], [500]), amountIn);
-      bridgeAdapter   = "PANCAKE_V3";
-      step1Data       = encodeV3SingleHopAdapterData(500);
-    } catch {
-      bridgeAmountOut = await quoteV2("PANCAKE_V2", [tokenIn, WBNB], amountIn);
-      bridgeAdapter   = "PANCAKE_V2";
-      step1Data       = encodeV2AdapterData([tokenIn, WBNB], deadline);
-    }
-
-    // Step 2: WBNB → tokenOut via BC adapter
+    const WBNB            = WBNB_BSC as Hex;
+    const bridgeAmountOut = step1.finalAmountOut;
     let finalAmountOut: bigint;
-    let step2Data:      Hex;
+    let step2Data: Hex;
 
     if (bcAdapter === "ONEMEME_BC") {
       finalAmountOut = (await quoteBcBuy(tokenOut, bridgeAmountOut)).amountOut;
@@ -701,31 +714,19 @@ export class RouteService {
       finalAmountOut = (await quoteFourMemeBuy(tokenOut, bridgeAmountOut)).amountOut;
       step2Data      = encodeFourMemeAdapterData(tokenOut);
     } else {
-      // FLAPSH
       finalAmountOut = await quoteFlapShBuy(tokenOut, bridgeAmountOut);
       step2Data      = encodeFlapShAdapterData();
     }
 
-    const bridgeMinOut = (bridgeAmountOut * (10_000n - slippageBps)) / 10_000n;
-    const finalMinOut  = (finalAmountOut  * (10_000n - slippageBps)) / 10_000n;
+    if (finalAmountOut === 0n) throw new Error(`${bcAdapter} returned zero output for bridge step2`);
+
+    const finalMinOut = (finalAmountOut * (10_000n - slippageBps)) / 10_000n;
 
     return {
       finalAmountOut,
       minFinalOut: finalMinOut,
       steps: [
-        {
-          adapter:     bridgeAdapter,
-          adapterId:   ADAPTER_IDS[bridgeAdapter],
-          tokenIn,
-          tokenOut:    WBNB,
-          amountIn:    amountIn.toString(),
-          amountOut:   bridgeAmountOut.toString(),
-          minOut:      bridgeMinOut.toString(),
-          adapterData: step1Data,
-          fees:        bridgeAdapter === "PANCAKE_V3" ? [500] : null,
-          tickSpacing: null,
-          hooks:       null,
-        },
+        step1.steps[0]!,
         {
           adapter:     bcAdapter,
           adapterId:   ADAPTER_IDS[bcAdapter],
