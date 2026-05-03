@@ -30,10 +30,11 @@ export class MetaTxController {
   /**
    * POST /dex/metatx/digest
    * Computes the EIP-712 digest the user must sign for a gasless single-hop swap.
+   * `adapterId` and `adapterData` come from the GET /dex/route response step.
    *
    * Body:
-   *   user, adapter, tokenIn, grossAmountIn, tokenOut, minUserOut,
-   *   recipient, deadline, swapDeadline, relayerFee, path?, fees?
+   *   user, adapterId, adapterData, tokenIn, grossAmountIn, tokenOut, minUserOut,
+   *   recipient, deadline, swapDeadline, relayerFee
    * Returns: { digest, order, metaTxContract, aggregatorFeeEstimate }
    */
   @Post("digest")

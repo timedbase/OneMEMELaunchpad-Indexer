@@ -622,27 +622,16 @@ GET /api/v1/bsc/dex/metatx/nonce/0x71be63f3384f5fb98995aa9b7a5b6e1234567890
 Live on-chain quote — simulates expected output before committing to a swap.
 Use this to calculate `amountOut` and `minOut` before calling `POST /dex/swap` or `POST /dex/metatx/digest`.
 
-**Two modes — `adapter` is optional:**
-
-| Mode | When | Behaviour |
-|---|---|---|
-| Aggregation | `adapter` omitted | Queries all liquidity sources in parallel; returns the best price. `sources[]` shows every source tried, sorted best-first. |
-| Specific adapter | `adapter` provided | Quotes that adapter only. V3/V4 require `fees`. |
+Queries all liquidity sources in parallel and returns the best price. `sources[]` lists every source tried, sorted best-first.
 
 **Query Parameters**
 
-| Parameter     | Type   | Required | Description |
+| Parameter  | Type   | Required | Description |
 |---|---|---|---|
-| `tokenIn`     | string | Yes | Input token address |
-| `amountIn`    | string | Yes | Input amount in wei (must be a string) |
-| `tokenOut`    | string | Yes | Output token address |
-| `adapter`     | string | No  | Adapter name — omit for aggregation mode |
-| `fees`        | string | No  | Comma-separated fee tiers — **required for V3 and V4** (e.g. `500` or `3000,500`) |
-| `slippage`    | number | No  | Slippage tolerance in basis points, default `100` (1%) |
-| `tickSpacing` | string | V4 only | Comma-separated tick spacings per hop — auto-derived from fee if omitted |
-| `hooks`       | string | V4 only | Comma-separated hooks addresses per hop — defaults to zero address |
-
-### Aggregation mode (best price across all sources)
+| `tokenIn`  | string | Yes | Input token address |
+| `amountIn` | string | Yes | Input amount in wei (must be a string) |
+| `tokenOut` | string | Yes | Output token address |
+| `slippage` | number | No  | Slippage tolerance in basis points, default `100` (1%) |
 
 ```
 GET /api/v1/bsc/dex/quote?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100
@@ -675,274 +664,24 @@ GET /api/v1/bsc/dex/quote?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amo
 }
 ```
 
----
-
-### Specific adapter — V2 single-hop
-
-```
-GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V2&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100
-```
-
-**Response**
+**Error — no liquidity found**
 ```json
-{
-  "data": {
-    "adapter":        "PANCAKE_V2",
-    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-    "amountIn":       "1000000000000000000",
-    "amountOut":      "1231847000000000000000000",
-    "minOut":         "1219528530000000000000000",
-    "aggregatorFee":  "10000000000000000",
-    "bondingFee":     null,
-    "slippageBps":    "100",
-    "quotedBy":       "PancakeSwap V2 Router",
-    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
-    "fees":           null
-  }
-}
-```
-
-### V2 multi-hop
-
-```
-GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V2&tokenIn=0xa3f1...&amountIn=500000000000000000000000&tokenOut=0x55d3...&path=0xa3f1...,0xbb4c...,0x55d3...&slippage=200
-```
-
-### V3 single-hop (0.05% fee tier)
-
-```
-GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V3&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=500000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&fees=500&slippage=100
-```
-
-**Response**
-```json
-{
-  "data": {
-    "adapter":        "PANCAKE_V3",
-    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-    "amountIn":       "500000000000000000",
-    "amountOut":      "618204000000000000000000",
-    "minOut":         "611921960000000000000000",
-    "aggregatorFee":  "5000000000000000",
-    "bondingFee":     null,
-    "slippageBps":    "100",
-    "quotedBy":       "PancakeSwap V3 QuoterV2",
-    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
-    "fees":           [500]
-  }
-}
-```
-
-### V3 multi-hop (two hops)
-
-```
-GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V3&tokenIn=0xa3f1...&amountIn=1000000000000000000000000&tokenOut=0x55d3...&path=0xa3f1...,0xbb4c...,0x55d3...&fees=500,100
-```
-
-### V4 single-hop
-
-V4 uses a singleton `PoolManager` — the quote requires a `PoolKey` (fee + tickSpacing + hooks)
-instead of path bytes. `tickSpacing` is auto-derived from the fee tier if omitted.
-
-```
-GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&fees=3000
-```
-
-**Response**
-```json
-{
-  "data": {
-    "adapter":        "PANCAKE_V4",
-    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-    "amountIn":       "1000000000000000000",
-    "amountOut":      "1229081000000000000000000",
-    "minOut":         "1216790190000000000000000",
-    "aggregatorFee":  "10000000000000000",
-    "bondingFee":     null,
-    "slippageBps":    "100",
-    "quotedBy":       "PancakeSwap V4 Quoter",
-    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
-    "fees":           [3000],
-    "tickSpacing":    [60],
-    "hooks":          ["0x0000000000000000000000000000000000000000"]
-  }
-}
-```
-
-V4 with explicit tickSpacing and a custom hooks contract:
-```
-GET ...&fees=3000&tickSpacing=60&hooks=0x1234...
-```
-
-### V4 multi-hop
-
-Provide a comma-separated `path` (all intermediate tokens), `fees` per hop,
-and optionally `tickSpacing`/`hooks` per hop (one value per hop, comma-separated).
-
-```
-GET /api/v1/bsc/dex/quote?adapter=PANCAKE_V4&tokenIn=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&amountIn=1000000000000000000000000&tokenOut=0x55d398326f99059ff775485246999027b3197955&path=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0,0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c,0x55d398326f99059ff775485246999027b3197955&fees=3000,500
-```
-
-**Response**
-```json
-{
-  "data": {
-    "adapter":        "PANCAKE_V4",
-    "tokenIn":        "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-    "tokenOut":       "0x55d398326f99059ff775485246999027b3197955",
-    "amountIn":       "1000000000000000000000000",
-    "amountOut":      "793421000000000000000",
-    "minOut":         "785486790000000000000",
-    "aggregatorFee":  "10000000000000000000000",
-    "bondingFee":     null,
-    "slippageBps":    "100",
-    "quotedBy":       "PancakeSwap V4 Quoter",
-    "path":           [
-      "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-      "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-      "0x55d398326f99059ff775485246999027b3197955"
-    ],
-    "fees":           [3000, 500],
-    "tickSpacing":    [60, 10],
-    "hooks":          [
-      "0x0000000000000000000000000000000000000000",
-      "0x0000000000000000000000000000000000000000"
-    ]
-  }
-}
-```
-
-With explicit per-hop tickSpacing and hooks:
-```
-GET ...&fees=3000,500&tickSpacing=60,10&hooks=0x0000...,0x1234...
-```
-
-**Automatic tickSpacing derivation**
-
-| Fee tier | Auto tickSpacing |
-|---|---|
-| 100 (0.01%) | 1 |
-| 500 (0.05%) | 10 |
-| 2500 (0.25%) | 50 |
-| 3000 (0.30%) | 60 |
-| 10000+ (1%+) | 200 |
-
-### OneMEME bonding-curve (ONEMEME_BC)
-
-`tokenIn` is WBNB for a buy, `tokenOut` is WBNB for a sell.
-
-```
-GET /api/v1/bsc/dex/quote?adapter=ONEMEME_BC&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
-```
-
-**Response**
-```json
-{
-  "data": {
-    "adapter":        "ONEMEME_BC",
-    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-    "amountIn":       "1000000000000000000",
-    "amountOut":      "1218432000000000000000000",
-    "minOut":         "1206247680000000000000000",
-    "aggregatorFee":  "10000000000000000",
-    "bondingFee":     "3000000000000000",
-    "slippageBps":    "100",
-    "quotedBy":       "OneMEME BondingCurve",
-    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
-    "fees":           null
-  }
-}
-```
-
-Sell — swap token addresses:
-```
-GET .../quote?adapter=ONEMEME_BC&tokenIn=0xa3f1...&amountIn=500000000000000000000000&tokenOut=0xbb4c...
-```
-
-### FourMEME bonding-curve (FOURMEME)
-
-Quoted via `TokenManagerHelper3.tryBuy` / `trySell` on-chain. No `path` or `fees` required.
-`tokenIn` is WBNB for a buy; `tokenOut` is WBNB for a sell.
-
-```
-GET /api/v1/bsc/dex/quote?adapter=FOURMEME&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0
-```
-
-**Response**
-```json
-{
-  "data": {
-    "adapter":        "FOURMEME",
-    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-    "amountIn":       "1000000000000000000",
-    "amountOut":      "984210000000000000000000",
-    "minOut":         "974367900000000000000000",
-    "aggregatorFee":  "10000000000000000",
-    "bondingFee":     null,
-    "slippageBps":    "100",
-    "quotedBy":       "FourMEME TokenManagerHelper3",
-    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"],
-    "fees":           null
-  }
-}
-```
-
-### Flap.SH bonding-curve (FLAPSH)
-
-Quoted via `Portal.previewBuy` / `previewSell` on-chain. No `path` or `fees` required.
-`tokenIn` is WBNB for a buy; `tokenOut` is WBNB for a sell.
-
-```
-GET /api/v1/bsc/dex/quote?adapter=FLAPSH&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=500000000000000000&tokenOut=0xb4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3
-```
-
-**Response**
-```json
-{
-  "data": {
-    "adapter":        "FLAPSH",
-    "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "tokenOut":       "0xb4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3",
-    "amountIn":       "500000000000000000",
-    "amountOut":      "412847000000000000000000",
-    "minOut":         "408718530000000000000000",
-    "aggregatorFee":  "5000000000000000",
-    "bondingFee":     null,
-    "slippageBps":    "100",
-    "quotedBy":       "Flap.SH Portal",
-    "path":           ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0xb4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3"],
-    "fees":           null
-  }
-}
-```
-
-**Error — V3/V4 missing fees**
-```json
-{ "statusCode": 400, "message": "V3 quote requires 1 fee tier(s) — provide via ?fees=500 (comma-separated for multi-hop)" }
+{ "statusCode": 503, "message": "No route found — no liquidity source returned a valid quote for this pair" }
 ```
 
 ---
 
 ## POST /dex/swap
 
-Builds ABI-encoded calldata for a direct `OneMEMEAggregator.swap()` call.
+Builds ABI-encoded calldata for a direct `OneMEMEAggregator.swap()` or `batchSwap()` call.
 The caller broadcasts this transaction themselves — no relayer, not gasless.
 
 The aggregator charges a **1% protocol fee** on `amountIn`; the response includes an estimate.
+Adapter selection is fully internal — the router picks the best source automatically.
 
-**`adapter` is optional:**
+**Body:** `{ tokenIn, amountIn, tokenOut, to, deadline, slippage? }`
 
-| Mode | Body fields | Behaviour |
-|---|---|---|
-| Auto-route | No `adapter`; use `slippage` | Aggregates all sources, picks best, computes `minOut` from slippage. Response includes `sources[]`. |
-| Specific adapter | `adapter` + explicit `minOut` | Routes through that adapter only. |
-
-### Auto-route (best price, adapter chosen internally)
+Aggregates all sources, picks the best, computes `minOut` from `slippage`. `sources[]` shows all tried. When the best route is a two-step bridge (tokenIn → WBNB → tokenOut via a BC adapter), `batchSwap` calldata is returned and `singleStep` is `false`.
 
 ```json
 POST /api/v1/bsc/dex/swap
@@ -951,19 +690,21 @@ POST /api/v1/bsc/dex/swap
   "amountIn":  "1000000000000000000",
   "tokenOut":  "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
   "to":        "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-  "deadline":  1745130000,
+  "deadline":  "1745130000",
   "slippage":  "100"
 }
 ```
 
-**Response**
+**Response — single-step route**
 ```json
 {
   "data": {
     "to":          "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
     "calldata":    "0x...",
-    "adapter":     "PANCAKE_V3",
-    "adapterId":   "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+    "value":       "0",
+    "nativeIn":    false,
+    "nativeOut":   false,
+    "singleStep":  true,
     "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
     "tokenOut":    "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
     "amountIn":    "1000000000000000000",
@@ -972,7 +713,21 @@ POST /api/v1/bsc/dex/swap
     "minOut":      "1235817000000000000000000",
     "slippageBps": "100",
     "deadline":    "1745130000",
-    "adapterData": "0x...",
+    "steps": [
+      {
+        "adapter":     "PANCAKE_V3",
+        "adapterId":   "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+        "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "tokenOut":    "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+        "amountIn":    "1000000000000000000",
+        "amountOut":   "1248300000000000000000000",
+        "minOut":      "1235817000000000000000000",
+        "adapterData": "0x...",
+        "fees":        [500],
+        "tickSpacing": null,
+        "hooks":       null
+      }
+    ],
     "sources": [
       { "adapter": "PANCAKE_V3", "fees": [500],  "amountOut": "1248300000000000000000000" },
       { "adapter": "PANCAKE_V2", "fees": null,   "amountOut": "1231847000000000000000000" }
@@ -981,101 +736,35 @@ POST /api/v1/bsc/dex/swap
 }
 ```
 
----
-
-### Specific adapter — V2 single-hop (PANCAKE_V2 / UNISWAP_V2)
-
-**Request**
-```json
-POST /api/v1/bsc/dex/swap
-{
-  "adapter":   "PANCAKE_V2",
-  "tokenIn":   "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-  "amountIn":  "1000000000000000000",
-  "tokenOut":  "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-  "minOut":    "1200000000000000000000000",
-  "to":        "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-  "deadline":  1745130000
-}
-```
-
-**Response**
+**Response — two-step bridge route** (tokenIn → WBNB → BC token, `singleStep: false`)
 ```json
 {
   "data": {
     "to":          "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
-    "calldata":    "0x7c025200000000000000000000000000000000000000000000000000a1b2a1b2...",
-    "adapter":     "PANCAKE_V2",
-    "adapterId":   "0xa1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2",
-    "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "tokenOut":    "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-    "amountIn":    "1000000000000000000",
-    "feeEstimate": "10000000000000000",
-    "netAmountIn": "990000000000000000",
-    "minOut":      "1200000000000000000000000",
-    "deadline":    "1745130000",
-    "adapterData": "0x000000000000000000000000000000000000000000000000000000000000002..."
+    "calldata":    "0x...",
+    "singleStep":  false,
+    "steps": [
+      {
+        "adapter":     "PANCAKE_V3",
+        "tokenIn":     "0xa3f1...",
+        "tokenOut":    "0xbb4c...",
+        "amountIn":    "500000000000000000000000",
+        "amountOut":   "410000000000000000",
+        "minOut":      "405900000000000000",
+        "adapterData": "0x...",
+        "fees":        [500]
+      },
+      {
+        "adapter":     "FOURMEME",
+        "tokenIn":     "0xbb4c...",
+        "tokenOut":    "0xc5d6...",
+        "amountIn":    "410000000000000000",
+        "amountOut":   "398000000000000000000000",
+        "minOut":      "394020000000000000000000",
+        "adapterData": "0x..."
+      }
+    ]
   }
-}
-```
-
-### V2 multi-hop with explicit path
-
-**Request**
-```json
-POST /api/v1/bsc/dex/swap
-{
-  "adapter":  "PANCAKE_V2",
-  "tokenIn":  "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-  "amountIn": "500000000000000000000000",
-  "tokenOut": "0x55d398326f99059ff775485246999027b3197955",
-  "minOut":   "390000000000000000000",
-  "to":       "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-  "deadline": 1745130000,
-  "path": [
-    "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "0x55d398326f99059ff775485246999027b3197955"
-  ]
-}
-```
-
-### V3 single-hop (PANCAKE_V3 / UNISWAP_V3)
-
-**Request**
-```json
-POST /api/v1/bsc/dex/swap
-{
-  "adapter":  "PANCAKE_V3",
-  "tokenIn":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-  "amountIn": "500000000000000000",
-  "tokenOut": "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-  "minOut":   "600000000000000000000000",
-  "to":       "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-  "deadline": 1745130000,
-  "path": [
-    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0"
-  ],
-  "fees": [500]
-}
-```
-
-### Bonding-curve (ONEMEME_BC / FOURMEME / FLAPSH)
-
-No `path` or `fees` required — the adapter resolves the curve from `tokenIn`/`tokenOut`.
-
-**Request**
-```json
-POST /api/v1/bsc/dex/swap
-{
-  "adapter":  "FOURMEME",
-  "tokenIn":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-  "amountIn": "1000000000000000000",
-  "tokenOut": "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-  "minOut":   "974367900000000000000000",
-  "to":       "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-  "deadline": 1745130000
 }
 ```
 
@@ -1088,34 +777,34 @@ Computes the EIP-712 digest the user must sign for a gasless meta-transaction.
 ### Gasless swap flow
 
 ```
-1. GET  /dex/metatx/nonce/:user          → get current nonce
-2. POST /dex/metatx/digest               → build order + get digest
-3. user.signTypedData(digest)            → sign in wallet (off-chain)
-4. POST /dex/metatx/relay { order, sig } → relayer submits on-chain
+1. GET  /dex/route                       → find best route; note step.adapterId + step.adapterData
+2. GET  /dex/metatx/nonce/:user          → get current nonce
+3. POST /dex/metatx/digest               → build order + get digest
+4. user.signTypedData(digest)            → sign in wallet (off-chain)
+5. POST /dex/metatx/relay { order, sig } → relayer submits on-chain
 ```
 
 > **Important:** Only Token → BNB and Token → Token swaps are supported (not BNB → Token).
 > The user must approve the MetaTx contract for `grossAmountIn` of `tokenIn` before relay.
+>
+> `adapterId` and `adapterData` are opaque bytes taken directly from the `GET /dex/route`
+> step response — the server does not derive them from an adapter name here.
 
 **Request**
 ```json
 POST /api/v1/bsc/dex/metatx/digest
 {
   "user":          "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-  "adapter":       "PANCAKE_V3",
+  "adapterId":     "0xc3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4",
+  "adapterData":   "0x000000000000000000000000000000000000000000000000000000000001f4",
   "tokenIn":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
   "grossAmountIn": "500000000000000000000000",
   "tokenOut":      "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
   "minUserOut":    "390000000000000000",
   "recipient":     "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-  "deadline":      1745133600,
-  "swapDeadline":  1745130000,
-  "relayerFee":    "2000000000000000000000",
-  "path": [
-    "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
-  ],
-  "fees": [500]
+  "deadline":      "1745133600",
+  "swapDeadline":  "1745130000",
+  "relayerFee":    "2000000000000000000000"
 }
 ```
 
@@ -1222,31 +911,17 @@ POST /api/v1/bsc/dex/metatx/relay
 
 Returns an optimally routed swap plan with pre-encoded `adapterData` for each step.
 
-**Two modes:**
-
-| Mode | When | Behaviour |
-|---|---|---|
-| Aggregation | `adapter` param omitted | Queries V2, V3, V4, and bonding-curve adapters in parallel; returns the best price. `sources[]` lists every source with its quoted output. |
-| Specific adapter | `adapter` param provided | Routes through that adapter only. Bonding-curve adapters with non-WBNB `tokenIn` automatically get a `PANCAKE_V3 → fallback PANCAKE_V2` bridge hop prepended. |
+Queries PancakeSwap V2/V3/V4, Uniswap V2/V3/V4, and bonding-curve protocols in parallel.
+V3/V4 pool candidates are discovered from their subgraphs first so only real pools with liquidity are quoted. When neither tokenIn nor tokenOut is WBNB and a BC adapter wins, a two-step bridge route is returned automatically (`singleStep: false`). `sources[]` lists every source with its quoted output.
 
 **Query Parameters**
 
-| Parameter     | Required | Description |
+| Parameter  | Required | Description |
 |---|---|---|
-| `tokenIn`     | Yes | Input token address |
-| `amountIn`    | Yes | Input amount in wei (string) |
-| `tokenOut`    | Yes | Output token address |
-| `adapter`     | No  | Omit for aggregation mode; set to a specific adapter name for single-source routing |
-| `fees`        | No  | Fee tier(s) — required when `adapter` is V3 or V4 |
-| `tickSpacing` | No  | Tick spacing(s) — V4 only; auto-derived from fee when omitted |
-| `hooks`       | No  | Hook addresses — V4 only; defaults to zero address |
-| `slippage`    | No  | Slippage in basis points (default `100` = 1%) |
-
----
-
-### Aggregation mode — no adapter specified
-
-When `adapter` is omitted, the API queries all relevant liquidity sources (PancakeSwap V2/V3/V4, Uniswap V2/V3/V4, and bonding-curve protocols when applicable) in parallel and returns the best price. V3/V4 pool candidates are discovered from their subgraphs first so only real pools with liquidity are quoted.
+| `tokenIn`  | Yes | Input token address |
+| `amountIn` | Yes | Input amount in wei (string) |
+| `tokenOut` | Yes | Output token address |
+| `slippage` | No  | Slippage in basis points (default `100` = 1%) |
 
 ```
 GET /api/v1/bsc/dex/route?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100
@@ -1295,82 +970,12 @@ The winning source is returned as the first and only element of `steps[]`. `sour
 { "statusCode": 503, "message": "No route found — no liquidity source returned a valid quote for this pair" }
 ```
 
----
+**Native BNB** — pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut`. When `nativeIn: true`, the caller must attach `value` wei as `msg.value` with the transaction.
 
-### Specific adapter — single-step — WBNB directly into a 1MEME token
-
-```
-GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xMEME&slippage=100
-```
-
-```json
-{
-  "data": {
-    "singleStep": true,
-    "nativeIn": false,
-    "nativeOut": false,
-    "value": "0",
-    "steps": [
-      {
-        "adapter": "ONEMEME_BC",
-        "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
-        "tokenIn": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-        "tokenOut": "0x000000000000000000000000000000000000meme",
-        "amountIn": "1000000000000000000",
-        "amountOut": "412800000000000000000000",
-        "minOut": "408672000000000000000000",
-        "adapterData": "0x000000000000000000...000000000000000000..."
-      }
-    ],
-    "amountIn": "1000000000000000000",
-    "minFinalOut": "408672000000000000000000",
-    "aggregatorFee": "10000000000000000",
-    "slippageBps": "100"
-  }
-}
-```
-
-### Single-step — native BNB (zero address) directly into a 1MEME token
-
-Pass `0x0000000000000000000000000000000000000000` as `tokenIn`. The API routes via WBNB internally and returns `nativeIn: true` with the `value` to attach.
+**Two-step bridge response** — when neither tokenIn nor tokenOut is WBNB and a bonding-curve adapter wins (e.g. USDC → 1MEME token), the router automatically prepends a tokenIn → WBNB hop:
 
 ```
-GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0x0000000000000000000000000000000000000000&amountIn=1000000000000000000&tokenOut=0xMEME&slippage=100
-```
-
-```json
-{
-  "data": {
-    "singleStep": true,
-    "nativeIn": true,
-    "nativeOut": false,
-    "value": "1000000000000000000",
-    "steps": [
-      {
-        "adapter": "ONEMEME_BC",
-        "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
-        "tokenIn": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-        "tokenOut": "0x000000000000000000000000000000000000meme",
-        "amountIn": "1000000000000000000",
-        "amountOut": "412800000000000000000000",
-        "minOut": "408672000000000000000000",
-        "adapterData": "0x..."
-      }
-    ],
-    "amountIn": "1000000000000000000",
-    "minFinalOut": "408672000000000000000000",
-    "aggregatorFee": "10000000000000000",
-    "slippageBps": "100"
-  }
-}
-```
-
-> When `nativeIn: true`, the caller must send `value` (wei) as `msg.value` with the transaction. When using `POST /dex/batch-swap` the `calldata` already encodes WBNB as `tokenIn`; the caller attaches native BNB as the transaction value.
-
-### Two-step bridge — USDC into a 1MEME token
-
-```
-GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d&amountIn=5000000000000000000&tokenOut=0xMEME&slippage=150
+GET /api/v1/bsc/dex/route?tokenIn=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d&amountIn=5000000000000000000&tokenOut=0xMEME&slippage=150
 ```
 
 ```json
@@ -1389,7 +994,10 @@ GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0x8ac76a51cc950d9822d68b83f
         "amountIn": "5000000000000000000",
         "amountOut": "8621500000000000",
         "minOut": "8492277500000000",
-        "adapterData": "0x..."
+        "adapterData": "0x...",
+        "fees": [500],
+        "tickSpacing": null,
+        "hooks": null
       },
       {
         "adapter": "ONEMEME_BC",
@@ -1405,7 +1013,11 @@ GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0x8ac76a51cc950d9822d68b83f
     "amountIn": "5000000000000000000",
     "minFinalOut": "3505576500000000000000",
     "aggregatorFee": "50000000000000000",
-    "slippageBps": "150"
+    "slippageBps": "150",
+    "sources": [
+      { "adapter": "PANCAKE_V3→ONEMEME_BC", "fees": [500], "amountOut": "3558900000000000000000" },
+      { "adapter": "PANCAKE_V2",            "fees": null,  "amountOut": "3102000000000000000000" }
+    ]
   }
 }
 ```
@@ -1487,7 +1099,7 @@ Computes the EIP-712 digest the user must sign for a gasless multi-hop swap.
 
 **Step 1** — get route:
 ```
-GET /dex/route?adapter=ONEMEME_BC&tokenIn=0xUSDC&amountIn=5000000000000000000&tokenOut=0xMEME
+GET /dex/route?tokenIn=0xUSDC&amountIn=5000000000000000000&tokenOut=0xMEME
 ```
 Save `steps[]` from the response.
 

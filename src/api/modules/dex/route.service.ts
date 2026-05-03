@@ -2,11 +2,12 @@
  * DEX Route Service — aggregation layer for optimal price routing.
  *
  * Responsible for:
- *   • On-chain quotes (single adapter)
- *   • Route finding — when no adapter is specified, quotes all relevant
- *     liquidity sources in parallel and returns the best price
+ *   • Route finding — discovers all liquidity sources in parallel and
+ *     returns the best price; bridge routes are built automatically
+ *     when bonding-curve adapters need WBNB as an intermediate token
  *   • Calldata building for direct (non-gasless) swap and batch-swap transactions
  *
+ * Adapter selection is 100% internal — no public endpoint accepts an adapter name.
  * This service has no knowledge of meta-transactions, relayers, or EIP-712.
  * Those concerns belong to MetaTxService which sits above this layer.
  */
@@ -15,14 +16,11 @@ import { Injectable, BadRequestException, ServiceUnavailableException, Logger } 
 import { dexFetchFrom } from "./dex-subgraph";
 import {
   ADAPTER_IDS,
-  ADAPTER_NAMES,
   AdapterName,
   SwapStep,
   encodeV2AdapterData,
   encodeV3SingleHopAdapterData,
-  encodeV3MultiHopAdapterData,
   encodeV4SingleHopAdapterData,
-  encodeV4MultiHopAdapterData,
   encodeOneMemeAdapterData,
   encodeFourMemeAdapterData,
   encodeFlapShAdapterData,
@@ -32,7 +30,6 @@ import {
   quoteV2,
   quoteV3,
   quoteV4,
-  quoteV4Multi,
   quoteBcBuy,
   quoteBcSell,
   quoteFourMemeBuy,
@@ -113,136 +110,6 @@ export function requireBigInt(val: unknown, name: string): bigint {
   }
 }
 
-export function requireAdapter(val: unknown): AdapterName {
-  if (typeof val !== "string" || !(val.toUpperCase() in ADAPTER_IDS)) {
-    throw new BadRequestException(
-      `adapter must be one of: ${ADAPTER_NAMES.join(", ")}`,
-    );
-  }
-  return val.toUpperCase() as AdapterName;
-}
-
-/**
- * Builds the ABI-encoded adapterData bytes for each adapter type.
- * Exported so MetaTxService can encode adapter data when building EIP-712 orders.
- */
-export function buildAdapterData(
-  adapterName: AdapterName,
-  tokenIn:     Hex,
-  tokenOut:    Hex,
-  body:        Record<string, unknown>,
-  deadline:    bigint,
-): Hex {
-  if (adapterName === "ONEMEME_BC") {
-    const token = tokenIn.toLowerCase() === WBNB_BSC ? tokenOut : tokenIn;
-    return encodeOneMemeAdapterData(token, deadline);
-  }
-
-  if (adapterName === "FOURMEME") {
-    const token = tokenIn.toLowerCase() === WBNB_BSC ? tokenOut : tokenIn;
-    return encodeFourMemeAdapterData(token);
-  }
-
-  if (adapterName === "FLAPSH") {
-    return encodeFlapShAdapterData();
-  }
-
-  if (adapterName === "PANCAKE_V2" || adapterName === "UNISWAP_V2") {
-    const rawPath = body["path"];
-    let path: Hex[];
-    if (Array.isArray(rawPath) && rawPath.length >= 2) {
-      rawPath.forEach((p, i) => {
-        if (!isAddress(String(p))) throw new BadRequestException(`path[${i}] is not a valid address`);
-      });
-      path = rawPath.map(p => normalizeAddress(String(p)) as Hex);
-    } else {
-      path = [tokenIn, tokenOut];
-    }
-    return encodeV2AdapterData(path, deadline);
-  }
-
-  if (adapterName === "PANCAKE_V3" || adapterName === "UNISWAP_V3") {
-    const rawPath = body["path"];
-    const rawFees = body["fees"];
-
-    let tokens: Hex[];
-    if (Array.isArray(rawPath) && rawPath.length >= 2) {
-      rawPath.forEach((p, i) => {
-        if (!isAddress(String(p))) throw new BadRequestException(`path[${i}] is not a valid address`);
-      });
-      tokens = rawPath.map(p => normalizeAddress(String(p)) as Hex);
-    } else {
-      tokens = [tokenIn, tokenOut];
-    }
-
-    const hopCount = tokens.length - 1;
-    if (!Array.isArray(rawFees) || rawFees.length !== hopCount) {
-      throw new BadRequestException(
-        hopCount === 1
-          ? "V3 swaps require a fees array (e.g. [500] for 0.05%)"
-          : `V3 fees must have ${hopCount} element(s) for ${tokens.length} tokens`,
-      );
-    }
-    const fees = rawFees.map((f, i) => {
-      const n = parseInt(String(f), 10);
-      if (isNaN(n) || n <= 0) throw new BadRequestException(`fees[${i}] must be a positive integer`);
-      return n;
-    });
-
-    return hopCount === 1
-      ? encodeV3SingleHopAdapterData(fees[0]!)
-      : encodeV3MultiHopAdapterData(tokens, fees);
-  }
-
-  if (adapterName === "PANCAKE_V4" || adapterName === "UNISWAP_V4") {
-    const rawPath        = body["path"];
-    const rawFees        = body["fees"];
-    const rawTickSpacings = body["tickSpacing"];
-    const rawHooks       = body["hooks"];
-
-    let tokens: Hex[];
-    if (Array.isArray(rawPath) && rawPath.length >= 2) {
-      rawPath.forEach((p, i) => {
-        if (!isAddress(String(p))) throw new BadRequestException(`path[${i}] is not a valid address`);
-      });
-      tokens = rawPath.map(p => normalizeAddress(String(p)) as Hex);
-    } else {
-      tokens = [tokenIn, tokenOut];
-    }
-
-    const hopCount = tokens.length - 1;
-    if (!Array.isArray(rawFees) || rawFees.length !== hopCount) {
-      throw new BadRequestException(`V4 swaps require ${hopCount} fee tier(s) in fees array`);
-    }
-    const fees = rawFees.map((f, i) => {
-      const n = parseInt(String(f), 10);
-      if (isNaN(n) || n <= 0) throw new BadRequestException(`fees[${i}] must be a positive integer`);
-      return n;
-    });
-
-    const tickSpacings: number[] = Array.isArray(rawTickSpacings)
-      ? rawTickSpacings.map(s => parseInt(String(s), 10) || 0)
-      : [];
-    const hooksArr: Hex[] = Array.isArray(rawHooks)
-      ? rawHooks.map((h, i) => {
-          if (!isAddress(String(h))) throw new BadRequestException(`hooks[${i}] is not a valid address`);
-          return normalizeAddress(String(h)) as Hex;
-        })
-      : [];
-
-    if (hopCount === 1) {
-      const fee        = fees[0]!;
-      const tickSpacing = tickSpacings[0] || defaultTickSpacing(fee);
-      const hooks      = hooksArr[0] ?? ZERO_ADDR;
-      return encodeV4SingleHopAdapterData(tokenIn, tokenOut, fee, tickSpacing, hooks, "0x", deadline);
-    } else {
-      return encodeV4MultiHopAdapterData(tokens, fees, tickSpacings, hooksArr, deadline);
-    }
-  }
-
-  throw new BadRequestException(`Unknown adapter: ${adapterName}`);
-}
-
 export function parseSteps(raw: unknown, prefix: string): SwapStep[] {
   if (!Array.isArray(raw) || raw.length < 2) {
     throw new BadRequestException(`${prefix} must be an array of at least 2 swap steps`);
@@ -319,12 +186,9 @@ export class RouteService {
   /**
    * GET /dex/quote
    *
-   * Aggregation mode (no adapter param): discovers all liquidity sources for
-   * the pair and returns the best on-chain quote. `sources` lists every source
-   * that returned a valid price, sorted best-first.
-   *
-   * Specific adapter mode (adapter param provided): quotes that single adapter.
-   * V3 and V4 require `?fees=` (and optionally `?tickSpacing=`, `?hooks=`).
+   * Aggregates all liquidity sources for the pair and returns the best on-chain
+   * quote. V3/V4 pools are discovered from their subgraphs first. `sources[]`
+   * lists every source that returned a valid price, sorted best-first.
    */
   async getQuote(query: Record<string, string | undefined>) {
     const rawTokenIn  = requireAddress(query["tokenIn"],  "tokenIn");
@@ -349,159 +213,40 @@ export class RouteService {
     }
 
     const aggregatorFee = amountIn / AGGREGATOR_FEE_DIVISOR;
+    const nowSec        = BigInt(Math.floor(Date.now() / 1000));
+    const deadline      = nowSec + 1800n;
+    const result        = await this.aggregateRoute(
+      tokenIn, tokenOut, amountIn, slippageBps, deadline, nativeIn, nativeOut, aggregatorFee,
+    );
 
-    // ── Aggregation mode: no adapter specified ─────────────────────────────
-    if (!query["adapter"]) {
-      const nowSec   = BigInt(Math.floor(Date.now() / 1000));
-      const deadline = nowSec + 1800n;
-      const result   = await this.aggregateRoute(
-        tokenIn, tokenOut, amountIn, slippageBps, deadline, nativeIn, nativeOut, aggregatorFee,
-      );
-      const best = result.data.steps[0]!;
-      return {
-        data: {
-          adapter:       best.adapter,
-          tokenIn:       nativeIn  ? NATIVE_BNB : tokenIn,
-          tokenOut:      nativeOut ? NATIVE_BNB : tokenOut,
-          nativeIn,
-          nativeOut,
-          value:         nativeIn ? amountIn.toString() : "0",
-          amountIn:      amountIn.toString(),
-          amountOut:     best.amountOut,
-          minOut:        best.minOut,
-          aggregatorFee: aggregatorFee.toString(),
-          bondingFee:    null,
-          slippageBps:   slippageBps.toString(),
-          quotedBy:      "aggregation",
-          path:          [tokenIn, tokenOut],
-          fees:          best.fees,
-          tickSpacing:   best.tickSpacing,
-          hooks:         best.hooks,
-          sources:       result.data.sources,
-        },
-      };
-    }
-
-    // ── Specific adapter mode ──────────────────────────────────────────────
-    const adapter         = requireAdapter(query["adapter"]);
-    const rawPath         = query["path"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
-    const rawFees         = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0 && n <= 1_000_000) ?? [];
-    const rawTickSpacings = query["tickSpacing"]?.split(",").map(s => parseInt(s.trim(), 10) || 0) ?? [];
-    const rawHooksArr     = query["hooks"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
-
-    const path: Hex[] = rawPath.length >= 2
-      ? rawPath.map((p, i) => {
-          if (!isAddress(p)) throw new BadRequestException(`path[${i}] is not a valid address`);
-          return toWbnbIfNative(normalizeAddress(p) as Hex);
-        })
-      : [tokenIn, tokenOut];
-
-    let amountOut: bigint;
-    let fee:       bigint | null = null;
-    let quotedBy:  string;
-
-    try {
-      if (adapter === "PANCAKE_V2" || adapter === "UNISWAP_V2") {
-        amountOut = await quoteV2(adapter, path, amountIn);
-        quotedBy  = adapter === "PANCAKE_V2" ? "PancakeSwap V2 Router" : "Uniswap V2 Router";
-
-      } else if (adapter === "PANCAKE_V3" || adapter === "UNISWAP_V3") {
-        if (rawFees.length !== path.length - 1) {
-          throw new BadRequestException(
-            `V3 quote requires ${path.length - 1} fee tier(s) — provide via ?fees=500 (comma-separated for multi-hop)`,
-          );
-        }
-        const packedPath = buildV3PackedPath(path, rawFees);
-        amountOut = await quoteV3(adapter, packedPath, amountIn);
-        quotedBy  = adapter === "PANCAKE_V3" ? "PancakeSwap V3 QuoterV2" : "Uniswap V3 QuoterV2";
-
-      } else if (adapter === "ONEMEME_BC") {
-        const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
-        const token = isBuy ? tokenOut : tokenIn;
-        const r = isBuy ? await quoteBcBuy(token, amountIn) : await quoteBcSell(token, amountIn);
-        amountOut = r.amountOut;
-        fee       = r.fee;
-        quotedBy  = "OneMEME BondingCurve";
-
-      } else if (adapter === "FOURMEME") {
-        const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
-        const token = isBuy ? tokenOut : tokenIn;
-        const r = isBuy ? await quoteFourMemeBuy(token, amountIn) : await quoteFourMemeSell(token, amountIn);
-        amountOut = r.amountOut;
-        fee       = r.fee;
-        quotedBy  = "FourMEME TokenManagerHelper3";
-
-      } else if (adapter === "FLAPSH") {
-        const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
-        const token = isBuy ? tokenOut : tokenIn;
-        amountOut = isBuy ? await quoteFlapShBuy(token, amountIn) : await quoteFlapShSell(token, amountIn);
-        quotedBy  = "Flap.SH Portal";
-
-      } else if (adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4") {
-        const hopCount = path.length - 1;
-        if (rawFees.length !== hopCount) {
-          throw new BadRequestException(
-            `V4 quote requires ${hopCount} fee tier(s) for ${path.length} tokens — ` +
-            `provide via ?fees=3000 (single-hop) or ?fees=500,3000 (multi-hop)`,
-          );
-        }
-        rawHooksArr.forEach((h, i) => {
-          if (!isAddress(h)) throw new BadRequestException(`hooks[${i}] is not a valid EVM address`);
-        });
-
-        const label = adapter === "PANCAKE_V4" ? "PancakeSwap V4 Quoter" : "Uniswap V4 Quoter";
-        if (hopCount === 1) {
-          const f  = rawFees[0]!;
-          const ts = rawTickSpacings[0] || defaultTickSpacing(f);
-          const hk = (rawHooksArr[0] ?? ZERO_ADDR) as Hex;
-          amountOut = await quoteV4(adapter, tokenIn, tokenOut, amountIn, f, ts, hk);
-        } else {
-          amountOut = await quoteV4Multi(adapter, path, amountIn, rawFees, rawTickSpacings, rawHooksArr as Hex[]);
-        }
-        quotedBy = label;
-
-      } else {
-        throw new BadRequestException(`On-chain quote is not supported for ${adapter}`);
-      }
-    } catch (err: unknown) {
-      if (err instanceof BadRequestException || err instanceof ServiceUnavailableException) throw err;
-      const msg = String(err);
-      if (
-        msg.includes("not configured") || msg.includes("timeout") || msg.includes("TIMEOUT") ||
-        msg.includes("ECONNREFUSED") || msg.includes("ENOTFOUND") || msg.includes("fetch failed")
-      ) {
-        throw new ServiceUnavailableException(`Quote unavailable: ${msg}`);
-      }
-      throw new BadRequestException(`Quote simulation failed: ${msg}`);
-    }
-
-    const minOut    = (amountOut * (10_000n - slippageBps)) / 10_000n;
-    const isV4      = adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4";
-    const hopCount  = path.length - 1;
+    const steps     = result.data.steps;
+    const firstStep = steps[0]!;
+    const lastStep  = steps[steps.length - 1]!;
+    const isMulti   = steps.length > 1;
+    const path      = isMulti
+      ? [...steps.map(s => s.tokenIn as string), lastStep.tokenOut as string]
+      : [tokenIn as string, tokenOut as string];
 
     return {
       data: {
-        adapter,
+        adapter:       isMulti ? steps.map(s => s.adapter).join("→") : firstStep.adapter,
         tokenIn:       nativeIn  ? NATIVE_BNB : tokenIn,
         tokenOut:      nativeOut ? NATIVE_BNB : tokenOut,
         nativeIn,
         nativeOut,
         value:         nativeIn ? amountIn.toString() : "0",
         amountIn:      amountIn.toString(),
-        amountOut:     amountOut.toString(),
-        minOut:        minOut.toString(),
+        amountOut:     lastStep.amountOut,
+        minOut:        lastStep.minOut,
         aggregatorFee: aggregatorFee.toString(),
-        bondingFee:    fee?.toString() ?? null,
+        bondingFee:    null,
         slippageBps:   slippageBps.toString(),
-        quotedBy,
+        quotedBy:      "aggregation",
         path,
-        fees:          rawFees.length ? rawFees : null,
-        tickSpacing:   isV4
-          ? rawFees.map((f, i) => rawTickSpacings[i] || defaultTickSpacing(f))
-          : null,
-        hooks:         isV4
-          ? Array.from({ length: hopCount }, (_, i) => rawHooksArr[i] ?? ZERO_ADDR)
-          : null,
+        fees:          firstStep.fees,
+        tickSpacing:   firstStep.tickSpacing,
+        hooks:         firstStep.hooks,
+        sources:       result.data.sources,
       },
     };
   }
@@ -511,14 +256,14 @@ export class RouteService {
   /**
    * GET /dex/route
    *
-   * Aggregation mode (no adapter param): quotes all relevant liquidity sources
-   * — V2, V3 (common fee tiers), and bonding-curve adapters when applicable —
-   * in parallel and returns the route with the best output. The `sources` field
-   * in the response shows every source that was tried with its quoted amount.
+   * Aggregates all relevant liquidity sources — V2, V3 (discovered pools),
+   * V4 (discovered pools), and bonding-curve adapters when applicable — in
+   * parallel and returns the route with the best output. When neither tokenIn
+   * nor tokenOut is WBNB and a bonding-curve adapter wins, a two-step bridge
+   * route (tokenIn→WBNB→tokenOut) is returned automatically.
    *
-   * Specific adapter mode (adapter param provided): routes through that single
-   * adapter. For bonding-curve adapters with a non-WBNB tokenIn, automatically
-   * prepends a PANCAKE_V3 (fee 500, fallback PANCAKE_V2) bridge hop to WBNB.
+   * The `sources[]` field shows every source that was tried with its quoted
+   * output, sorted best-first.
    */
   async getRoute(query: Record<string, string | undefined>) {
     const rawTokenIn  = requireAddress(query["tokenIn"],  "tokenIn");
@@ -542,217 +287,27 @@ export class RouteService {
       throw new BadRequestException("slippage must be between 0 and 5000 basis points");
     }
 
-    const nowSec       = BigInt(Math.floor(Date.now() / 1000));
-    const deadline     = nowSec + 1800n;
+    const nowSec        = BigInt(Math.floor(Date.now() / 1000));
+    const deadline      = nowSec + 1800n;
     const aggregatorFee = amountIn / AGGREGATOR_FEE_DIVISOR;
 
-    // ── Aggregation mode: no adapter specified ─────────────────────────────
-    if (!query["adapter"]) {
-      return this.aggregateRoute(
-        tokenIn, tokenOut, amountIn, slippageBps, deadline,
-        nativeIn, nativeOut, aggregatorFee,
-      );
-    }
-
-    // ── Specific adapter mode ──────────────────────────────────────────────
-    const adapter      = requireAdapter(query["adapter"]);
-    const isBcAdapter  = BC_ADAPTERS.includes(adapter);
-    const needsBridge  = isBcAdapter && tokenIn.toLowerCase() !== WBNB_BSC;
-    const WBNB         = WBNB_BSC as Hex;
-
-    const rawFees         = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)) ?? [];
-    const rawTickSpacings = query["tickSpacing"]?.split(",").map(s => parseInt(s.trim(), 10) || 0) ?? [];
-    const rawHooksArr     = query["hooks"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
-    const rawPath         = query["path"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
-    const path: Hex[]     = rawPath.length >= 2
-      ? rawPath.map(p => toWbnbIfNative(normalizeAddress(p) as Hex))
-      : [tokenIn, tokenOut];
-
-    const wrapQuoteError = (err: unknown, label: string): never => {
-      if (err instanceof BadRequestException || err instanceof ServiceUnavailableException) throw err;
-      const msg = String(err);
-      if (
-        msg.includes("not configured") || msg.includes("timeout") ||
-        msg.includes("ECONNREFUSED") || msg.includes("fetch failed")
-      ) throw new ServiceUnavailableException(`${label} unavailable: ${msg}`);
-      throw new BadRequestException(`${label} failed: ${msg}`);
-    };
-
-    if (!needsBridge) {
-      let amountOut: bigint;
-      try {
-        if (adapter === "ONEMEME_BC") {
-          const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
-          const token = isBuy ? tokenOut : tokenIn;
-          amountOut = (isBuy ? await quoteBcBuy(token, amountIn) : await quoteBcSell(token, amountIn)).amountOut;
-        } else if (adapter === "FOURMEME") {
-          const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
-          const token = isBuy ? tokenOut : tokenIn;
-          amountOut = (isBuy ? await quoteFourMemeBuy(token, amountIn) : await quoteFourMemeSell(token, amountIn)).amountOut;
-        } else if (adapter === "FLAPSH") {
-          const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
-          const token = isBuy ? tokenOut : tokenIn;
-          amountOut = isBuy ? await quoteFlapShBuy(token, amountIn) : await quoteFlapShSell(token, amountIn);
-        } else if (adapter === "PANCAKE_V2" || adapter === "UNISWAP_V2") {
-          amountOut = await quoteV2(adapter, path, amountIn);
-        } else if (adapter === "PANCAKE_V3" || adapter === "UNISWAP_V3") {
-          if (rawFees.length === 0) throw new BadRequestException("V3 route requires ?fees= query param (e.g. ?fees=500)");
-          amountOut = await quoteV3(adapter, buildV3PackedPath(path, rawFees), amountIn);
-        } else {
-          // PANCAKE_V4 or UNISWAP_V4
-          const hopCount = path.length - 1;
-          if (rawFees.length !== hopCount) {
-            throw new BadRequestException(
-              `V4 route requires ${hopCount} fee tier(s) — provide via ?fees=3000` +
-              (hopCount > 1 ? " (comma-separated for multi-hop)" : ""),
-            );
-          }
-          if (hopCount === 1) {
-            const f  = rawFees[0]!;
-            const ts = rawTickSpacings[0] || defaultTickSpacing(f);
-            const hk = (rawHooksArr[0] ?? ZERO_ADDR) as Hex;
-            amountOut = await quoteV4(adapter, tokenIn, tokenOut, amountIn, f, ts, hk);
-          } else {
-            amountOut = await quoteV4Multi(adapter, path, amountIn, rawFees, rawTickSpacings, rawHooksArr as Hex[]);
-          }
-        }
-      } catch (err) { wrapQuoteError(err, "Quote"); }
-
-      const minOut      = (amountOut! * (10_000n - slippageBps)) / 10_000n;
-      const isV4        = adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4";
-      const adapterBody: Record<string, unknown> = {
-        ...(rawFees.length      > 0 && { fees:        rawFees        }),
-        ...(rawPath.length     >= 2 && { path:        rawPath        }),
-        ...(isV4 && rawTickSpacings.length > 0 && { tickSpacing: rawTickSpacings }),
-        ...(isV4 && rawHooksArr.length     > 0 && { hooks:       rawHooksArr     }),
-      };
-      const adapterData = buildAdapterData(adapter, tokenIn, tokenOut, adapterBody, deadline);
-
-      return {
-        data: {
-          singleStep: true,
-          nativeIn,
-          nativeOut,
-          value:      nativeIn ? amountIn.toString() : "0",
-          steps: [{
-            adapter,
-            adapterId:   ADAPTER_IDS[adapter],
-            tokenIn,
-            tokenOut,
-            amountIn:    amountIn.toString(),
-            amountOut:   amountOut!.toString(),
-            minOut:      minOut.toString(),
-            adapterData,
-            fees:        rawFees.length ? rawFees : null,
-            tickSpacing: isV4 && rawFees.length
-              ? rawFees.map((f, i) => rawTickSpacings[i] || defaultTickSpacing(f))
-              : null,
-            hooks: isV4
-              ? Array.from({ length: path.length - 1 }, (_, i) =>
-                  rawHooksArr[i] ?? ZERO_ADDR)
-              : null,
-          }],
-          amountIn:      amountIn.toString(),
-          minFinalOut:   minOut.toString(),
-          aggregatorFee: aggregatorFee.toString(),
-          slippageBps:   slippageBps.toString(),
-        },
-      };
-    }
-
-    // ── Two-step bridge route: tokenIn → WBNB → tokenOut (BC adapter) ─────
-    let bridgeAmountOut: bigint;
-    let bridgeAdapter:   "PANCAKE_V3" | "PANCAKE_V2" = "PANCAKE_V2";
-    let step1Data:       Hex;
-
-    try {
-      bridgeAmountOut = await quoteV3("PANCAKE_V3", buildV3PackedPath([tokenIn, WBNB], [500]), amountIn);
-      bridgeAdapter   = "PANCAKE_V3";
-      step1Data       = encodeV3SingleHopAdapterData(500);
-    } catch {
-      try {
-        bridgeAmountOut = await quoteV2("PANCAKE_V2", [tokenIn, WBNB], amountIn);
-        bridgeAdapter   = "PANCAKE_V2";
-        step1Data       = encodeV2AdapterData([tokenIn, WBNB], deadline);
-      } catch (err2) {
-        wrapQuoteError(
-          new BadRequestException(`No PANCAKE_V3/V2 bridge path from tokenIn to WBNB: ${String(err2)}`),
-          "Bridge quote",
-        );
-      }
-    }
-
-    const bridgeMinOut = (bridgeAmountOut! * (10_000n - slippageBps)) / 10_000n;
-    const wbnbIn       = bridgeAmountOut!;
-
-    let finalAmountOut: bigint;
-    try {
-      if (adapter === "ONEMEME_BC") {
-        finalAmountOut = (await quoteBcBuy(tokenOut, wbnbIn)).amountOut;
-      } else if (adapter === "FOURMEME") {
-        finalAmountOut = (await quoteFourMemeBuy(tokenOut, wbnbIn)).amountOut;
-      } else {
-        finalAmountOut = await quoteFlapShBuy(tokenOut, wbnbIn);
-      }
-    } catch (err) { wrapQuoteError(err, "BC quote"); }
-
-    const finalMinOut = (finalAmountOut! * (10_000n - slippageBps)) / 10_000n;
-    const step2Data   = buildAdapterData(adapter, WBNB, tokenOut, {}, deadline);
-
-    return {
-      data: {
-        singleStep: false,
-        nativeIn,
-        nativeOut,
-        value: nativeIn ? amountIn.toString() : "0",
-        steps: [
-          {
-            adapter:     bridgeAdapter!,
-            adapterId:   ADAPTER_IDS[bridgeAdapter!],
-            tokenIn,
-            tokenOut:    WBNB,
-            amountIn:    amountIn.toString(),
-            amountOut:   bridgeAmountOut!.toString(),
-            minOut:      bridgeMinOut.toString(),
-            adapterData: step1Data!,
-            fees:        bridgeAdapter === "PANCAKE_V3" ? [500] : null,
-            tickSpacing: null,
-            hooks:       null,
-          },
-          {
-            adapter,
-            adapterId:   ADAPTER_IDS[adapter],
-            tokenIn:     WBNB,
-            tokenOut,
-            amountIn:    wbnbIn.toString(),
-            amountOut:   finalAmountOut!.toString(),
-            minOut:      finalMinOut.toString(),
-            adapterData: step2Data,
-            fees:        null,
-            tickSpacing: null,
-            hooks:       null,
-          },
-        ],
-        amountIn:      amountIn.toString(),
-        minFinalOut:   finalMinOut.toString(),
-        aggregatorFee: aggregatorFee.toString(),
-        slippageBps:   slippageBps.toString(),
-      },
-    };
+    return this.aggregateRoute(
+      tokenIn, tokenOut, amountIn, slippageBps, deadline,
+      nativeIn, nativeOut, aggregatorFee,
+    );
   }
 
   // ── Swap calldata builders ─────────────────────────────────────────────────
 
   /**
    * POST /dex/swap
-   * Builds calldata for a direct OneMEMEAggregator.swap() call.
+   * Builds calldata for a direct OneMEMEAggregator.swap() call (single step) or
+   * OneMEMEAggregator.batchSwap() call (multi-step bridge route).
    * The caller broadcasts the transaction — no relayer involved.
    *
-   * Auto-route mode (no adapter): runs aggregation to pick the best source,
-   * computes minOut from `slippage` (default 100 bps). `minOut` is not required.
-   *
-   * Specific adapter mode (adapter provided): routes through that adapter.
-   * `minOut` must be supplied explicitly; `slippage` is ignored.
+   * Aggregates all sources, picks the best, computes minOut from slippage.
+   * When the best route is a two-step bridge (tokenIn→WBNB→tokenOut),
+   * batchSwap calldata is returned automatically.
    */
   async buildSwap(body: Record<string, unknown>) {
     const rawTokenIn  = requireAddress(body["tokenIn"],  "tokenIn");
@@ -775,55 +330,34 @@ export class RouteService {
     const tokenOut    = toWbnbIfNative(rawTokenOut);
     const feeEstimate = amountIn / AGGREGATOR_FEE_DIVISOR;
 
-    // ── Auto-route mode: no adapter specified ──────────────────────────────
-    if (!body["adapter"]) {
-      let slippageBps: bigint;
-      try { slippageBps = BigInt(String(body["slippage"] ?? "100")); }
-      catch { throw new BadRequestException("slippage must be a numeric basis-point value (e.g. 100 for 1%)"); }
-      if (slippageBps < 0n || slippageBps > 5000n) {
-        throw new BadRequestException("slippage must be between 0 and 5000 basis points");
-      }
-
-      const nowSec   = BigInt(Math.floor(Date.now() / 1000));
-      const aggFee   = amountIn / AGGREGATOR_FEE_DIVISOR;
-      const route    = await this.aggregateRoute(
-        tokenIn, tokenOut, amountIn, slippageBps, deadline, nativeIn, nativeOut, aggFee,
-      );
-      const best     = route.data.steps[0]!;
-      const minOut   = BigInt(route.data.minFinalOut);
-      const calldata = buildSwapCalldata(
-        best.adapterId, tokenIn, amountIn, tokenOut, minOut, to, deadline, best.adapterData,
-      );
-
-      return {
-        data: {
-          to:          aggregatorAddress(),
-          calldata,
-          value:       nativeIn ? amountIn.toString() : "0",
-          nativeIn,
-          nativeOut,
-          adapter:     best.adapter,
-          adapterId:   best.adapterId,
-          tokenIn:     nativeIn  ? NATIVE_BNB : tokenIn,
-          tokenOut:    nativeOut ? NATIVE_BNB : tokenOut,
-          amountIn:    amountIn.toString(),
-          feeEstimate: feeEstimate.toString(),
-          netAmountIn: (amountIn - feeEstimate).toString(),
-          minOut:      route.data.minFinalOut,
-          slippageBps: slippageBps.toString(),
-          deadline:    deadline.toString(),
-          adapterData: best.adapterData,
-          sources:     route.data.sources,
-        },
-      };
+    let slippageBps: bigint;
+    try { slippageBps = BigInt(String(body["slippage"] ?? "100")); }
+    catch { throw new BadRequestException("slippage must be a numeric basis-point value (e.g. 100 for 1%)"); }
+    if (slippageBps < 0n || slippageBps > 5000n) {
+      throw new BadRequestException("slippage must be between 0 and 5000 basis points");
     }
 
-    // ── Specific adapter mode ──────────────────────────────────────────────
-    const adapter     = requireAdapter(body["adapter"]);
-    const minOut      = requireBigInt(body["minOut"], "minOut");
-    const adapterId   = ADAPTER_IDS[adapter];
-    const adapterData = buildAdapterData(adapter, tokenIn, tokenOut, body, deadline);
-    const calldata    = buildSwapCalldata(adapterId, tokenIn, amountIn, tokenOut, minOut, to, deadline, adapterData);
+    const route   = await this.aggregateRoute(
+      tokenIn, tokenOut, amountIn, slippageBps, deadline, nativeIn, nativeOut, feeEstimate,
+    );
+    const steps   = route.data.steps;
+    const minOut  = BigInt(route.data.minFinalOut);
+    const isMulti = steps.length > 1;
+
+    let calldata: Hex;
+    if (!isMulti) {
+      const step = steps[0]!;
+      calldata = buildSwapCalldata(step.adapterId, tokenIn, amountIn, tokenOut, minOut, to, deadline, step.adapterData);
+    } else {
+      const swapSteps: SwapStep[] = steps.map(s => ({
+        adapterId:   s.adapterId,
+        tokenIn:     s.tokenIn,
+        tokenOut:    s.tokenOut,
+        minOut:      BigInt(s.minOut),
+        adapterData: s.adapterData,
+      }));
+      calldata = buildBatchSwapCalldata(swapSteps, amountIn, minOut, to, deadline);
+    }
 
     return {
       data: {
@@ -832,16 +366,17 @@ export class RouteService {
         value:       nativeIn ? amountIn.toString() : "0",
         nativeIn,
         nativeOut,
-        adapter,
-        adapterId,
+        singleStep:  !isMulti,
         tokenIn:     nativeIn  ? NATIVE_BNB : tokenIn,
         tokenOut:    nativeOut ? NATIVE_BNB : tokenOut,
         amountIn:    amountIn.toString(),
         feeEstimate: feeEstimate.toString(),
         netAmountIn: (amountIn - feeEstimate).toString(),
-        minOut:      minOut.toString(),
+        minOut:      route.data.minFinalOut,
+        slippageBps: slippageBps.toString(),
         deadline:    deadline.toString(),
-        adapterData,
+        steps:       steps,
+        sources:     route.data.sources,
       },
     };
   }
@@ -939,7 +474,9 @@ export class RouteService {
    * V3/V4 pools are discovered from their subgraphs first — only pools that
    * actually exist with liquidity are quoted, using their real fee tiers and
    * (for V4) tick spacings. No hardcoded fee tier probing.
-   * BC adapters are only included when one side of the pair is WBNB.
+   * BC adapters are included when one side is WBNB (direct) or when neither
+   * side is WBNB (bridge route: tokenIn→WBNB via V3/V2, then WBNB→tokenOut
+   * via BC adapter).
    */
   private async aggregateRoute(
     tokenIn:       Hex,
@@ -974,17 +511,24 @@ export class RouteService {
       // V4 — discovered pools with real fee tiers + tick spacings
       ...pancakeV4.map(p => ({ adapter: "PANCAKE_V4" as AdapterName, fees: [p.feeTier], tickSpacings: [p.tickSpacing] })),
       ...uniswapV4.map(p => ({ adapter: "UNISWAP_V4" as AdapterName, fees: [p.feeTier], tickSpacings: [p.tickSpacing] })),
-      // BC adapters — only when one side is WBNB
+      // BC adapters — direct when one side is WBNB
       ...(isWbnbIn || isWbnbOut
         ? BC_ADAPTERS.map(a => ({ adapter: a, fees: [], tickSpacings: [] }))
         : []),
     ];
 
-    const results = await Promise.allSettled(
-      candidates.map(c =>
-        this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, tokenOut, amountIn, slippageBps, deadline),
-      ),
+    const singleStepTasks = candidates.map(c =>
+      this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, tokenOut, amountIn, slippageBps, deadline),
     );
+
+    // When neither side is WBNB, also try bridge routes for BC adapters
+    const bridgeTasks = (!isWbnbIn && !isWbnbOut)
+      ? BC_ADAPTERS.map(bcAdapter =>
+          this.tryBridgeRoute(bcAdapter, tokenIn, tokenOut, amountIn, slippageBps, deadline),
+        )
+      : [];
+
+    const results = await Promise.allSettled([...singleStepTasks, ...bridgeTasks]);
 
     const successful = results
       .filter((r): r is PromiseFulfilledResult<RouteCandidate> => r.status === "fulfilled")
@@ -1001,7 +545,7 @@ export class RouteService {
 
     return {
       data: {
-        singleStep:    true,
+        singleStep:    best.steps.length === 1,
         nativeIn,
         nativeOut,
         value:         nativeIn ? amountIn.toString() : "0",
@@ -1011,7 +555,9 @@ export class RouteService {
         aggregatorFee: aggregatorFee.toString(),
         slippageBps:   slippageBps.toString(),
         sources: successful.map(r => ({
-          adapter:   r.steps[0]!.adapter,
+          adapter:   r.steps.length > 1
+            ? r.steps.map(s => s.adapter).join("→")
+            : r.steps[0]!.adapter,
           fees:      r.steps[0]!.fees,
           amountOut: r.steps[r.steps.length - 1]!.amountOut,
         })),
@@ -1090,6 +636,90 @@ export class RouteService {
         tickSpacing: isV4 && tickSpacings.length ? tickSpacings : null,
         hooks:       null,
       }],
+    };
+  }
+
+  /**
+   * Attempts a two-step bridge route: tokenIn → WBNB (via PANCAKE_V3 fee 500
+   * or PANCAKE_V2 fallback) then WBNB → tokenOut (via a bonding-curve adapter).
+   * Used when neither tokenIn nor tokenOut is WBNB and a BC adapter is a candidate.
+   * Throws if either hop fails — caller uses Promise.allSettled.
+   */
+  private async tryBridgeRoute(
+    bcAdapter:   AdapterName,
+    tokenIn:     Hex,
+    tokenOut:    Hex,
+    amountIn:    bigint,
+    slippageBps: bigint,
+    deadline:    bigint,
+  ): Promise<RouteCandidate> {
+    const WBNB = WBNB_BSC as Hex;
+
+    // Step 1: tokenIn → WBNB via PANCAKE_V3 (500 bps) or PANCAKE_V2 fallback
+    let bridgeAmountOut: bigint;
+    let bridgeAdapter:   "PANCAKE_V3" | "PANCAKE_V2";
+    let step1Data:       Hex;
+
+    try {
+      bridgeAmountOut = await quoteV3("PANCAKE_V3", buildV3PackedPath([tokenIn, WBNB], [500]), amountIn);
+      bridgeAdapter   = "PANCAKE_V3";
+      step1Data       = encodeV3SingleHopAdapterData(500);
+    } catch {
+      bridgeAmountOut = await quoteV2("PANCAKE_V2", [tokenIn, WBNB], amountIn);
+      bridgeAdapter   = "PANCAKE_V2";
+      step1Data       = encodeV2AdapterData([tokenIn, WBNB], deadline);
+    }
+
+    // Step 2: WBNB → tokenOut via BC adapter
+    let finalAmountOut: bigint;
+    let step2Data:      Hex;
+
+    if (bcAdapter === "ONEMEME_BC") {
+      finalAmountOut = (await quoteBcBuy(tokenOut, bridgeAmountOut)).amountOut;
+      step2Data      = encodeOneMemeAdapterData(tokenOut, deadline);
+    } else if (bcAdapter === "FOURMEME") {
+      finalAmountOut = (await quoteFourMemeBuy(tokenOut, bridgeAmountOut)).amountOut;
+      step2Data      = encodeFourMemeAdapterData(tokenOut);
+    } else {
+      // FLAPSH
+      finalAmountOut = await quoteFlapShBuy(tokenOut, bridgeAmountOut);
+      step2Data      = encodeFlapShAdapterData();
+    }
+
+    const bridgeMinOut = (bridgeAmountOut * (10_000n - slippageBps)) / 10_000n;
+    const finalMinOut  = (finalAmountOut  * (10_000n - slippageBps)) / 10_000n;
+
+    return {
+      finalAmountOut,
+      minFinalOut: finalMinOut,
+      steps: [
+        {
+          adapter:     bridgeAdapter,
+          adapterId:   ADAPTER_IDS[bridgeAdapter],
+          tokenIn,
+          tokenOut:    WBNB,
+          amountIn:    amountIn.toString(),
+          amountOut:   bridgeAmountOut.toString(),
+          minOut:      bridgeMinOut.toString(),
+          adapterData: step1Data,
+          fees:        bridgeAdapter === "PANCAKE_V3" ? [500] : null,
+          tickSpacing: null,
+          hooks:       null,
+        },
+        {
+          adapter:     bcAdapter,
+          adapterId:   ADAPTER_IDS[bcAdapter],
+          tokenIn:     WBNB,
+          tokenOut,
+          amountIn:    bridgeAmountOut.toString(),
+          amountOut:   finalAmountOut.toString(),
+          minOut:      finalMinOut.toString(),
+          adapterData: step2Data,
+          fees:        null,
+          tickSpacing: null,
+          hooks:       null,
+        },
+      ],
     };
   }
 }

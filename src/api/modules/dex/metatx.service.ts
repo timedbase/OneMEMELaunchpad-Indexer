@@ -15,7 +15,6 @@ import {
   MetaTxOrder,
   PermitData,
   BatchMetaTxOrder,
-  ADAPTER_IDS,
   getUserNonce,
   getOrderDigest,
   getBatchOrderDigest,
@@ -26,12 +25,10 @@ import {
   metaTxAddress,
 } from "./dex-rpc";
 import {
-  buildAdapterData,
   parseSteps,
   validatePathContinuity,
   requireAddress,
   requireBigInt,
-  requireAdapter,
   isNative,
   toWbnbIfNative,
 } from "./route.service";
@@ -80,11 +77,15 @@ export class MetaTxService {
   /**
    * POST /dex/metatx/digest
    * Computes the EIP-712 digest the user must sign for a gasless single-hop swap.
-   * Accepts the same adapter/tokenIn/tokenOut/fees body as POST /dex/swap.
+   *
+   * `adapterId` and `adapterData` come directly from the GET /dex/route response —
+   * they are opaque to this endpoint. Use POST /dex/metatx/batch-digest for multi-hop.
+   *
+   * Body: { user, adapterId, adapterData, tokenIn, grossAmountIn, tokenOut, minUserOut,
+   *         recipient, deadline, swapDeadline, relayerFee }
    */
   async buildDigest(body: Record<string, unknown>) {
     const user          = requireAddress(body["user"],         "user");
-    const adapter       = requireAdapter(body["adapter"]);
     const rawTokenIn    = requireAddress(body["tokenIn"],      "tokenIn");
     const rawTokenOut   = requireAddress(body["tokenOut"],     "tokenOut");
     const grossAmountIn = requireBigInt(body["grossAmountIn"], "grossAmountIn");
@@ -94,6 +95,19 @@ export class MetaTxService {
     const swapDeadline  = requireBigInt(body["swapDeadline"],  "swapDeadline");
     const relayerFee    = requireBigInt(body["relayerFee"],    "relayerFee");
 
+    const rawAdapterId   = body["adapterId"];
+    const rawAdapterData = body["adapterData"];
+
+    if (typeof rawAdapterId !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(rawAdapterId)) {
+      throw new BadRequestException("adapterId must be a 32-byte hex string (from GET /dex/route response)");
+    }
+    if (typeof rawAdapterData !== "string" || !/^0x[0-9a-fA-F]*$/.test(rawAdapterData)) {
+      throw new BadRequestException("adapterData must be a hex string (from GET /dex/route response)");
+    }
+
+    const adapterId   = rawAdapterId   as Hex;
+    const adapterData = rawAdapterData as Hex;
+
     if (grossAmountIn === 0n) throw new BadRequestException("grossAmountIn must be greater than 0");
     if (relayerFee >= grossAmountIn) throw new BadRequestException("relayerFee must be less than grossAmountIn");
     if (isNative(rawTokenIn) && isNative(rawTokenOut)) {
@@ -102,9 +116,6 @@ export class MetaTxService {
 
     const tokenIn  = toWbnbIfNative(rawTokenIn);
     const tokenOut = toWbnbIfNative(rawTokenOut);
-
-    const adapterId   = ADAPTER_IDS[adapter];
-    const adapterData = buildAdapterData(adapter, tokenIn, tokenOut, body as Record<string, unknown>, swapDeadline);
 
     let nonce: bigint;
     try {
