@@ -35,6 +35,8 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 Returns all supported routing adapters and their on-chain `bytes32` IDs.
 No configuration required — this is a static response.
 
+> **Note:** `PANCAKE_V4` and `UNISWAP_V4` are registered on-chain but currently excluded from automatic routing. Their IDs remain valid for manual `POST /dex/batch-swap` step construction.
+
 ```bash
 curl 'https://api.1coin.meme/api/v1/bsc/dex/adapters'
 ```
@@ -1226,13 +1228,13 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-relay' \
 | `SUBGRAPH_API_KEY` | No | Bearer token for the main launchpad subgraph |
 | `AGGREGATOR_SUBGRAPH_URL` | Yes (read: FOURMEME/FLAPSH + DEX swaps) | OneMEMEAggregator subgraph endpoint |
 | `AGGREGATOR_SUBGRAPH_API_KEY` | No | Bearer token for the aggregator subgraph |
-| `THE_GRAPH_API_KEY` | Yes (V3/V4 pools) | The Graph gateway API key for PancakeSwap V3/V4 and Uniswap V2/V3/V4 subgraphs |
+| `THE_GRAPH_API_KEY` | Yes (V3 pools) | The Graph gateway API key for PancakeSwap V3 and Uniswap V2/V3 subgraphs |
 | `PANCAKE_V2_SUBGRAPH_URL` | No | Override default NodeReal PancakeSwap V2 endpoint |
 | `PANCAKE_V3_SUBGRAPH_URL` | No | Override default The Graph PancakeSwap V3 endpoint |
-| `PANCAKE_V4_SUBGRAPH_URL` | No | Override default The Graph PancakeSwap V4 endpoint |
+| `PANCAKE_V4_SUBGRAPH_URL` | No | Override default The Graph PancakeSwap V4 endpoint _(unused while V4 routing is disabled)_ |
 | `UNISWAP_V2_SUBGRAPH_URL` | No | Override default The Graph Uniswap V2 endpoint |
 | `UNISWAP_V3_SUBGRAPH_URL` | No | Override default The Graph Uniswap V3 endpoint |
-| `UNISWAP_V4_SUBGRAPH_URL` | No | Override default The Graph Uniswap V4 endpoint |
+| `UNISWAP_V4_SUBGRAPH_URL` | No | Override default The Graph Uniswap V4 endpoint _(unused while V4 routing is disabled)_ |
 
 ### Contracts and RPC
 
@@ -1248,5 +1250,5 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-relay' \
 | `PANCAKE_V3_QUOTER_ADDRESS` | No | PancakeSwap V3 QuoterV2 (default: BSC mainnet) |
 | `UNISWAP_V2_ROUTER_ADDRESS` | No | Uniswap V2 Router (default: BSC mainnet) |
 | `UNISWAP_V3_QUOTER_ADDRESS` | No | Uniswap V3 Quoter (no BSC default; set if deployed) |
-| `PANCAKE_V4_QUOTER_ADDRESS` | No | PancakeSwap V4 Quoter (no default; required for V4 quotes) |
-| `UNISWAP_V4_QUOTER_ADDRESS` | No | Uniswap V4 Quoter (no default; required for V4 quotes) |
+| `PANCAKE_V4_QUOTER_ADDRESS` | No | PancakeSwap V4 Quoter _(unused while V4 routing is disabled)_ |
+| `UNISWAP_V4_QUOTER_ADDRESS` | No | Uniswap V4 Quoter _(unused while V4 routing is disabled)_ |

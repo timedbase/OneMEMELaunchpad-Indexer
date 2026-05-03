@@ -642,10 +642,10 @@ Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in 
 | `FLAPSH` | bonding-curve | Flap.SH bonding curve |
 | `PANCAKE_V2` | amm-v2 | PancakeSwap V2 |
 | `PANCAKE_V3` | amm-v3 | PancakeSwap V3 (fee param required) |
-| `PANCAKE_V4` | amm-v4 | PancakeSwap V4 |
+| `PANCAKE_V4` | amm-v4 | PancakeSwap V4 _(registered on-chain; routing disabled)_ |
 | `UNISWAP_V2` | amm-v2 | Uniswap V2 on BSC |
 | `UNISWAP_V3` | amm-v3 | Uniswap V3 on BSC |
-| `UNISWAP_V4` | amm-v4 | Uniswap V4 on BSC |
+| `UNISWAP_V4` | amm-v4 | Uniswap V4 on BSC _(registered on-chain; routing disabled)_ |
 
 **Gasless swap flow (single-hop)**
 
@@ -785,13 +785,13 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 |---|---|
 | `AGGREGATOR_SUBGRAPH_URL` | Aggregator subgraph endpoint (FourMEME / Flap.SH / OneMEMEAggregator data) |
 | `AGGREGATOR_SUBGRAPH_API_KEY` | Bearer auth for the aggregator subgraph |
-| `THE_GRAPH_API_KEY` | The Graph decentralised network key for PancakeSwap V3/V4 and Uniswap subgraphs |
+| `THE_GRAPH_API_KEY` | The Graph decentralised network key for PancakeSwap V3 and Uniswap subgraphs |
 | `PANCAKE_V2_SUBGRAPH_URL` | Override for PancakeSwap V2 subgraph |
 | `PANCAKE_V3_SUBGRAPH_URL` | Override for PancakeSwap V3 subgraph |
-| `PANCAKE_V4_SUBGRAPH_URL` | Override for PancakeSwap V4 subgraph |
+| `PANCAKE_V4_SUBGRAPH_URL` | Override for PancakeSwap V4 subgraph _(unused while V4 routing is disabled)_ |
 | `UNISWAP_V2_SUBGRAPH_URL` | Override for Uniswap V2 subgraph |
 | `UNISWAP_V3_SUBGRAPH_URL` | Override for Uniswap V3 subgraph |
-| `UNISWAP_V4_SUBGRAPH_URL` | Override for Uniswap V4 subgraph |
+| `UNISWAP_V4_SUBGRAPH_URL` | Override for Uniswap V4 subgraph _(unused while V4 routing is disabled)_ |
 | `AGGREGATOR_ADDRESS` | `OneMEMEAggregator` contract address (required for swap calldata) |
 | `METATX_ADDRESS` | `OneMEMEMetaTx` contract address (required for gasless relay) |
 | `RELAYER_PRIVATE_KEY` | 0x-prefixed EOA private key for the gas-paying relayer account |
@@ -799,8 +799,8 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 | `PANCAKE_V3_QUOTER_ADDRESS` | Override PancakeSwap V3 quoter (default: BSC mainnet) |
 | `UNISWAP_V2_ROUTER_ADDRESS` | Override Uniswap V2 router (default: BSC mainnet) |
 | `UNISWAP_V3_QUOTER_ADDRESS` | Uniswap V3 quoter (no BSC default — set for your deployment) |
-| `PANCAKE_V4_QUOTER_ADDRESS` | PancakeSwap V4 quoter |
-| `UNISWAP_V4_QUOTER_ADDRESS` | Uniswap V4 quoter |
+| `PANCAKE_V4_QUOTER_ADDRESS` | PancakeSwap V4 quoter _(unused while V4 routing is disabled)_ |
+| `UNISWAP_V4_QUOTER_ADDRESS` | Uniswap V4 quoter _(unused while V4 routing is disabled)_ |
 | `FOURMEME_HELPER_ADDRESS` | Override FourMEME TokenManagerHelper3 (default: BSC mainnet) |
 | `FLAPSH_PORTAL_ADDRESS` | Override Flap.SH Portal contract (default: BSC mainnet) |
 
