@@ -608,9 +608,9 @@ All DEX endpoints live under `/api/v1/{chain}/dex/`. They require the aggregator
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/{chain}/dex/quote` | On-chain quote — omit `adapter` for best-price aggregation, or specify one source |
-| `GET` | `/api/v1/{chain}/dex/route` | Optimal multi-hop route with pre-encoded adapter data |
-| `POST` | `/api/v1/{chain}/dex/swap` | Build `OneMEMEAggregator.swap()` calldata — omit `adapter` for auto-route |
+| `GET` | `/api/v1/{chain}/dex/quote` | On-chain quote — best-price aggregation across all sources |
+| `GET` | `/api/v1/{chain}/dex/route` | Optimal multi-hop route with pre-encoded adapter data — routing is fully internal |
+| `POST` | `/api/v1/{chain}/dex/swap` | Build `OneMEMEAggregator.swap()` calldata — adapter selection is automatic |
 | `POST` | `/api/v1/{chain}/dex/batch-swap` | Build `OneMEMEAggregator.batchSwap()` calldata (self-broadcast) |
 
 **Gasless / meta-transaction endpoints**

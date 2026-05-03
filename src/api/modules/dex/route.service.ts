@@ -51,8 +51,8 @@ const ZERO_ADDR  = "0x0000000000000000000000000000000000000000" as Hex;
 // Bonding-curve adapters — require WBNB as one side; no fee tier needed.
 const BC_ADAPTERS: AdapterName[] = ["ONEMEME_BC", "FOURMEME", "FLAPSH"];
 
-// Protocol fee charged by OneMEMEAggregator on every swap (1% = 100 bps).
-const AGGREGATOR_FEE_DIVISOR = 100n;
+// Protocol fee charged by OneMEMEAggregator on every swap (0.5% = 200 divisor).
+const AGGREGATOR_FEE_DIVISOR = 200n;
 
 // Well-known intermediate tokens used for two-hop routing when no direct pair exists.
 // For each hub, the router tries tokenIn→hub→tokenOut across all discovered pools.

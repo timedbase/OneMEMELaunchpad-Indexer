@@ -676,7 +676,7 @@ GET /api/v1/bsc/dex/quote?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amo
 Builds ABI-encoded calldata for a direct `OneMEMEAggregator.swap()` or `batchSwap()` call.
 The caller broadcasts this transaction themselves — no relayer, not gasless.
 
-The aggregator charges a **1% protocol fee** on `amountIn`; the response includes an estimate.
+The aggregator charges a **0.5% protocol fee** on `amountIn`; the response includes an estimate.
 Adapter selection is fully internal — the router picks the best source automatically.
 
 **Body:** `{ tokenIn, amountIn, tokenOut, to, deadline, slippage? }`
@@ -839,7 +839,7 @@ POST /api/v1/bsc/dex/metatx/digest
 |---|---|
 | `grossAmountIn`     | Total user approves and signs for |
 | `relayerFee`        | Deducted first — paid to the relayer (covers gas + service) |
-| `aggregatorFeeEstimate` | 1% of `grossAmountIn` — taken by the aggregator contract |
+| `aggregatorFeeEstimate` | 0.5% of `grossAmountIn` — taken by the aggregator contract |
 | net to swap         | `grossAmountIn - relayerFee - aggregatorFee` — what hits the DEX |
 | `minUserOut`        | Minimum `tokenOut` the user must receive (slippage guard) |
 
@@ -1028,7 +1028,7 @@ GET /api/v1/bsc/dex/route?tokenIn=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d&amo
 
 Builds ABI-encoded calldata for `OneMEMEAggregator.batchSwap()`.
 Use steps from `GET /dex/route` or compose them manually from `/dex/quote` outputs.
-The aggregator fee (1%) is charged once on the initial `amountIn`.
+The aggregator fee (0.5%) is charged once on the initial `amountIn`.
 
 **Request** (two-step USDC → 1MEME token):
 ```json

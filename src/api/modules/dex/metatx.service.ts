@@ -153,7 +153,7 @@ export class MetaTxService {
           swapDeadline:  order.swapDeadline.toString(),
           relayerFee:    order.relayerFee.toString(),
         },
-        aggregatorFeeEstimate: (grossAmountIn / 100n).toString() /* 1% protocol fee */,
+        aggregatorFeeEstimate: (grossAmountIn / 200n).toString() /* 0.5% protocol fee */,
       },
     };
   }
@@ -309,7 +309,7 @@ export class MetaTxService {
           relayerFee:    order.relayerFee.toString(),
           steps:         order.steps.map(s => ({ ...s, minOut: s.minOut.toString() })),
         },
-        aggregatorFeeEstimate: (grossAmountIn / 100n).toString() /* 1% protocol fee */,
+        aggregatorFeeEstimate: (grossAmountIn / 200n).toString() /* 0.5% protocol fee */,
       },
     };
   }
