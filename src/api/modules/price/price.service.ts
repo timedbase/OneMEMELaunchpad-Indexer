@@ -30,12 +30,20 @@ const SOURCE_TTL: Record<string, number> = {
   PancakeSwap: 30,
 };
 
+// Minimum milliseconds between fetches per source.
+// CoinGecko free tier allows ~30 req/min; 60s keeps us well clear.
+const SOURCE_COOLDOWN_MS: Record<string, number> = {
+  CoinGecko:   60_000,
+  PancakeSwap: 10_000,
+};
+
 @Injectable()
 export class PriceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PriceService.name);
   private cache: PriceCache | null = null;
   private timer: NodeJS.Timeout | null = null;
-  private lastGood = new Map<string, SourceResult>();
+  private lastGood    = new Map<string, SourceResult>();
+  private lastFetchMs = new Map<string, number>();
   private rpcClient: ReturnType<typeof createPublicClient> | null = null;
 
   private readonly REFRESH_MS = 10_000;
@@ -110,25 +118,41 @@ export class PriceService implements OnModuleInit, OnModuleDestroy {
 
   // ─── Aggregation ─────────────────────────────────────────────────────────────
 
+  private shouldFetch(source: string): boolean {
+    const cooldown = SOURCE_COOLDOWN_MS[source] ?? this.REFRESH_MS;
+    const last     = this.lastFetchMs.get(source) ?? 0;
+    return Date.now() - last >= cooldown;
+  }
+
   private async refresh(): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
+    const nowMs = Date.now();
 
-    const fresh = await Promise.all([
-      this.fetchCoinGecko(),
-      this.fetchPancakeSwap(),
+    const [cgResult, psResult] = await Promise.all([
+      this.shouldFetch("CoinGecko")   ? this.fetchCoinGecko()   : Promise.resolve(null),
+      this.shouldFetch("PancakeSwap") ? this.fetchPancakeSwap() : Promise.resolve(null),
     ]);
 
-    for (const r of fresh) {
-      if (r.ok) this.lastGood.set(r.source, r);
+    if (cgResult) this.lastFetchMs.set("CoinGecko",   nowMs);
+    if (psResult) this.lastFetchMs.set("PancakeSwap", nowMs);
+
+    // Update lastGood from any fresh successful fetches.
+    for (const r of [cgResult, psResult]) {
+      if (r?.ok) this.lastGood.set(r.source, r);
     }
 
-    // Use fresh result if ok, else fall back to lastGood within TTL.
-    const sources: SourceResult[] = fresh.map((r) => {
-      if (r.ok) return r;
-      const last = this.lastGood.get(r.source);
-      const ttl  = SOURCE_TTL[r.source] ?? 30;
+    // Build sources list for all known sources, including skipped ones.
+    // Skipped sources (cooldown not elapsed) use their lastGood value within TTL.
+    const ALL_SOURCES = ["CoinGecko", "PancakeSwap"];
+    const freshMap    = new Map([[cgResult?.source ?? "", cgResult], [psResult?.source ?? "", psResult]]);
+
+    const sources: SourceResult[] = ALL_SOURCES.map((name) => {
+      const fresh = freshMap.get(name);
+      if (fresh?.ok) return fresh;
+      const last = this.lastGood.get(name);
+      const ttl  = SOURCE_TTL[name] ?? 30;
       if (last && now - last.cachedAt <= ttl) return { ...last, ok: true };
-      return r;
+      return fresh ?? { source: name, price: 0, ok: false, cachedAt: 0 };
     });
 
     const live = sources.filter((s) => s.ok);
