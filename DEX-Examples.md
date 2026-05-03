@@ -1134,12 +1134,83 @@ POST /api/v1/bsc/dex/metatx/relay
 ## GET /dex/route
 
 Returns an optimally routed swap plan with pre-encoded `adapterData` for each step.
-When the target adapter is a bonding-curve protocol (ONEMEME_BC, FOURMEME, FLAPSH) and
-`tokenIn` is not WBNB, a two-step bridge route is automatically constructed:
-`tokenIn → WBNB` via PANCAKE_V3 (fee 500, fallback PANCAKE_V2), then `WBNB → tokenOut`
-via the bonding-curve adapter.
 
-### Single-step — WBNB directly into a 1MEME token
+**Two modes:**
+
+| Mode | When | Behaviour |
+|---|---|---|
+| Aggregation | `adapter` param omitted | Queries V2, V3, V4, and bonding-curve adapters in parallel; returns the best price. `sources[]` lists every source with its quoted output. |
+| Specific adapter | `adapter` param provided | Routes through that adapter only. Bonding-curve adapters with non-WBNB `tokenIn` automatically get a `PANCAKE_V3 → fallback PANCAKE_V2` bridge hop prepended. |
+
+**Query Parameters**
+
+| Parameter     | Required | Description |
+|---|---|---|
+| `tokenIn`     | Yes | Input token address |
+| `amountIn`    | Yes | Input amount in wei (string) |
+| `tokenOut`    | Yes | Output token address |
+| `adapter`     | No  | Omit for aggregation mode; set to a specific adapter name for single-source routing |
+| `fees`        | No  | Fee tier(s) — required when `adapter` is V3 or V4 |
+| `tickSpacing` | No  | Tick spacing(s) — V4 only; auto-derived from fee when omitted |
+| `hooks`       | No  | Hook addresses — V4 only; defaults to zero address |
+| `slippage`    | No  | Slippage in basis points (default `100` = 1%) |
+
+---
+
+### Aggregation mode — no adapter specified
+
+When `adapter` is omitted, the API queries all relevant liquidity sources (PancakeSwap V2/V3/V4, Uniswap V2/V3/V4, and bonding-curve protocols when applicable) in parallel and returns the best price. V3/V4 pool candidates are discovered from their subgraphs first so only real pools with liquidity are quoted.
+
+```
+GET /api/v1/bsc/dex/route?tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0&slippage=100
+```
+
+**Response**
+```json
+{
+  "data": {
+    "singleStep": true,
+    "nativeIn": false,
+    "nativeOut": false,
+    "value": "0",
+    "steps": [
+      {
+        "adapter": "PANCAKE_V3",
+        "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
+        "tokenIn": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "tokenOut": "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+        "amountIn": "1000000000000000000",
+        "amountOut": "1248300000000000000000000",
+        "minOut": "1235817000000000000000000",
+        "adapterData": "0x...",
+        "fees": [500],
+        "tickSpacing": null,
+        "hooks": null
+      }
+    ],
+    "amountIn": "1000000000000000000",
+    "minFinalOut": "1235817000000000000000000",
+    "aggregatorFee": "10000000000000000",
+    "slippageBps": "100",
+    "sources": [
+      { "adapter": "PANCAKE_V3", "fees": [500],  "amountOut": "1248300000000000000000000" },
+      { "adapter": "PANCAKE_V2", "fees": null,   "amountOut": "1231847000000000000000000" },
+      { "adapter": "UNISWAP_V3", "fees": [3000], "amountOut": "1219400000000000000000000" }
+    ]
+  }
+}
+```
+
+The winning source is returned as the first and only element of `steps[]`. `sources[]` contains every source that returned a valid quote, sorted best-first — useful for showing users where liquidity was found.
+
+**Error — no liquidity found**
+```json
+{ "statusCode": 503, "message": "No route found — no liquidity source returned a valid quote for this pair" }
+```
+
+---
+
+### Specific adapter — single-step — WBNB directly into a 1MEME token
 
 ```
 GET /api/v1/bsc/dex/route?adapter=ONEMEME_BC&tokenIn=0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c&amountIn=1000000000000000000&tokenOut=0xMEME&slippage=100

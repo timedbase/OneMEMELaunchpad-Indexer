@@ -20,7 +20,25 @@ import { WsAdapter }    from "@nestjs/platform-ws";
 import { AppModule }    from "./app.module";
 import { AppLogger }    from "./logger";
 
+function validateEnv() {
+  // SUBGRAPH_URL is the primary data source — all token/trade endpoints fail without it.
+  if (!process.env.SUBGRAPH_URL) {
+    throw new Error(
+      "SUBGRAPH_URL is not set. Copy .env.example to .env and configure it."
+    );
+  }
+  // DATABASE_URL is validated eagerly by db.ts at module load, but check here
+  // for a cleaner error message if bootstrap() is called before that module.
+  if (!process.env.DATABASE_URL) {
+    throw new Error(
+      "DATABASE_URL is not set. Copy .env.example to .env and configure it."
+    );
+  }
+}
+
 async function bootstrap() {
+  validateEnv();
+
   const certPath = process.env.SSL_CERT_PATH;
   const keyPath  = process.env.SSL_KEY_PATH;
   const httpsOptions = certPath && keyPath

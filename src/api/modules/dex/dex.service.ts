@@ -325,13 +325,13 @@ function dexNameFor(endpoint: DexEndpoint): string {
 // ─── Normalizers ──────────────────────────────────────────────────────────────
 
 function normalizeAggToken(t: AggToken) {
-  const bondingTrades = parseInt(t.bondingBuysCount) + parseInt(t.bondingSellsCount);
-  const dexTrades     = parseInt(t.dexTradesCount);
+  const bondingTrades = parseInt(t.bondingBuysCount ?? "0", 10) + parseInt(t.bondingSellsCount ?? "0", 10);
+  const dexTrades     = parseInt(t.dexTradesCount ?? "0", 10);
   return {
     address:             t.id,
-    name:                t.name   ?? null,
-    symbol:              t.symbol ?? null,
-    decimals:            parseInt(t.decimals),
+    name:                t.name?.trim()   || null,
+    symbol:              t.symbol?.trim() || null,
+    decimals:            parseInt(t.decimals ?? "18", 10),
     platforms:           t.launchPlatform ? [t.launchPlatform] : [],
     bondingPhase:        !t.graduated,
     bondingCurve:        null as string | null,
@@ -352,9 +352,9 @@ function normalizeAggToken(t: AggToken) {
 function normalizeMainToken(t: MainToken) {
   return {
     address:             t.id,
-    name:                t.name   ?? null,
-    symbol:              t.symbol ?? null,
-    decimals:            parseInt(t.decimals),
+    name:                t.name?.trim()   || null,
+    symbol:              t.symbol?.trim() || null,
+    decimals:            parseInt(t.decimals ?? "18", 10),
     platforms:           ["1MEME"],
     bondingPhase:        !t.migration,
     bondingCurve:        null as string | null,
@@ -404,9 +404,9 @@ function normalizeV3Pool(p: V3Pool, endpoint: DexEndpoint) {
 function normalizeDexV2Token(t: DexV2Token, platform: string) {
   return {
     address:             t.id,
-    name:                t.name   ?? null,
-    symbol:              t.symbol ?? null,
-    decimals:            parseInt(t.decimals),
+    name:                t.name?.trim()   || null,
+    symbol:              t.symbol?.trim() || null,
+    decimals:            parseInt(t.decimals ?? "18", 10),
     platforms:           [platform],
     bondingPhase:        false,
     bondingCurve:        null as string | null,
@@ -426,9 +426,9 @@ function normalizeDexV2Token(t: DexV2Token, platform: string) {
 function normalizeDexV3Token(t: DexV3Token, platform: string) {
   return {
     address:             t.id,
-    name:                t.name   ?? null,
-    symbol:              t.symbol ?? null,
-    decimals:            parseInt(t.decimals),
+    name:                t.name?.trim()   || null,
+    symbol:              t.symbol?.trim() || null,
+    decimals:            parseInt(t.decimals ?? "18", 10),
     platforms:           [platform],
     bondingPhase:        false,
     bondingCurve:        null as string | null,

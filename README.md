@@ -481,9 +481,9 @@ Responses include computed fields: `claimable` (currently unlocked and unclaimed
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/{chain}/price/bnb` | BNB/USDT aggregated from 6 exchanges |
+| `GET` | `/api/v1/{chain}/price/bnb` | BNB/USDT averaged from 2 sources |
 
-Sources: CoinGecko (free API) and PancakeSwap WBNB/USDT on-chain pair (via `getReserves()`). Refreshed every 10 seconds. Returns the average with a per-source breakdown.
+Sources: CoinGecko (free API) and the PancakeSwap WBNB/USDT V2 pair on-chain (via `getReserves()`). Refreshed every 10 seconds. Returns the weighted average with a per-source breakdown. Falls back to the last known good value (within 30–90 s TTL) if a source is temporarily unavailable.
 
 ---
 
@@ -838,11 +838,13 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 │       ├── points/              # /api/v1/{chain}/points/* (background poller + export)
 │       ├── referrals/           # /api/v1/{chain}/referrals/*
 │       ├── dex/                 # /api/v1/{chain}/dex/* — aggregator, quotes, swap, meta-tx
-│       │   ├── dex.service.ts
+│       │   ├── dex.service.ts       # subgraph data: tokens, pools, swaps, stats
 │       │   ├── dex.controller.ts
-│       │   ├── dex-subgraph.ts  # per-protocol subgraph clients
-│       │   ├── dex-rpc.ts       # viem quoters, swap builders, relay execution
-│       │   ├── metatx.service.ts
+│       │   ├── dex-subgraph.ts      # per-protocol subgraph clients
+│       │   ├── dex-rpc.ts           # viem quoters, swap builders, relay execution
+│       │   ├── route.service.ts     # aggregation: multi-source routing, calldata building
+│       │   ├── route.controller.ts
+│       │   ├── metatx.service.ts    # gasless: EIP-712 digest, nonce, relay
 │       │   └── metatx.controller.ts
 │       └── index/               # GET /api/v1/{chain} — route index
 ├── docker-compose.yml           # local Postgres for off-chain tables

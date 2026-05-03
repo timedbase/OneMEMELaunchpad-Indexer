@@ -54,6 +54,9 @@ const ZERO_ADDR  = "0x0000000000000000000000000000000000000000" as Hex;
 // Bonding-curve adapters — require WBNB as one side; no fee tier needed.
 const BC_ADAPTERS: AdapterName[] = ["ONEMEME_BC", "FOURMEME", "FLAPSH"];
 
+// Protocol fee charged by OneMEMEAggregator on every swap (1% = 100 bps).
+const AGGREGATOR_FEE_DIVISOR = 100n;
+
 // Pool pair discovery query — works for V3 and V4 subgraphs.
 // V4 subgraphs expose tickSpacing explicitly; V3 subgraphs do not (derived from fee).
 const PAIR_POOLS_QUERY = /* GraphQL */ `
@@ -96,19 +99,17 @@ export function requireAddress(val: unknown, name: string): Hex {
 }
 
 export function requireBigInt(val: unknown, name: string): bigint {
-  if (typeof val === "number") {
-    if (!Number.isInteger(val)) {
-      throw new BadRequestException(`${name} must be an integer (wei), not a float`);
-    }
-  } else if (typeof val !== "string") {
-    throw new BadRequestException(`${name} must be a numeric string (wei)`);
+  // Only accept strings — JavaScript numbers cannot represent uint256 values
+  // larger than Number.MAX_SAFE_INTEGER (≈9e15) without silent precision loss.
+  if (typeof val !== "string") {
+    throw new BadRequestException(`${name} must be a numeric string (wei), e.g. "1000000000000000000"`);
   }
   try {
-    const n = BigInt(val as string | number);
+    const n = BigInt(val);
     if (n < 0n) throw new Error();
     return n;
   } catch {
-    throw new BadRequestException(`${name} must be a non-negative integer (wei)`);
+    throw new BadRequestException(`${name} must be a non-negative integer string (wei)`);
   }
 }
 
@@ -344,7 +345,7 @@ export class RouteService {
     }
 
     const rawPath         = query["path"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
-    const rawFees         = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)) ?? [];
+    const rawFees         = query["fees"]?.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0 && n <= 1_000_000) ?? [];
     const rawTickSpacings = query["tickSpacing"]?.split(",").map(s => parseInt(s.trim(), 10) || 0) ?? [];
     const rawHooksArr     = query["hooks"]?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
 
@@ -434,7 +435,7 @@ export class RouteService {
       throw new BadRequestException(`Quote simulation failed: ${msg}`);
     }
 
-    const aggregatorFee = amountIn / 100n;
+    const aggregatorFee = amountIn / AGGREGATOR_FEE_DIVISOR;
     const minOut        = (amountOut * (10_000n - slippageBps)) / 10_000n;
     const isV4          = adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4";
     const hopCount      = path.length - 1;
@@ -504,7 +505,7 @@ export class RouteService {
 
     const nowSec       = BigInt(Math.floor(Date.now() / 1000));
     const deadline     = nowSec + 1800n;
-    const aggregatorFee = amountIn / 100n;
+    const aggregatorFee = amountIn / AGGREGATOR_FEE_DIVISOR;
 
     // ── Aggregation mode: no adapter specified ─────────────────────────────
     if (!query["adapter"]) {
@@ -732,7 +733,7 @@ export class RouteService {
 
     const adapterId   = ADAPTER_IDS[adapter];
     const adapterData = buildAdapterData(adapter, tokenIn, tokenOut, body, deadline);
-    const feeEstimate = amountIn / 100n;
+    const feeEstimate = amountIn / AGGREGATOR_FEE_DIVISOR;
     const netAmountIn = amountIn - feeEstimate;
     const calldata    = buildSwapCalldata(adapterId, tokenIn, amountIn, tokenOut, minOut, to, deadline, adapterData);
 
@@ -781,7 +782,7 @@ export class RouteService {
 
     validatePathContinuity(steps);
 
-    const feeEstimate = amountIn / 100n;
+    const feeEstimate = amountIn / AGGREGATOR_FEE_DIVISOR;
     const calldata    = buildBatchSwapCalldata(steps, amountIn, minFinalOut, to, deadline);
 
     return {
@@ -836,7 +837,8 @@ export class RouteService {
       }
 
       return pools;
-    } catch {
+    } catch (err) {
+      this.logger.debug(`Pool discovery failed for ${adapter} (${tokenIn}/${tokenOut}): ${String(err)}`);
       return [];
     }
   }

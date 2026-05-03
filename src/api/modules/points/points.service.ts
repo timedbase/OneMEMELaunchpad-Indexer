@@ -208,7 +208,7 @@ export class PointsService implements OnModuleInit {
       await this.awardMigrations(startBlock);
       await this.awardReferralBonuses(startBlock);
     } catch (err: unknown) {
-      this.logger.warn(`Points poll error: ${(err as Error).message}`);
+      this.logger.error(`Points poll error: ${(err as Error).message ?? String(err)}`);
     }
   }
 
