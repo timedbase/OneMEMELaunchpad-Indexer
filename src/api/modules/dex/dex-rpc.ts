@@ -501,6 +501,8 @@ export async function quoteBcSell(
   return { amountOut: bnbOut, fee: feeBNB };
 }
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 /** FourMEME buy quote (BNB → meme token) via TokenManagerHelper3.tryBuy(). */
 export async function quoteFourMemeBuy(
   tokenAddress: Hex,
@@ -514,6 +516,10 @@ export async function quoteFourMemeBuy(
     args:         [tokenAddress, 0n, bnbIn],
   }) as [Hex, Hex, bigint, bigint, bigint, bigint, bigint, bigint];
   // [tokenManager, quote, estimatedAmount, estimatedCost, estimatedFee, ...]
+  // tokenManager === zero address means the token is not managed by FourMeme
+  if (result[0].toLowerCase() === ZERO_ADDRESS) {
+    throw new Error(`Token ${tokenAddress} is not a FourMeme token`);
+  }
   return { amountOut: result[2], fee: result[4] };
 }
 
@@ -529,6 +535,9 @@ export async function quoteFourMemeSell(
     args:         [tokenAddress, tokensIn],
   }) as [Hex, Hex, bigint, bigint];
   // [tokenManager, quote, funds, fee]
+  if (result[0].toLowerCase() === ZERO_ADDRESS) {
+    throw new Error(`Token ${tokenAddress} is not a FourMeme token`);
+  }
   return { amountOut: result[2], fee: result[3] };
 }
 

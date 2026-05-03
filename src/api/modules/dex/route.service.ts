@@ -485,19 +485,16 @@ export class RouteService {
     tokenIn:  Hex,
     tokenOut: Hex,
   ): Promise<{ adapter: AdapterName; fees: number[]; tickSpacings: number[] }[]> {
-    const [pancakeV3, uniswapV3, pancakeV4, uniswapV4] = await Promise.all([
+    // V4 (PANCAKE_V4, UNISWAP_V4) disabled — re-enable when contracts are stable
+    const [pancakeV3, uniswapV3] = await Promise.all([
       this.discoverPools("PANCAKE_V3", tokenIn, tokenOut),
       this.discoverPools("UNISWAP_V3", tokenIn, tokenOut),
-      this.discoverPools("PANCAKE_V4", tokenIn, tokenOut),
-      this.discoverPools("UNISWAP_V4", tokenIn, tokenOut),
     ]);
     return [
       { adapter: "PANCAKE_V2" as AdapterName, fees: [], tickSpacings: [] },
       { adapter: "UNISWAP_V2" as AdapterName, fees: [], tickSpacings: [] },
       ...pancakeV3.map(p => ({ adapter: "PANCAKE_V3" as AdapterName, fees: [p.feeTier], tickSpacings: [] })),
       ...uniswapV3.map(p => ({ adapter: "UNISWAP_V3" as AdapterName, fees: [p.feeTier], tickSpacings: [] })),
-      ...pancakeV4.map(p => ({ adapter: "PANCAKE_V4" as AdapterName, fees: [p.feeTier], tickSpacings: [p.tickSpacing] })),
-      ...uniswapV4.map(p => ({ adapter: "UNISWAP_V4" as AdapterName, fees: [p.feeTier], tickSpacings: [p.tickSpacing] })),
     ];
   }
 
