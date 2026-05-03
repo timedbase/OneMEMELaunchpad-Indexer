@@ -477,7 +477,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f
         "symbol": "WBNB"
       },
       "grossAmountIn": "500000000000000000000000",
-      "feeCharged": "5000000000000000000000",
+      "feeCharged": "2500000000000000000000",
       "amountOut": "405000000000000000",
       "timestamp": 1745123400,
       "txHash": "0xabc123def456abc123def456abc123def456abc123def456abc123def456abc123",
@@ -549,7 +549,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2'
         "symbol": "PEPEBSC"
       },
       "grossAmountIn": "1000000000000000000",
-      "feeCharged": "10000000000000000",
+      "feeCharged": "5000000000000000",
       "amountOut": "1218432000000000000000000",
       "timestamp": 1745123456,
       "txHash": "0xabc123def456abc123def456abc123def456abc123def456abc123def456abc123"
@@ -568,7 +568,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2'
         "symbol": "WBNB"
       },
       "grossAmountIn": "250000000000000000000000",
-      "feeCharged": "2500000000000000000000",
+      "feeCharged": "1250000000000000000000",
       "amountOut": "201480000000000000",
       "timestamp": 1745123200,
       "txHash": "0xbcd234efa567bcd234efa567bcd234efa567bcd234efa567bcd234efa567bcd234"
@@ -632,10 +632,13 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/quote?tokenIn=0xbb4cdb9cbd36b01bd1cb
     "adapter":        "PANCAKE_V3",
     "tokenIn":        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
     "tokenOut":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+    "nativeIn":       false,
+    "nativeOut":      false,
+    "value":          "0",
     "amountIn":       "1000000000000000000",
     "amountOut":      "1248300000000000000000000",
     "minOut":         "1235817000000000000000000",
-    "aggregatorFee":  "10000000000000000",
+    "aggregatorFee":  "5000000000000000",
     "bondingFee":     null,
     "slippageBps":    "100",
     "quotedBy":       "aggregation",
@@ -697,8 +700,8 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
     "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
     "tokenOut":    "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
     "amountIn":    "1000000000000000000",
-    "feeEstimate": "10000000000000000",
-    "netAmountIn": "990000000000000000",
+    "feeEstimate": "5000000000000000",
+    "netAmountIn": "995000000000000000",
     "minOut":      "1235817000000000000000000",
     "slippageBps": "100",
     "deadline":    "1745130000",
@@ -816,7 +819,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
       "adapterData":   "0x000000000000000000000000000000000000000000000000000000000000002...",
       "relayerFee":    "2000000000000000000000"
     },
-    "aggregatorFeeEstimate": "5000000000000000000000"
+    "aggregatorFeeEstimate": "2500000000000000000000"
   }
 }
 ```
@@ -902,8 +905,8 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relay' \
 
 Returns an optimally routed swap plan with pre-encoded `adapterData` for each step.
 
-Queries PancakeSwap V2/V3/V4, Uniswap V2/V3/V4, and bonding-curve protocols in parallel.
-V3/V4 pool candidates are discovered from their subgraphs first so only real pools with liquidity are quoted. When neither tokenIn nor tokenOut is WBNB and a BC adapter wins, a two-step bridge route is returned automatically (`singleStep: false`). `sources[]` lists every source with its quoted output.
+Queries PancakeSwap V2/V3, Uniswap V2/V3, and bonding-curve protocols in parallel.
+V3 pool candidates are discovered from their subgraphs first so only real pools with liquidity are quoted. When neither tokenIn nor tokenOut is WBNB and a BC adapter wins, a two-step bridge route is returned automatically (`singleStep: false`). `sources[]` lists every source with its quoted output.
 
 **Query Parameters**
 
@@ -942,7 +945,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/route?tokenIn=0xbb4cdb9cbd36b01bd1cb
     ],
     "amountIn": "1000000000000000000",
     "minFinalOut": "1235817000000000000000000",
-    "aggregatorFee": "10000000000000000",
+    "aggregatorFee": "5000000000000000",
     "slippageBps": "100",
     "sources": [
       { "adapter": "PANCAKE_V3", "fees": [500],  "amountOut": "1248300000000000000000000" },
@@ -1002,7 +1005,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/route?tokenIn=0x8ac76a51cc950d9822d6
     ],
     "amountIn": "5000000000000000000",
     "minFinalOut": "3505576500000000000000",
-    "aggregatorFee": "50000000000000000",
+    "aggregatorFee": "25000000000000000",
     "slippageBps": "150",
     "sources": [
       { "adapter": "PANCAKE_V3→ONEMEME_BC", "fees": [500], "amountOut": "3558900000000000000000" },
@@ -1072,7 +1075,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
       }
     ],
     "amountIn":    "5000000000000000000",
-    "feeEstimate": "50000000000000000",
+    "feeEstimate": "25000000000000000",
     "minFinalOut": "3505576500000000000000",
     "deadline":    "1746400000"
   }
@@ -1161,7 +1164,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
       "swapDeadline":  "1746400000",
       "relayerFee":    "3000000000000000"
     },
-    "aggregatorFeeEstimate": "50000000000000000"
+    "aggregatorFeeEstimate": "25000000000000000"
   }
 }
 ```
