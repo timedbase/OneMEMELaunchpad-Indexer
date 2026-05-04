@@ -574,7 +574,20 @@ export class RouteService {
       );
     }
 
-    const best = successful[0]!;
+    // Prefer single-step routes: a multi-hop route only wins when it beats the
+    // best direct route by > 50 bps. This prevents a momentary V2 pool imbalance
+    // from choosing a two-hop path whose on-chain price then fails slippage checks.
+    const singleSteps = successful.filter(r => r.steps.length === 1);
+    const bestSingle  = singleSteps[0];
+    const bestMulti   = successful.filter(r => r.steps.length > 1)[0];
+    const MULTI_HOP_EDGE = 50n; // basis points a multi-hop must exceed single-step by
+
+    const best = (() => {
+      if (!bestSingle) return successful[0]!;
+      if (!bestMulti)  return bestSingle;
+      const edge = (bestSingle.finalAmountOut * MULTI_HOP_EDGE) / 10_000n;
+      return bestMulti.finalAmountOut > bestSingle.finalAmountOut + edge ? bestMulti : bestSingle;
+    })();
 
     return {
       data: {
