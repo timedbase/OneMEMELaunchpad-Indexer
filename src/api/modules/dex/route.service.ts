@@ -353,15 +353,22 @@ export class RouteService {
     const minOut  = BigInt(route.data.minFinalOut);
     const isMulti = steps.length > 1;
 
+    // The aggregator contract identifies native BNB by tokenIn/tokenOut == address(0).
+    // Internal routing uses WBNB for quoting; the calldata must restore address(0)
+    // so the contract uses msg.value rather than calling WBNB.transferFrom.
+    const ctTokenIn  = nativeIn  ? (NATIVE_BNB as Hex) : tokenIn;
+    const ctTokenOut = nativeOut ? (NATIVE_BNB as Hex) : tokenOut;
+
     let calldata: Hex;
     if (!isMulti) {
       const step = steps[0]!;
-      calldata = buildSwapCalldata(step.adapterId, tokenIn, amountIn, tokenOut, minOut, to, deadline, step.adapterData);
+      calldata = buildSwapCalldata(step.adapterId, ctTokenIn, amountIn, ctTokenOut, minOut, to, deadline, step.adapterData);
     } else {
-      const swapSteps: SwapStep[] = steps.map(s => ({
+      const lastIdx   = steps.length - 1;
+      const swapSteps: SwapStep[] = steps.map((s, i) => ({
         adapterId:   s.adapterId,
-        tokenIn:     s.tokenIn,
-        tokenOut:    s.tokenOut,
+        tokenIn:     i === 0       && nativeIn  ? (NATIVE_BNB as Hex) : s.tokenIn,
+        tokenOut:    i === lastIdx && nativeOut ? (NATIVE_BNB as Hex) : s.tokenOut,
         minOut:      BigInt(s.minOut),
         adapterData: s.adapterData,
       }));
