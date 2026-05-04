@@ -375,11 +375,18 @@ export class RouteService {
       calldata = buildBatchSwapCalldata(swapSteps, amountIn, minOut, to, deadline);
     }
 
+    // Conservative per-step gas budget covering ERC20 transfers + V2/V3 swap overhead.
+    // batchSwap needs more base overhead for the loop and intermediate transfers.
+    const gasLimit = isMulti
+      ? (100_000n + BigInt(steps.length) * 150_000n).toString()
+      : "250000";
+
     return {
       data: {
         to:          aggregatorAddress(),
         calldata,
         value:       nativeIn ? amountIn.toString() : "0",
+        gasLimit,
         nativeIn,
         nativeOut,
         singleStep:  !isMulti,
@@ -423,6 +430,7 @@ export class RouteService {
 
     const feeEstimate = amountIn / AGGREGATOR_FEE_DIVISOR;
     const calldata    = buildBatchSwapCalldata(steps, amountIn, minFinalOut, to, deadline);
+    const gasLimit    = (100_000n + BigInt(steps.length) * 150_000n).toString();
 
     return {
       data: {
@@ -431,6 +439,7 @@ export class RouteService {
         nativeIn,
         nativeOut,
         value:       nativeIn ? amountIn.toString() : "0",
+        gasLimit,
         steps:       steps.map(s => ({ ...s, minOut: s.minOut.toString() })),
         amountIn:    amountIn.toString(),
         feeEstimate: feeEstimate.toString(),

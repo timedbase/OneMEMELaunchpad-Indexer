@@ -687,6 +687,8 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
 }'
 ```
 
+> **Gas limit:** Always use the `gasLimit` field from the response when broadcasting. Do **not** rely on `eth_estimateGas` — if the simulation state differs from execution state the estimate fails and wallets fall back to a dangerously low default, causing out-of-gas reverts.
+
 **Response — single-step route**
 ```json
 {
@@ -694,6 +696,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
     "to":          "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
     "calldata":    "0x...",
     "value":       "0",
+    "gasLimit":    "250000",
     "nativeIn":    false,
     "nativeOut":   false,
     "singleStep":  true,
@@ -734,6 +737,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
   "data": {
     "to":          "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
     "calldata":    "0x...",
+    "gasLimit":    "400000",
     "singleStep":  false,
     "steps": [
       {
@@ -1058,6 +1062,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
     "nativeIn":    false,
     "nativeOut":   false,
     "value":       "0",
+    "gasLimit":    "400000",
     "steps": [
       {
         "adapterId":   "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
