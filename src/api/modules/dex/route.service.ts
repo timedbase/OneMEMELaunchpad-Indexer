@@ -524,6 +524,12 @@ export class RouteService {
     const isWbnbIn  = tokenIn.toLowerCase()  === WBNB_BSC;
     const isWbnbOut = tokenOut.toLowerCase() === WBNB_BSC;
 
+    // The aggregator deducts its fee from the gross input before calling the adapter.
+    // Quote with netAmountIn so that amountOut/minOut reflect the adapter's actual input,
+    // preserving the full slippage tolerance for real price movement rather than burning
+    // half of it on the known fee deduction.
+    const netAmountIn = amountIn - aggregatorFee;
+
     // Discover single-step AMM candidates for the direct tokenIn/tokenOut pair
     const candidates = await this.discoverCandidates(tokenIn, tokenOut);
 
@@ -533,14 +539,15 @@ export class RouteService {
     }
 
     const singleStepTasks = candidates.map(c =>
-      this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, tokenOut, amountIn, slippageBps, deadline),
+      this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, tokenOut, amountIn, slippageBps, deadline, netAmountIn),
     );
 
     // When neither side is WBNB, build bridge routes: tokenIn→WBNB (best AMM) then WBNB→tokenOut (BC adapter).
     // Step 1 is computed once across all BC adapters to avoid redundant pool discovery.
+    // bestSingleHop quotes step1 with netAmountIn so step2 sees the accurate WBNB amount.
     const bridgeTasks: Promise<RouteCandidate>[] = [];
     if (!isWbnbIn && !isWbnbOut) {
-      const step1 = await this.bestSingleHop(tokenIn, WBNB_BSC as Hex, amountIn, slippageBps, deadline);
+      const step1 = await this.bestSingleHop(tokenIn, WBNB_BSC as Hex, amountIn, netAmountIn, slippageBps, deadline);
       if (step1) {
         for (const bcAdapter of BC_ADAPTERS) {
           bridgeTasks.push(this.tryBcStep2(bcAdapter, step1, tokenOut, slippageBps, deadline));
@@ -548,10 +555,11 @@ export class RouteService {
       }
     }
 
-    // Two-hop routes through each hub token (tokenIn → hub → tokenOut)
+    // Two-hop routes through each hub token (tokenIn → hub → tokenOut).
+    // Hop1 quotes with netAmountIn; hop2 uses hop1's output (already net-accurate).
     const hubTasks = HUB_TOKENS
       .filter(h => h.toLowerCase() !== tokenIn.toLowerCase() && h.toLowerCase() !== tokenOut.toLowerCase())
-      .map(hub => this.tryTwoHopRoute(hub, tokenIn, tokenOut, amountIn, slippageBps, deadline));
+      .map(hub => this.tryTwoHopRoute(hub, tokenIn, tokenOut, amountIn, netAmountIn, slippageBps, deadline));
 
     const results = await Promise.allSettled([...singleStepTasks, ...bridgeTasks, ...hubTasks]);
 
@@ -593,52 +601,59 @@ export class RouteService {
   /**
    * Attempts a single-step quote + adapterData encoding for one candidate.
    * Throws if the source has no liquidity — caller uses Promise.allSettled.
+   *
+   * `quoteAmountIn` is the amount used for price simulation (defaults to `amountIn`).
+   * Pass `netAmountIn = amountIn - aggregatorFee` here so that `amountOut` and
+   * `minOut` reflect what the adapter will actually receive on-chain, not the
+   * gross input. `amountIn` in the returned StepData always stays as the full
+   * gross amount (what the contract records in the Swapped event).
    */
   private async trySingleStepRoute(
-    adapter:      AdapterName,
-    fees:         number[],
-    tickSpacings: number[],
-    tokenIn:      Hex,
-    tokenOut:     Hex,
-    amountIn:     bigint,
-    slippageBps:  bigint,
-    deadline:     bigint,
+    adapter:        AdapterName,
+    fees:           number[],
+    tickSpacings:   number[],
+    tokenIn:        Hex,
+    tokenOut:       Hex,
+    amountIn:       bigint,
+    slippageBps:    bigint,
+    deadline:       bigint,
+    quoteAmountIn:  bigint = amountIn,
   ): Promise<RouteCandidate> {
     let amountOut: bigint;
     let adapterData: Hex;
 
     if (adapter === "PANCAKE_V2" || adapter === "UNISWAP_V2") {
-      amountOut   = await quoteV2(adapter, [tokenIn, tokenOut], amountIn);
+      amountOut   = await quoteV2(adapter, [tokenIn, tokenOut], quoteAmountIn);
       adapterData = encodeV2AdapterData([tokenIn, tokenOut], deadline);
 
     } else if (adapter === "PANCAKE_V3" || adapter === "UNISWAP_V3") {
       const fee   = fees[0]!;
-      amountOut   = await quoteV3(adapter, buildV3PackedPath([tokenIn, tokenOut], [fee]), amountIn);
+      amountOut   = await quoteV3(adapter, buildV3PackedPath([tokenIn, tokenOut], [fee]), quoteAmountIn);
       adapterData = encodeV3SingleHopAdapterData(fee);
 
     } else if (adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4") {
       const fee = fees[0]!;
       const ts  = tickSpacings[0] ?? defaultTickSpacing(fee);
-      amountOut   = await quoteV4(adapter, tokenIn, tokenOut, amountIn, fee, ts, ZERO_ADDR);
+      amountOut   = await quoteV4(adapter, tokenIn, tokenOut, quoteAmountIn, fee, ts, ZERO_ADDR);
       adapterData = encodeV4SingleHopAdapterData(tokenIn, tokenOut, fee, ts, ZERO_ADDR, "0x", deadline);
 
     } else if (adapter === "ONEMEME_BC") {
       const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
       const token = isBuy ? tokenOut : tokenIn;
-      amountOut   = (isBuy ? await quoteBcBuy(token, amountIn) : await quoteBcSell(token, amountIn)).amountOut;
+      amountOut   = (isBuy ? await quoteBcBuy(token, quoteAmountIn) : await quoteBcSell(token, quoteAmountIn)).amountOut;
       adapterData = encodeOneMemeAdapterData(token, deadline);
 
     } else if (adapter === "FOURMEME") {
       const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
       const token = isBuy ? tokenOut : tokenIn;
-      amountOut   = (isBuy ? await quoteFourMemeBuy(token, amountIn) : await quoteFourMemeSell(token, amountIn)).amountOut;
+      amountOut   = (isBuy ? await quoteFourMemeBuy(token, quoteAmountIn) : await quoteFourMemeSell(token, quoteAmountIn)).amountOut;
       adapterData = encodeFourMemeAdapterData(token);
 
     } else {
       // FLAPSH
       const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
       const token = isBuy ? tokenOut : tokenIn;
-      amountOut   = isBuy ? await quoteFlapShBuy(token, amountIn) : await quoteFlapShSell(token, amountIn);
+      amountOut   = isBuy ? await quoteFlapShBuy(token, quoteAmountIn) : await quoteFlapShSell(token, quoteAmountIn);
       adapterData = encodeFlapShAdapterData();
     }
 
@@ -669,19 +684,21 @@ export class RouteService {
   /**
    * Returns the best single-hop route from tokenIn to tokenOut across all AMM
    * pools. Used to compute the step1 amount before trying BC bridge routes.
-   * Returns null if no AMM source has liquidity.
+   * `quoteAmountIn` should be `netAmountIn` (after fee) so step2 is anchored
+   * to what the adapter actually receives. Returns null if no source has liquidity.
    */
   private async bestSingleHop(
-    tokenIn:     Hex,
-    tokenOut:    Hex,
-    amountIn:    bigint,
-    slippageBps: bigint,
-    deadline:    bigint,
+    tokenIn:       Hex,
+    tokenOut:      Hex,
+    amountIn:      bigint,
+    quoteAmountIn: bigint,
+    slippageBps:   bigint,
+    deadline:      bigint,
   ): Promise<RouteCandidate | null> {
     const candidates = await this.discoverCandidates(tokenIn, tokenOut);
     const results    = await Promise.allSettled(
       candidates.map(c =>
-        this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, tokenOut, amountIn, slippageBps, deadline),
+        this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, tokenOut, amountIn, slippageBps, deadline, quoteAmountIn),
       ),
     );
     return results
@@ -750,14 +767,18 @@ export class RouteService {
    * Both hops are discovered and quoted in parallel; hop2 uses hop1's output
    * as its amountIn (sequential, not combinatorial). Throws if either hop has
    * no valid pool — caller uses Promise.allSettled.
+   *
+   * `quoteAmountIn` is the net amount (after aggregator fee) used for hop1
+   * so that hop2's input reflects what the adapter actually receives on-chain.
    */
   private async tryTwoHopRoute(
-    hub:         Hex,
-    tokenIn:     Hex,
-    tokenOut:    Hex,
-    amountIn:    bigint,
-    slippageBps: bigint,
-    deadline:    bigint,
+    hub:           Hex,
+    tokenIn:       Hex,
+    tokenOut:      Hex,
+    amountIn:      bigint,
+    quoteAmountIn: bigint,
+    slippageBps:   bigint,
+    deadline:      bigint,
   ): Promise<RouteCandidate> {
     // Discover AMM candidates for both hops in parallel
     const [hop1Candidates, hop2Candidates] = await Promise.all([
@@ -768,7 +789,7 @@ export class RouteService {
     // Quote all hop1 candidates in parallel; pick the one with the best output
     const hop1Results = await Promise.allSettled(
       hop1Candidates.map(c =>
-        this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, hub, amountIn, slippageBps, deadline),
+        this.trySingleStepRoute(c.adapter, c.fees, c.tickSpacings, tokenIn, hub, amountIn, slippageBps, deadline, quoteAmountIn),
       ),
     );
     const hop1Best = hop1Results
