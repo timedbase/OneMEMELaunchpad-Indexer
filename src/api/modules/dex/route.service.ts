@@ -38,7 +38,6 @@ import {
   quoteFlapShSell,
   defaultTickSpacing,
   aggregatorAddress,
-  batchAggregatorAddress,
 } from "./dex-rpc";
 import type { Hex } from "viem";
 import { isAddress, normalizeAddress } from "../../helpers";
@@ -369,10 +368,8 @@ export class RouteService {
       steps.every(s => s.adapter === v2Adapter);
 
     let calldata: Hex;
-    let useAggregator: boolean;
 
     if (!isMulti || collapseToV2) {
-      useAggregator = true;
       if (!isMulti) {
         const step = steps[0]!;
         calldata = buildSwapCalldata(step.adapterId, ctTokenIn, amountIn, ctTokenOut, minOut, to, deadline, step.adapterData);
@@ -383,7 +380,6 @@ export class RouteService {
         calldata = buildSwapCalldata(steps[0]!.adapterId, ctTokenIn, amountIn, ctTokenOut, minOut, to, deadline, adapterData);
       }
     } else {
-      useAggregator = false;
       const lastIdx   = steps.length - 1;
       const swapSteps: SwapStep[] = steps.map((s, i) => ({
         adapterId:   s.adapterId,
@@ -402,7 +398,7 @@ export class RouteService {
 
     return {
       data: {
-        to:          useAggregator ? aggregatorAddress() : batchAggregatorAddress(),
+        to:          aggregatorAddress(),
         calldata,
         value:       nativeIn ? amountIn.toString() : "0",
         gasLimit,
@@ -453,7 +449,7 @@ export class RouteService {
 
     return {
       data: {
-        to:          batchAggregatorAddress(),
+        to:          aggregatorAddress(),
         calldata,
         nativeIn,
         nativeOut,

@@ -1248,8 +1248,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-relay' \
 
 | Variable | Required | Description |
 |---|---|---|
-| `AGGREGATOR_ADDRESS` | Yes (`POST /dex/swap` single-step, `POST /dex/metatx/*`) | OneMEMEAggregator contract — has `swap()` only |
-| `BATCH_AGGREGATOR_ADDRESS` | Yes (`POST /dex/swap` multi-step, `POST /dex/batch-swap`) | OneMEMEBatchAggregator contract — has `batchSwap()` |
+| `AGGREGATOR_ADDRESS` | Yes (`POST /dex/swap`, `POST /dex/batch-swap`, `POST /dex/metatx/*`) | OneMEMEAggregator contract — must expose both `swap()` and `batchSwap()` |
 | `METATX_ADDRESS` | Yes (`POST /dex/metatx/*`) | OneMEMEMetaTx contract address |
 | `RELAYER_PRIVATE_KEY` | Yes (`POST /dex/metatx/relay`) | 0x-prefixed private key of the funded relayer EOA |
 | `BSC_RPC_URL` | Yes (quotes, relay) | BSC HTTP RPC for contract reads and relay broadcast |

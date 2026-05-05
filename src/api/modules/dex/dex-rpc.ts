@@ -76,13 +76,6 @@ export function aggregatorAddress(): Hex {
   return process.env.AGGREGATOR_ADDRESS as Hex;
 }
 
-export function batchAggregatorAddress(): Hex {
-  if (!process.env.BATCH_AGGREGATOR_ADDRESS) {
-    throw new Error("BATCH_AGGREGATOR_ADDRESS is not configured.");
-  }
-  return process.env.BATCH_AGGREGATOR_ADDRESS as Hex;
-}
-
 export function metaTxAddress(): Hex {
   if (!process.env.METATX_ADDRESS) {
     throw new Error("METATX_ADDRESS is not configured.");
