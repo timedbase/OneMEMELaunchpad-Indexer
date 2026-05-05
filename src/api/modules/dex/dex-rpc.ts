@@ -349,6 +349,7 @@ export function v4ZeroForOne(tokenIn: Hex, tokenOut: Hex): boolean {
 
 const V2_ROUTER_ABI = parseAbi([
   "function getAmountsOut(uint256 amountIn, address[] calldata path) view returns (uint256[] amounts)",
+  "function getAmountsIn(uint256 amountOut, address[] calldata path) view returns (uint256[] amounts)",
 ]);
 
 const V3_QUOTER_ABI = parseAbi([
@@ -451,6 +452,26 @@ export async function quoteV2(
   }) as bigint[];
 
   return amounts[amounts.length - 1]!;
+}
+
+/** V2 AMM reverse quote: returns the exact amountIn required to receive amountOut. */
+export async function quoteV2AmountsIn(
+  adapter:   "PANCAKE_V2" | "UNISWAP_V2",
+  path:      Hex[],
+  amountOut: bigint,
+): Promise<bigint> {
+  const router = adapter === "PANCAKE_V2"
+    ? pancakeV2RouterAddress()
+    : uniswapV2RouterAddress();
+
+  const amounts = await getDexPublicClient().readContract({
+    address:      router,
+    abi:          V2_ROUTER_ABI,
+    functionName: "getAmountsIn",
+    args:         [amountOut, path],
+  }) as bigint[];
+
+  return amounts[0]!;
 }
 
 /** V3 AMM quote: returns estimated output amount for the given packed path. */
@@ -693,15 +714,18 @@ export interface SwapStep {
 }
 
 export interface BatchMetaTxOrder {
-  user:          Hex;
-  nonce:         bigint;
-  deadline:      bigint;
-  steps:         SwapStep[];
-  grossAmountIn: bigint;
-  minFinalOut:   bigint;
-  recipient:     Hex;
-  swapDeadline:  bigint;
-  relayerFee:    bigint;
+  user:                  Hex;
+  nonce:                 bigint;
+  deadline:              bigint;
+  steps:                 SwapStep[];
+  grossAmountIn:         bigint;
+  minFinalOut:           bigint;
+  recipient:             Hex;
+  swapDeadline:          bigint;
+  relayerFee:            bigint;
+  relayerFeeTokenAmount: bigint;
+  relayerFeeAdapterId:   Hex;
+  relayerFeeAdapterData: Hex;
 }
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
@@ -711,9 +735,13 @@ export const AGGREGATOR_ABI = parseAbi([
   "event Swapped(address indexed user, bytes32 indexed adapterId, address tokenIn, address tokenOut, uint256 grossAmountIn, uint256 feeCharged, uint256 amountOut)",
 ]);
 
+// Shorthand for the MetaTxOrder tuple — used in both executeMetaTx and orderDigest.
+const META_ORDER_TUPLE =
+  "(address user, uint256 nonce, uint256 deadline, bytes32 adapterId, address tokenIn, uint256 grossAmountIn, address tokenOut, uint256 minUserOut, address recipient, uint256 swapDeadline, bytes adapterData, uint256 relayerFee, uint256 relayerFeeTokenAmount, bytes32 relayerFeeAdapterId, bytes relayerFeeAdapterData)";
+
 export const METATX_ABI = parseAbi([
-  "function executeMetaTx((address user, uint256 nonce, uint256 deadline, bytes32 adapterId, address tokenIn, uint256 grossAmountIn, address tokenOut, uint256 minUserOut, address recipient, uint256 swapDeadline, bytes adapterData, uint256 relayerFee) order, bytes sig, (uint8 permitType, bytes data) permit)",
-  "function orderDigest((address user, uint256 nonce, uint256 deadline, bytes32 adapterId, address tokenIn, uint256 grossAmountIn, address tokenOut, uint256 minUserOut, address recipient, uint256 swapDeadline, bytes adapterData, uint256 relayerFee) order) view returns (bytes32)",
+  `function executeMetaTx(${META_ORDER_TUPLE} order, bytes sig, (uint8 permitType, bytes data) permit)`,
+  `function orderDigest(${META_ORDER_TUPLE} order) view returns (bytes32)`,
   "function nonces(address user) view returns (uint256)",
 ]);
 
@@ -722,27 +750,35 @@ export const BATCH_AGGREGATOR_ABI = parseAbi([
   "event BatchSwapped(address indexed user, address tokenIn, address tokenOut, uint256 grossAmountIn, uint256 feeCharged, uint256 amountOut, uint256 stepCount)",
 ]);
 
+const BATCH_META_ORDER_TUPLE =
+  "(address user, uint256 nonce, uint256 deadline, (bytes32 adapterId, address tokenIn, address tokenOut, uint256 minOut, bytes adapterData)[] steps, uint256 grossAmountIn, uint256 minFinalOut, address recipient, uint256 swapDeadline, uint256 relayerFee, uint256 relayerFeeTokenAmount, bytes32 relayerFeeAdapterId, bytes relayerFeeAdapterData)";
+
 export const BATCH_METATX_ABI = parseAbi([
-  "function batchExecuteMetaTx((address user, uint256 nonce, uint256 deadline, (bytes32 adapterId, address tokenIn, address tokenOut, uint256 minOut, bytes adapterData)[] steps, uint256 grossAmountIn, uint256 minFinalOut, address recipient, uint256 swapDeadline, uint256 relayerFee) order, bytes sig, (uint8 permitType, bytes data) permit) returns (uint256 amountOut)",
-  "function batchOrderDigest((address user, uint256 nonce, uint256 deadline, (bytes32 adapterId, address tokenIn, address tokenOut, uint256 minOut, bytes adapterData)[] steps, uint256 grossAmountIn, uint256 minFinalOut, address recipient, uint256 swapDeadline, uint256 relayerFee) order) view returns (bytes32)",
+  `function batchExecuteMetaTx(${BATCH_META_ORDER_TUPLE} order, bytes sig, (uint8 permitType, bytes data) permit) returns (uint256 amountOut)`,
+  `function batchOrderDigest(${BATCH_META_ORDER_TUPLE} order) view returns (bytes32)`,
   "event BatchMetaTxExecuted(address indexed user, address indexed relayer, address tokenIn, address tokenOut, uint256 grossAmountIn, uint256 amountOut, uint256 relayerFee, uint256 nonce, uint256 stepCount)",
 ]);
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
 export interface MetaTxOrder {
-  user:          Hex;
-  nonce:         bigint;
-  deadline:      bigint;
-  adapterId:     Hex;
-  tokenIn:       Hex;
-  grossAmountIn: bigint;
-  tokenOut:      Hex;
-  minUserOut:    bigint;
-  recipient:     Hex;
-  swapDeadline:  bigint;
-  adapterData:   Hex;
-  relayerFee:    bigint;
+  user:                   Hex;
+  nonce:                  bigint;
+  deadline:               bigint;
+  adapterId:              Hex;
+  tokenIn:                Hex;
+  grossAmountIn:          bigint;
+  tokenOut:               Hex;
+  minUserOut:             bigint;
+  recipient:              Hex;
+  swapDeadline:           bigint;
+  adapterData:            Hex;
+  relayerFee:             bigint;
+  // ERC-20 output fee: deduct relayerFeeTokenAmount of tokenOut, swap→BNB, send to relayer.
+  // All three must be set together; leave at zero/empty for BNB-output swaps.
+  relayerFeeTokenAmount:  bigint;
+  relayerFeeAdapterId:    Hex;
+  relayerFeeAdapterData:  Hex;
 }
 
 export interface PermitData {
@@ -762,17 +798,49 @@ const GAS_META_PER_STEP   = 120_000n;
 // Premium paid to the relayer above gas break-even, in basis points.
 const RELAYER_PREMIUM_BPS = 3_000n; // 30%
 
-export async function estimateRelayerFee(stepCount: number): Promise<{
-  gasPrice:    bigint;
-  gasEstimate: bigint;
-  relayerFee:  bigint;
+const WBNB = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c" as Hex;
+const ZERO_BYTES32 = "0x0000000000000000000000000000000000000000000000000000000000000000" as Hex;
+
+export async function estimateRelayerFee(
+  stepCount:  number,
+  tokenOut?:  Hex,   // ERC-20 output token; omit or pass address(0) for BNB-output swaps
+  deadline?:  bigint,
+): Promise<{
+  gasPrice:              bigint;
+  gasEstimate:           bigint;
+  relayerFee:            bigint;
+  relayerFeeTokenAmount: bigint;
+  relayerFeeAdapterId:   Hex;
+  relayerFeeAdapterData: Hex;
 }> {
-  const gasPrice   = await getDexPublicClient().getGasPrice();
-  const gasEstimate = stepCount <= 1
-    ? GAS_META_SINGLE
-    : GAS_META_BATCH_BASE + BigInt(stepCount) * GAS_META_PER_STEP;
-  const relayerFee = (gasEstimate * gasPrice * (10_000n + RELAYER_PREMIUM_BPS)) / 10_000n;
-  return { gasPrice, gasEstimate, relayerFee };
+  // Extra gas for the secondary fee-conversion swap when output is ERC-20.
+  const feeSwapGas = (tokenOut && tokenOut !== WBNB && tokenOut !== "0x0000000000000000000000000000000000000000")
+    ? 120_000n : 0n;
+
+  const gasPrice    = await getDexPublicClient().getGasPrice();
+  const gasEstimate = (stepCount <= 1 ? GAS_META_SINGLE : GAS_META_BATCH_BASE + BigInt(stepCount) * GAS_META_PER_STEP)
+    + feeSwapGas;
+  const relayerFee  = (gasEstimate * gasPrice * (10_000n + RELAYER_PREMIUM_BPS)) / 10_000n;
+
+  // For ERC-20 output: quote how many tokenOut tokens the fee swap will cost.
+  // Uses V2 getAmountsIn([tokenOut, WBNB], relayerFee) — exact amount needed.
+  // Add 1% buffer to cover slippage between quote time and execution.
+  let relayerFeeTokenAmount = 0n;
+  let relayerFeeAdapterId: Hex   = ZERO_BYTES32;
+  let relayerFeeAdapterData: Hex = "0x";
+
+  if (feeSwapGas > 0n && tokenOut) {
+    try {
+      const exactIn = await quoteV2AmountsIn("PANCAKE_V2", [tokenOut, WBNB], relayerFee);
+      relayerFeeTokenAmount = (exactIn * 10_100n) / 10_000n; // +1% slippage buffer
+      relayerFeeAdapterId   = ADAPTER_IDS["PANCAKE_V2"];
+      relayerFeeAdapterData = encodeV2AdapterData([tokenOut, WBNB], deadline ?? BigInt(Math.floor(Date.now() / 1000)) + 1800n);
+    } catch {
+      // Pool may not exist — caller should handle relayerFeeTokenAmount === 0n as "not available"
+    }
+  }
+
+  return { gasPrice, gasEstimate, relayerFee, relayerFeeTokenAmount, relayerFeeAdapterId, relayerFeeAdapterData };
 }
 
 // ─── Contract reads ───────────────────────────────────────────────────────────

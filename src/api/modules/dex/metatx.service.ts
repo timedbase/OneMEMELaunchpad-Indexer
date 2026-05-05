@@ -80,7 +80,10 @@ export class MetaTxService {
    * Returns a suggested relayerFee (in BNB wei) the user should include in their
    * MetaTxOrder so the relayer at least breaks even on gas, plus a 30% premium.
    *
-   * Query: { steps? }  — number of swap steps (default 1)
+   * Query: { steps?, tokenOut? }
+   *   steps    — number of swap steps (default 1)
+   *   tokenOut — output token address; when ERC-20, also returns relayerFeeTokenAmount
+   *              and the adapter details needed to convert that token to BNB for the relayer
    */
   async getRelayerFee(query: Record<string, string | undefined>) {
     const rawSteps = query["steps"] ?? "1";
@@ -89,15 +92,30 @@ export class MetaTxService {
       throw new BadRequestException("steps must be an integer between 1 and 10");
     }
 
-    const { gasPrice, gasEstimate, relayerFee } = await estimateRelayerFee(steps);
+    let tokenOut: Hex | undefined;
+    if (query["tokenOut"]) {
+      if (!isAddress(query["tokenOut"])) throw new BadRequestException("tokenOut must be a valid EVM address");
+      tokenOut = normalizeAddress(query["tokenOut"]) as Hex;
+    }
+
+    const nowSec   = BigInt(Math.floor(Date.now() / 1000));
+    const deadline = nowSec + 1800n;
+
+    const {
+      gasPrice, gasEstimate, relayerFee,
+      relayerFeeTokenAmount, relayerFeeAdapterId, relayerFeeAdapterData,
+    } = await estimateRelayerFee(steps, tokenOut, deadline);
 
     return {
       data: {
         steps,
-        gasPrice:    gasPrice.toString(),
-        gasEstimate: gasEstimate.toString(),
-        relayerFee:  relayerFee.toString(),
-        premiumBps:  "3000",
+        gasPrice:              gasPrice.toString(),
+        gasEstimate:           gasEstimate.toString(),
+        relayerFee:            relayerFee.toString(),
+        relayerFeeTokenAmount: relayerFeeTokenAmount.toString(),
+        relayerFeeAdapterId,
+        relayerFeeAdapterData,
+        premiumBps:            "3000",
       },
     };
   }
@@ -110,7 +128,12 @@ export class MetaTxService {
    * they are opaque to this endpoint. Use POST /dex/metatx/batch-digest for multi-hop.
    *
    * Body: { user, adapterId, adapterData, tokenIn, grossAmountIn, tokenOut, minUserOut,
-   *         recipient, deadline, swapDeadline, relayerFee }
+   *         recipient, deadline, swapDeadline, relayerFee,
+   *         relayerFeeTokenAmount?, relayerFeeAdapterId?, relayerFeeAdapterData? }
+   *
+   * For ERC-20 output swaps: set relayerFeeTokenAmount + relayerFeeAdapterId +
+   * relayerFeeAdapterData (all from GET /dex/metatx/relayer-fee?tokenOut=...).
+   * These fields default to zero/empty for BNB-output swaps.
    */
   async buildDigest(body: Record<string, unknown>) {
     const user          = requireAddress(body["user"],         "user");
@@ -136,6 +159,21 @@ export class MetaTxService {
     const adapterId   = rawAdapterId   as Hex;
     const adapterData = rawAdapterData as Hex;
 
+    // ERC-20 fee fields — default to zero/empty when not provided (BNB-output swaps).
+    const relayerFeeTokenAmount = body["relayerFeeTokenAmount"] !== undefined
+      ? requireBigInt(body["relayerFeeTokenAmount"], "relayerFeeTokenAmount")
+      : 0n;
+    const rawRfAdapterId = body["relayerFeeAdapterId"] ?? "0x0000000000000000000000000000000000000000000000000000000000000000";
+    if (typeof rawRfAdapterId !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(rawRfAdapterId)) {
+      throw new BadRequestException("relayerFeeAdapterId must be a 32-byte hex string");
+    }
+    const rawRfAdapterData = body["relayerFeeAdapterData"] ?? "0x";
+    if (typeof rawRfAdapterData !== "string" || !/^0x[0-9a-fA-F]*$/.test(rawRfAdapterData)) {
+      throw new BadRequestException("relayerFeeAdapterData must be a hex string");
+    }
+    const relayerFeeAdapterId   = rawRfAdapterId  as Hex;
+    const relayerFeeAdapterData = rawRfAdapterData as Hex;
+
     if (grossAmountIn === 0n) throw new BadRequestException("grossAmountIn must be greater than 0");
     if (relayerFee >= grossAmountIn) throw new BadRequestException("relayerFee must be less than grossAmountIn");
     if (isNative(rawTokenIn) && isNative(rawTokenOut)) {
@@ -157,6 +195,7 @@ export class MetaTxService {
     const order: MetaTxOrder = {
       user, nonce, deadline, adapterId, tokenIn, grossAmountIn,
       tokenOut, minUserOut, recipient, swapDeadline, adapterData, relayerFee,
+      relayerFeeTokenAmount, relayerFeeAdapterId, relayerFeeAdapterData,
     };
 
     let digest: Hex;
@@ -174,12 +213,13 @@ export class MetaTxService {
         metaTxContract: metaTxAddress(),
         order: {
           ...order,
-          nonce:         order.nonce.toString(),
-          deadline:      order.deadline.toString(),
-          grossAmountIn: order.grossAmountIn.toString(),
-          minUserOut:    order.minUserOut.toString(),
-          swapDeadline:  order.swapDeadline.toString(),
-          relayerFee:    order.relayerFee.toString(),
+          nonce:                  order.nonce.toString(),
+          deadline:               order.deadline.toString(),
+          grossAmountIn:          order.grossAmountIn.toString(),
+          minUserOut:             order.minUserOut.toString(),
+          swapDeadline:           order.swapDeadline.toString(),
+          relayerFee:             order.relayerFee.toString(),
+          relayerFeeTokenAmount:  order.relayerFeeTokenAmount.toString(),
         },
         aggregatorFeeEstimate: (grossAmountIn / 200n).toString() /* 0.5% protocol fee */,
       },
@@ -224,6 +264,19 @@ export class MetaTxService {
         return v as Hex;
       })(),
       relayerFee:    requireBigInt(o["relayerFee"],      "order.relayerFee"),
+      relayerFeeTokenAmount: o["relayerFeeTokenAmount"] !== undefined
+        ? requireBigInt(o["relayerFeeTokenAmount"], "order.relayerFeeTokenAmount")
+        : 0n,
+      relayerFeeAdapterId: (() => {
+        const v = o["relayerFeeAdapterId"] ?? "0x0000000000000000000000000000000000000000000000000000000000000000";
+        if (typeof v !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(v)) throw new BadRequestException("order.relayerFeeAdapterId must be a 32-byte hex string");
+        return v as Hex;
+      })(),
+      relayerFeeAdapterData: (() => {
+        const v = o["relayerFeeAdapterData"] ?? "0x";
+        if (typeof v !== "string" || !/^0x[0-9a-fA-F]*$/.test(v)) throw new BadRequestException("order.relayerFeeAdapterData must be a hex string");
+        return v as Hex;
+      })(),
     };
 
     const sig = body["sig"];
@@ -293,6 +346,20 @@ export class MetaTxService {
     const swapDeadline  = requireBigInt(body["swapDeadline"],   "swapDeadline");
     const relayerFee    = requireBigInt(body["relayerFee"],     "relayerFee");
 
+    const relayerFeeTokenAmount = body["relayerFeeTokenAmount"] !== undefined
+      ? requireBigInt(body["relayerFeeTokenAmount"], "relayerFeeTokenAmount")
+      : 0n;
+    const rawRfAdapterId = body["relayerFeeAdapterId"] ?? "0x0000000000000000000000000000000000000000000000000000000000000000";
+    if (typeof rawRfAdapterId !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(rawRfAdapterId)) {
+      throw new BadRequestException("relayerFeeAdapterId must be a 32-byte hex string");
+    }
+    const rawRfAdapterData = body["relayerFeeAdapterData"] ?? "0x";
+    if (typeof rawRfAdapterData !== "string" || !/^0x[0-9a-fA-F]*$/.test(rawRfAdapterData)) {
+      throw new BadRequestException("relayerFeeAdapterData must be a hex string");
+    }
+    const relayerFeeAdapterId   = rawRfAdapterId  as Hex;
+    const relayerFeeAdapterData = rawRfAdapterData as Hex;
+
     if (grossAmountIn === 0n) throw new BadRequestException("grossAmountIn must be greater than 0");
     if (relayerFee >= grossAmountIn) throw new BadRequestException("relayerFee must be less than grossAmountIn");
 
@@ -312,6 +379,7 @@ export class MetaTxService {
 
     const order: BatchMetaTxOrder = {
       user, nonce, deadline, steps, grossAmountIn, minFinalOut, recipient, swapDeadline, relayerFee,
+      relayerFeeTokenAmount, relayerFeeAdapterId, relayerFeeAdapterData,
     };
 
     let digest: Hex;
@@ -370,6 +438,19 @@ export class MetaTxService {
       recipient:     requireAddress(o["recipient"],     "order.recipient"),
       swapDeadline:  requireBigInt(o["swapDeadline"],   "order.swapDeadline"),
       relayerFee:    requireBigInt(o["relayerFee"],     "order.relayerFee"),
+      relayerFeeTokenAmount: o["relayerFeeTokenAmount"] !== undefined
+        ? requireBigInt(o["relayerFeeTokenAmount"], "order.relayerFeeTokenAmount")
+        : 0n,
+      relayerFeeAdapterId: (() => {
+        const v = o["relayerFeeAdapterId"] ?? "0x0000000000000000000000000000000000000000000000000000000000000000";
+        if (typeof v !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(v)) throw new BadRequestException("order.relayerFeeAdapterId must be a 32-byte hex string");
+        return v as Hex;
+      })(),
+      relayerFeeAdapterData: (() => {
+        const v = o["relayerFeeAdapterData"] ?? "0x";
+        if (typeof v !== "string" || !/^0x[0-9a-fA-F]*$/.test(v)) throw new BadRequestException("order.relayerFeeAdapterData must be a hex string");
+        return v as Hex;
+      })(),
     };
 
     const sig = body["sig"];
