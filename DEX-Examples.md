@@ -1024,27 +1024,51 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
 
 ## POST /dex/metatx/digest
 
-Computes the EIP-712 digest the user must sign for a gasless meta-transaction.
+Computes the EIP-712 digest the user must sign for a gasless single-step swap.
 
-### Gasless swap flow
+> Only Token → BNB and Token → Token swaps are supported (not BNB → Token).
+> `adapterId` and `adapterData` come directly from `GET /dex/route` — treat them as opaque bytes.
+
+### Complete gasless swap flow
 
 ```
-1. GET  /dex/route                       → find best route; note step.adapterId + step.adapterData
-2. GET  /dex/metatx/nonce/:user          → get current nonce
-3. POST /dex/metatx/digest               → build order + get digest
-4. user.signTypedData(digest)            → sign in wallet (off-chain)
-5. POST /dex/metatx/relay { order, sig } → relayer submits on-chain
-```
+Step 1  GET /dex/metatx/permit-type?token=&owner=&amount=
+        → detect which permit mode the token supports
+        → use recommended (1=EIP-2612, 2=Permit2, 0=pre-approve)
 
-> **Important:** Only Token → BNB and Token → Token swaps are supported (not BNB → Token).
-> The user must approve the MetaTx contract for `grossAmountIn` of `tokenIn` before relay.
->
-> `adapterId` and `adapterData` are opaque bytes taken directly from the `GET /dex/route`
-> step response — the server does not derive them from an adapter name here.
->
-> For ERC-20 output swaps, also pass `relayerFeeTokenAmount`, `relayerFeeAdapterId`, and
-> `relayerFeeAdapterData` (all returned by `GET /dex/metatx/relayer-fee?tokenOut=...`).
-> These fields default to zero/empty and can be omitted for BNB-output swaps.
+Step 2  GET /dex/metatx/relayer-fee?steps=1&tokenOut=
+        → get relayerFee (BNB) and, for ERC-20 output,
+          relayerFeeTokenAmount + relayerFeeAdapterId + relayerFeeAdapterData
+
+Step 3  GET /dex/route?tokenIn=&amountIn=&tokenOut=&slippage=
+        → find best route; save steps[0].adapterId + steps[0].adapterData
+
+Step 4  GET /dex/metatx/nonce/:user
+        → get current on-chain nonce
+
+Step 5a [if recommended=1] GET /dex/metatx/permit-digest?token=&owner=&amount=&deadline=
+        → returns EIP-712 typed data for EIP-2612 permit
+        → user signs with eth_signTypedData_v4 → (v, r, s)
+        → encode: permitData = abi.encode(deadline, v, r, s)
+
+Step 5b [if recommended=2] GET /dex/metatx/permit2-digest?token=&owner=&amount=&deadline=
+        → returns EIP-712 typed data for Permit2 PermitTransferFrom
+        → user signs with eth_signTypedData_v4 → signature
+        → encode: permitData = abi.encode(nonce, deadline, signature)
+
+Step 5c [if recommended=0] user calls token.approve(metaTxAddress, grossAmountIn) on-chain
+        → permitType=0, permitData="0x"
+
+Step 6  POST /dex/metatx/digest  { order fields }
+        → returns digest + echo of the full order
+
+Step 7  user signs digest with eth_sign or personal_sign (NOT signTypedData — the contract
+        uses ecrecover on the raw digest returned by orderDigest())
+        → 65-byte signature (0x + 130 hex chars)
+
+Step 8  POST /dex/metatx/relay  { order, sig, permitType, permitData }
+        → relayer submits on-chain, user receives tokenOut
+```
 
 **BNB output**
 
@@ -1397,21 +1421,35 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
 ## POST /dex/metatx/batch-digest
 
 Computes the EIP-712 digest the user must sign for a gasless multi-hop swap.
+Same permit detection and signing flow as the single-step digest — use `steps=N` in the relayer-fee call.
 
 ### Gasless batch swap flow
 
-**Step 1** — get route:
-```bash
-curl 'https://api.1coin.meme/api/v1/bsc/dex/route?tokenIn=0xUSDC&amountIn=5000000000000000000&tokenOut=0xMEME'
 ```
-Save `steps[]` from the response.
+Step 1  GET /dex/metatx/permit-type?token=&owner=&amount=
+        → detect permit mode for tokenIn
 
-**Step 2** — get nonce:
-```bash
-curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/nonce/0xUserWallet'
+Step 2  GET /dex/metatx/relayer-fee?steps=2&tokenOut=
+        → steps=N matches the number of route steps
+
+Step 3  GET /dex/route?tokenIn=&amountIn=&tokenOut=&slippage=
+        → save full steps[] array (adapterId, tokenIn, tokenOut, minOut, adapterData)
+
+Step 4  GET /dex/metatx/nonce/:user
+
+Step 5a/b/c  sign permit (same as single-step — see POST /dex/metatx/digest flow)
+
+Step 6  POST /dex/metatx/batch-digest  { user, steps[], grossAmountIn, minFinalOut,
+                                          recipient, deadline, swapDeadline,
+                                          relayerFee, relayerFeeTokenAmount,
+                                          relayerFeeAdapterId, relayerFeeAdapterData }
+        → returns digest + echo of the full BatchMetaTxOrder
+
+Step 7  user signs digest
+Step 8  POST /dex/metatx/batch-relay  { order, sig, permitType, permitData }
 ```
 
-**Step 3** — build batch digest:
+**Step 6** — build batch digest:
 
 ```bash
 curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
@@ -1485,9 +1523,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
 }
 ```
 
-**Step 4** — sign `digest` client-side with the user's wallet, then:
-
-**Step 5** — POST /dex/metatx/batch-relay:
+Sign the returned `digest` (step 7), then submit via `POST /dex/metatx/batch-relay` (step 8).
 
 ---
 
