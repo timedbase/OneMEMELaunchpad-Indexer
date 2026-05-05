@@ -18,7 +18,8 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 5. [GET /dex/tokens/:address/pools](#get-dextokensaddresspools)
 6. [GET /dex/tokens/:address/trades](#get-dextokensaddresstrades)
 7. [GET /dex/swaps](#get-dexswaps)
-8. [GET /dex/metatx/nonce/:user](#get-dexmetatxnonceuser)
+8. [GET /dex/metatx/relayer-fee](#get-dexmetatxrelayer-fee)
+9. [GET /dex/metatx/nonce/:user](#get-dexmetatxnonceuser)
 9. [GET /dex/quote](#get-dexquote)
 10. [POST /dex/swap](#post-dexswap)
 11. [POST /dex/metatx/digest](#post-dexmetatxdigest)
@@ -583,6 +584,38 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2'
   }
 }
 ```
+
+---
+
+## GET /dex/metatx/relayer-fee
+
+Returns a suggested `relayerFee` in BNB wei, computed from the live BSC gas price plus a 30% relayer premium. Pass the returned `relayerFee` value directly into `POST /dex/metatx/digest` or `POST /dex/metatx/batch-digest`.
+
+Only relevant when `tokenOut` is native BNB (`address(0)`) — the MetaTx contract deducts this amount from the BNB output and sends it to the relayer.
+
+**Query Parameters**
+
+| Parameter | Required | Description |
+|---|---|---|
+| `steps` | No | Number of swap steps (default `1`). Use `2` for a bridge or two-hop route. |
+
+```bash
+curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relayer-fee?steps=1'
+```
+
+```json
+{
+  "data": {
+    "steps":       1,
+    "gasPrice":    "1000000000",
+    "gasEstimate": "250000",
+    "relayerFee":  "325000000000000",
+    "premiumBps":  "3000"
+  }
+}
+```
+
+`relayerFee` = `gasEstimate × gasPrice × 1.30` (in wei). For `steps=2`: gasEstimate = 200,000 + 2×120,000 = 440,000.
 
 ---
 

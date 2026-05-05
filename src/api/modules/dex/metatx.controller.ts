@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body } from "@nestjs/common";
+import { Controller, Get, Post, Param, Body, Query } from "@nestjs/common";
 import { MetaTxService } from "./metatx.service";
 
 /**
@@ -25,6 +25,17 @@ export class MetaTxController {
   @Get("nonce/:user")
   getNonce(@Param("user") user: string) {
     return this.metatx.getNonce(user);
+  }
+
+  /**
+   * GET /dex/metatx/relayer-fee
+   * Returns a suggested relayerFee in BNB wei.
+   * Based on live BSC gas price + a 30% relayer premium.
+   * Query: steps (default 1) — number of swap steps in the meta-tx.
+   */
+  @Get("relayer-fee")
+  getRelayerFee(@Query() query: Record<string, string>) {
+    return this.metatx.getRelayerFee(query);
   }
 
   /**

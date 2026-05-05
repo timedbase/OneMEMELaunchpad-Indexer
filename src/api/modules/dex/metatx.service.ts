@@ -23,6 +23,7 @@ import {
   verifyOrderSignature,
   verifyBatchOrderSignature,
   metaTxAddress,
+  estimateRelayerFee,
 } from "./dex-rpc";
 import {
   parseSteps,
@@ -72,6 +73,33 @@ export class MetaTxService {
     }
 
     return { data: { user: addr, nonce: nonce.toString() } };
+  }
+
+  /**
+   * GET /dex/metatx/relayer-fee
+   * Returns a suggested relayerFee (in BNB wei) the user should include in their
+   * MetaTxOrder so the relayer at least breaks even on gas, plus a 30% premium.
+   *
+   * Query: { steps? }  — number of swap steps (default 1)
+   */
+  async getRelayerFee(query: Record<string, string | undefined>) {
+    const rawSteps = query["steps"] ?? "1";
+    const steps    = parseInt(rawSteps, 10);
+    if (isNaN(steps) || steps < 1 || steps > 10) {
+      throw new BadRequestException("steps must be an integer between 1 and 10");
+    }
+
+    const { gasPrice, gasEstimate, relayerFee } = await estimateRelayerFee(steps);
+
+    return {
+      data: {
+        steps,
+        gasPrice:    gasPrice.toString(),
+        gasEstimate: gasEstimate.toString(),
+        relayerFee:  relayerFee.toString(),
+        premiumBps:  "3000",
+      },
+    };
   }
 
   /**

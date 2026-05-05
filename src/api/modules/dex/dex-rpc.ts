@@ -749,6 +749,31 @@ export interface PermitData {
   data:       Hex;
 }
 
+// ─── Relayer fee estimation ───────────────────────────────────────────────────
+
+// Conservative gas budgets for MetaTx relay transactions.
+// Single-step: MetaTx overhead (~100k) + single aggregator swap (~150k).
+// Batch: MetaTx overhead (~130k) + batchSwap base (~70k) + per-step (~120k).
+const GAS_META_SINGLE    = 250_000n;
+const GAS_META_BATCH_BASE = 200_000n;
+const GAS_META_PER_STEP   = 120_000n;
+
+// Premium paid to the relayer above gas break-even, in basis points.
+const RELAYER_PREMIUM_BPS = 3_000n; // 30%
+
+export async function estimateRelayerFee(stepCount: number): Promise<{
+  gasPrice:    bigint;
+  gasEstimate: bigint;
+  relayerFee:  bigint;
+}> {
+  const gasPrice   = await getDexPublicClient().getGasPrice();
+  const gasEstimate = stepCount <= 1
+    ? GAS_META_SINGLE
+    : GAS_META_BATCH_BASE + BigInt(stepCount) * GAS_META_PER_STEP;
+  const relayerFee = (gasEstimate * gasPrice * (10_000n + RELAYER_PREMIUM_BPS)) / 10_000n;
+  return { gasPrice, gasEstimate, relayerFee };
+}
+
 // ─── Contract reads ───────────────────────────────────────────────────────────
 
 export async function getUserNonce(user: Hex): Promise<bigint> {
