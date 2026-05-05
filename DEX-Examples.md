@@ -589,15 +589,19 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2'
 
 ## GET /dex/metatx/relayer-fee
 
-Returns a suggested `relayerFee` in BNB wei, computed from the live BSC gas price plus a 30% relayer premium. Pass the returned `relayerFee` value directly into `POST /dex/metatx/digest` or `POST /dex/metatx/batch-digest`.
+Returns a suggested `relayerFee` in BNB wei (the minimum BNB the relayer must receive), computed from the live BSC gas price plus a 30% premium.
 
-Only relevant when `tokenOut` is native BNB (`address(0)`) — the MetaTx contract deducts this amount from the BNB output and sends it to the relayer.
+- **BNB output** (`tokenOut = address(0)`): use `relayerFee` alone. The contract deducts it directly from the BNB output.
+- **ERC-20 output**: pass all four fee fields (`relayerFee`, `relayerFeeTokenAmount`, `relayerFeeAdapterId`, `relayerFeeAdapterData`) into the digest. The contract deducts `relayerFeeTokenAmount` of `tokenOut`, swaps it to BNB via the aggregator, and guarantees the relayer receives at least `relayerFee` BNB.
 
 **Query Parameters**
 
 | Parameter | Required | Description |
 |---|---|---|
-| `steps` | No | Number of swap steps (default `1`). Use `2` for a bridge or two-hop route. |
+| `steps` | No | Number of swap steps (default `1`). Use `2` for a two-hop route. |
+| `tokenOut` | No | Output token address. When ERC-20, the response includes `relayerFeeTokenAmount` and adapter details for the fee conversion swap. |
+
+**BNB output (`tokenOut` omitted or `address(0)`)**
 
 ```bash
 curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relayer-fee?steps=1'
@@ -606,16 +610,40 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relayer-fee?steps=1'
 ```json
 {
   "data": {
-    "steps":       1,
-    "gasPrice":    "1000000000",
-    "gasEstimate": "250000",
-    "relayerFee":  "325000000000000",
-    "premiumBps":  "3000"
+    "steps":                 1,
+    "gasPrice":              "1000000000",
+    "gasEstimate":           "250000",
+    "relayerFee":            "325000000000000",
+    "relayerFeeTokenAmount": "0",
+    "relayerFeeAdapterId":   "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "relayerFeeAdapterData": "0x",
+    "premiumBps":            "3000"
   }
 }
 ```
 
-`relayerFee` = `gasEstimate × gasPrice × 1.30` (in wei). For `steps=2`: gasEstimate = 200,000 + 2×120,000 = 440,000.
+**ERC-20 output**
+
+```bash
+curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relayer-fee?steps=1&tokenOut=0x67c8b64fbcc780acbcff90f7a848eec5bccb9d45'
+```
+
+```json
+{
+  "data": {
+    "steps":                 1,
+    "gasPrice":              "1000000000",
+    "gasEstimate":           "370000",
+    "relayerFee":            "481000000000000",
+    "relayerFeeTokenAmount": "125000000000000000000",
+    "relayerFeeAdapterId":   "0xbed4079be2b2085074c8e018c29e583ba528d02bf887af9ab44f3ec550095725",
+    "relayerFeeAdapterData": "0x...",
+    "premiumBps":            "3000"
+  }
+}
+```
+
+`relayerFee` = `gasEstimate × gasPrice × 1.30`. ERC-20 gasEstimate adds 120,000 for the fee-conversion swap. `relayerFeeTokenAmount` is quoted via V2 `getAmountsIn` with a 1% slippage buffer.
 
 ---
 
@@ -818,6 +846,12 @@ Computes the EIP-712 digest the user must sign for a gasless meta-transaction.
 >
 > `adapterId` and `adapterData` are opaque bytes taken directly from the `GET /dex/route`
 > step response — the server does not derive them from an adapter name here.
+>
+> For ERC-20 output swaps, also pass `relayerFeeTokenAmount`, `relayerFeeAdapterId`, and
+> `relayerFeeAdapterData` (all returned by `GET /dex/metatx/relayer-fee?tokenOut=...`).
+> These fields default to zero/empty and can be omitted for BNB-output swaps.
+
+**BNB output**
 
 ```bash
 curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
@@ -825,15 +859,38 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
   -d '{
   "user":          "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
   "adapterId":     "0xc3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4",
-  "adapterData":   "0x000000000000000000000000000000000000000000000000000000000001f4",
+  "adapterData":   "0x...",
   "tokenIn":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
   "grossAmountIn": "500000000000000000000000",
-  "tokenOut":      "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+  "tokenOut":      "0x0000000000000000000000000000000000000000",
   "minUserOut":    "390000000000000000",
   "recipient":     "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
   "deadline":      "1745133600",
   "swapDeadline":  "1745130000",
-  "relayerFee":    "2000000000000000000000"
+  "relayerFee":    "325000000000000"
+}'
+```
+
+**ERC-20 output** (add the three fee fields from `GET /dex/metatx/relayer-fee?tokenOut=...`)
+
+```bash
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "user":                   "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+  "adapterId":              "0xbed4079be2b2085074c8e018c29e583ba528d02bf887af9ab44f3ec550095725",
+  "adapterData":            "0x...",
+  "tokenIn":                "0x55d398326f99059ff775485246999027b3197955",
+  "grossAmountIn":          "5000000000000000000",
+  "tokenOut":               "0x67c8b64fbcc780acbcff90f7a848eec5bccb9d45",
+  "minUserOut":             "95000000000000000000000000",
+  "recipient":              "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+  "deadline":               "1745133600",
+  "swapDeadline":           "1745130000",
+  "relayerFee":             "481000000000000",
+  "relayerFeeTokenAmount":  "125000000000000000000",
+  "relayerFeeAdapterId":    "0xbed4079be2b2085074c8e018c29e583ba528d02bf887af9ab44f3ec550095725",
+  "relayerFeeAdapterData":  "0x..."
 }'
 ```
 
@@ -843,33 +900,37 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
     "digest": "0x9f1e2d3c4b5a6f7e8d9c0b1a2f3e4d5c6b7a8f9e0d1c2b3a4f5e6d7c8b9a0f1e",
     "metaTxContract": "0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c",
     "order": {
-      "user":          "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-      "nonce":         "3",
-      "deadline":      "1745133600",
-      "adapterId":     "0xc3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4",
-      "tokenIn":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-      "grossAmountIn": "500000000000000000000000",
-      "tokenOut":      "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-      "minUserOut":    "390000000000000000",
-      "recipient":     "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-      "swapDeadline":  "1745130000",
-      "adapterData":   "0x000000000000000000000000000000000000000000000000000000000000002...",
-      "relayerFee":    "2000000000000000000000"
+      "user":                   "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+      "nonce":                  "3",
+      "deadline":               "1745133600",
+      "adapterId":              "0xbed4079be2b2085074c8e018c29e583ba528d02bf887af9ab44f3ec550095725",
+      "tokenIn":                "0x55d398326f99059ff775485246999027b3197955",
+      "grossAmountIn":          "5000000000000000000",
+      "tokenOut":               "0x67c8b64fbcc780acbcff90f7a848eec5bccb9d45",
+      "minUserOut":             "95000000000000000000000000",
+      "recipient":              "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+      "swapDeadline":           "1745130000",
+      "adapterData":            "0x...",
+      "relayerFee":             "481000000000000",
+      "relayerFeeTokenAmount":  "125000000000000000000",
+      "relayerFeeAdapterId":    "0xbed4079be2b2085074c8e018c29e583ba528d02bf887af9ab44f3ec550095725",
+      "relayerFeeAdapterData":  "0x..."
     },
-    "aggregatorFeeEstimate": "2500000000000000000000"
+    "aggregatorFeeEstimate": "25000000000000000"
   }
 }
 ```
 
 **Amount breakdown**
 
-| Field               | Description |
-|---|---|
-| `grossAmountIn`     | Total user approves and signs for |
-| `relayerFee`        | Deducted first — paid to the relayer (covers gas + service) |
-| `aggregatorFeeEstimate` | 0.5% of `grossAmountIn` — taken by the aggregator contract |
-| net to swap         | `grossAmountIn - relayerFee - aggregatorFee` — what hits the DEX |
-| `minUserOut`        | Minimum `tokenOut` the user must receive (slippage guard) |
+| Field | BNB output | ERC-20 output |
+|---|---|---|
+| `grossAmountIn` | Total input the user signs for | Same |
+| `aggregatorFee` | 0.5% of `grossAmountIn` — taken by the aggregator | Same |
+| net to swap | `grossAmountIn − aggregatorFee` hits the DEX | Same |
+| `relayerFee` | Min BNB deducted from output for the relayer | Min BNB the relayer gets from the fee-conversion swap |
+| `relayerFeeTokenAmount` | — (zero) | Amount of `tokenOut` sold to BNB for the relayer |
+| `minUserOut` | Min BNB user receives (after relayerFee) | Min `tokenOut` user receives (after relayerFeeTokenAmount) |
 
 ---
 
@@ -885,18 +946,21 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relay' \
   -H 'Content-Type: application/json' \
   -d '{
   "order": {
-    "user":          "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-    "nonce":         "3",
-    "deadline":      "1745133600",
-    "adapterId":     "0xc3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4",
-    "tokenIn":       "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-    "grossAmountIn": "500000000000000000000000",
-    "tokenOut":      "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "minUserOut":    "390000000000000000",
-    "recipient":     "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-    "swapDeadline":  "1745130000",
-    "adapterData":   "0x000000000000000000000000000000000000000000000000000000000000002...",
-    "relayerFee":    "2000000000000000000000"
+    "user":                  "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+    "nonce":                 "3",
+    "deadline":              "1745133600",
+    "adapterId":             "0xbed4079be2b2085074c8e018c29e583ba528d02bf887af9ab44f3ec550095725",
+    "tokenIn":               "0x55d398326f99059ff775485246999027b3197955",
+    "grossAmountIn":         "5000000000000000000",
+    "tokenOut":              "0x67c8b64fbcc780acbcff90f7a848eec5bccb9d45",
+    "minUserOut":            "95000000000000000000000000",
+    "recipient":             "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+    "swapDeadline":          "1745130000",
+    "adapterData":           "0x...",
+    "relayerFee":            "481000000000000",
+    "relayerFeeTokenAmount": "125000000000000000000",
+    "relayerFeeAdapterId":   "0xbed4079be2b2085074c8e018c29e583ba528d02bf887af9ab44f3ec550095725",
+    "relayerFeeAdapterData": "0x..."
   },
   "sig":        "0x4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b1b",
   "permitType": 0,
@@ -1162,12 +1226,15 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
       "adapterData": "0x..."
     }
   ],
-  "grossAmountIn": "5000000000000000000",
-  "minFinalOut":   "3505576500000000000000",
-  "recipient":     "0xUserWalletAddress",
-  "deadline":      1746403600,
-  "swapDeadline":  1746400000,
-  "relayerFee":    "3000000000000000"
+  "grossAmountIn":          "5000000000000000000",
+  "minFinalOut":            "3505576500000000000000",
+  "recipient":              "0xUserWalletAddress",
+  "deadline":               1746403600,
+  "swapDeadline":           1746400000,
+  "relayerFee":             "3000000000000000",
+  "relayerFeeTokenAmount":  "0",
+  "relayerFeeAdapterId":    "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "relayerFeeAdapterData":  "0x"
 }'
 ```
 
@@ -1196,11 +1263,14 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
           "adapterData": "0x..."
         }
       ],
-      "grossAmountIn": "5000000000000000000",
-      "minFinalOut":   "3505576500000000000000",
-      "recipient":     "0xUserWalletAddress",
-      "swapDeadline":  "1746400000",
-      "relayerFee":    "3000000000000000"
+      "grossAmountIn":          "5000000000000000000",
+      "minFinalOut":            "3505576500000000000000",
+      "recipient":              "0xUserWalletAddress",
+      "swapDeadline":           "1746400000",
+      "relayerFee":             "3000000000000000",
+      "relayerFeeTokenAmount":  "0",
+      "relayerFeeAdapterId":    "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "relayerFeeAdapterData":  "0x"
     },
     "aggregatorFeeEstimate": "25000000000000000"
   }
@@ -1215,7 +1285,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
 
 ## POST /dex/metatx/batch-relay
 
-Submits a signed `BatchMetaTxOrder` on-chain. The relayer pays gas; the user pays `relayerFee` from their token balance.
+Submits a signed `BatchMetaTxOrder` on-chain. The relayer pays gas and receives `relayerFee` BNB — either split from BNB output directly, or from a `relayerFeeTokenAmount` of ERC-20 output swapped to BNB atomically.
 
 ```bash
 curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-relay' \
