@@ -991,7 +991,54 @@ export async function relayBatchMetaTx(
 const ERC20_PERMIT_ABI = parseAbi([
   "function name() view returns (string)",
   "function nonces(address owner) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)",
 ]);
+
+/**
+ * Detects which permit modes are available for a token/owner pair.
+ *
+ * Probes on-chain in parallel:
+ *   - EIP-2612: calls nonces(owner) — succeeds only if the token implements it
+ *   - Permit2 readiness: reads token.allowance(owner, permit2) — max means ready
+ *   - MetaTx direct allowance: reads token.allowance(owner, metaTx) — for type 0
+ *
+ * Returns a recommended permitType:
+ *   1 (EIP-2612)  — token supports it; no prior setup needed
+ *   2 (Permit2)   — fallback; needs one-time token.approve(permit2, max) if not ready
+ *   0 (pre-approve) — last resort; user must approve MetaTx contract directly
+ */
+export async function detectPermitType(
+  token:  Hex,
+  owner:  Hex,
+  amount: bigint,
+): Promise<{
+  supportsEip2612:   boolean;
+  permit2Allowance:  bigint;
+  permit2Ready:      boolean;
+  metaTxAllowance:   bigint;
+  metaTxReady:       boolean;
+  recommended:       0 | 1 | 2;
+}> {
+  const client = getDexPublicClient();
+  const p2     = permit2Address();
+  const metaTx = metaTxAddress();
+
+  const [eip2612, p2Allow, metaTxAllow] = await Promise.allSettled([
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "nonces",    args: [owner]        }) as Promise<bigint>,
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "allowance", args: [owner, p2]    }) as Promise<bigint>,
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "allowance", args: [owner, metaTx]}) as Promise<bigint>,
+  ]);
+
+  const supportsEip2612  = eip2612.status === "fulfilled";
+  const permit2Allowance = p2Allow.status      === "fulfilled" ? p2Allow.value      : 0n;
+  const metaTxAllowance  = metaTxAllow.status  === "fulfilled" ? metaTxAllow.value  : 0n;
+  const permit2Ready     = permit2Allowance >= amount;
+  const metaTxReady      = metaTxAllowance  >= amount;
+
+  const recommended: 0 | 1 | 2 = supportsEip2612 ? 1 : 2;
+
+  return { supportsEip2612, permit2Allowance, permit2Ready, metaTxAllowance, metaTxReady, recommended };
+}
 
 /**
  * Builds the EIP-712 typed data the user must sign for an EIP-2612 permit,

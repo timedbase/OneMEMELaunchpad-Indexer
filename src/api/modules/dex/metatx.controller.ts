@@ -28,6 +28,16 @@ export class MetaTxController {
   }
 
   /**
+   * GET /dex/metatx/permit-type
+   * Detects which permit mode(s) a token supports for a given owner and amount.
+   * Query: token, owner, amount
+   */
+  @Get("permit-type")
+  getPermitType(@Query() query: Record<string, string>) {
+    return this.metatx.getPermitType(query);
+  }
+
+  /**
    * GET /dex/metatx/permit-digest
    * Returns EIP-712 typed data for an EIP-2612 permit signature.
    * Query: token, owner, amount, deadline

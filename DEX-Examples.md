@@ -19,8 +19,9 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 6. [GET /dex/tokens/:address/trades](#get-dextokensaddresstrades)
 7. [GET /dex/swaps](#get-dexswaps)
 8. [GET /dex/metatx/relayer-fee](#get-dexmetatxrelayer-fee)
-9. [GET /dex/metatx/permit-digest](#get-dexmetatxpermit-digest)
-10. [GET /dex/metatx/permit2-digest](#get-dexmetatxpermit2-digest)
+9. [GET /dex/metatx/permit-type](#get-dexmetatxpermit-type)
+10. [GET /dex/metatx/permit-digest](#get-dexmetatxpermit-digest)
+11. [GET /dex/metatx/permit2-digest](#get-dexmetatxpermit2-digest)
 11. [GET /dex/metatx/nonce/:user](#get-dexmetatxnonceuser)
 9. [GET /dex/quote](#get-dexquote)
 10. [POST /dex/swap](#post-dexswap)
@@ -646,6 +647,53 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relayer-fee?steps=1&tokenOut=
 ```
 
 `relayerFee` = `gasEstimate × gasPrice × 1.30`. ERC-20 gasEstimate adds 120,000 for the fee-conversion swap. `relayerFeeTokenAmount` is quoted via V2 `getAmountsIn` with a 1% slippage buffer.
+
+---
+
+## GET /dex/metatx/permit-type
+
+Detects which permit mode a token supports and which ones are already set up for the user. Call this before building the digest — use `recommended` to choose the right flow.
+
+**Query Parameters**
+
+| Parameter | Required | Description |
+|---|---|---|
+| `token` | Yes | ERC-20 input token address |
+| `owner` | Yes | User wallet address |
+| `amount` | Yes | Amount in wei (typically `grossAmountIn`) |
+
+```bash
+curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/permit-type?token=0x55d398326f99059ff775485246999027b3197955&owner=0x71be63f3384f5fb98995aa9b7a5b6e1234567890&amount=5000000000000000000'
+```
+
+```json
+{
+  "data": {
+    "token":           "0x55d398326f99059ff775485246999027b3197955",
+    "owner":           "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+    "amount":          "5000000000000000000",
+    "recommended":     2,
+    "supportsEip2612": false,
+    "permit2":         "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "permit2Allowance": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+    "permit2Ready":    true,
+    "metaTxAddress":   "0xOneMEMEMetaTxAddress",
+    "metaTxAllowance": "0",
+    "metaTxReady":     false,
+    "options": {
+      "0": { "name": "pre-approve", "available": true,  "ready": false },
+      "1": { "name": "eip-2612",    "available": false, "ready": false },
+      "2": { "name": "permit2",     "available": true,  "ready": true  }
+    }
+  }
+}
+```
+
+| `recommended` | When | Action needed |
+|---|---|---|
+| `1` | Token supports EIP-2612 | None — sign permit inline |
+| `2` | EIP-2612 not supported, Permit2 available | None if `permit2Ready: true`; otherwise one-time `approve(permit2, max)` |
+| `0` | Neither (rare) | `approve(metaTxAddress, amount)` before relay |
 
 ---
 

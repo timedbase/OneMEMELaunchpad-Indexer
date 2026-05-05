@@ -27,6 +27,7 @@ import {
   estimateRelayerFee,
   buildEip2612TypedData,
   buildPermit2TypedData,
+  detectPermitType,
 } from "./dex-rpc";
 import {
   parseSteps,
@@ -76,6 +77,42 @@ export class MetaTxService {
     }
 
     return { data: { user: addr, nonce: nonce.toString() } };
+  }
+
+  /**
+   * GET /dex/metatx/permit-type
+   * Detects which permit mode is available for a token/owner pair and returns
+   * the recommended permitType along with current on-chain allowance state.
+   *
+   * Query: { token, owner, amount }
+   */
+  async getPermitType(query: Record<string, string | undefined>) {
+    const token  = requireAddress(query["token"],  "token");
+    const owner  = requireAddress(query["owner"],  "owner");
+    const amount = requireBigInt(query["amount"],  "amount");
+
+    const result = await detectPermitType(token, owner, amount);
+
+    return {
+      data: {
+        token,
+        owner,
+        amount:            amount.toString(),
+        recommended:       result.recommended,
+        supportsEip2612:   result.supportsEip2612,
+        permit2:           permit2Address(),
+        permit2Allowance:  result.permit2Allowance.toString(),
+        permit2Ready:      result.permit2Ready,
+        metaTxAddress:     metaTxAddress(),
+        metaTxAllowance:   result.metaTxAllowance.toString(),
+        metaTxReady:       result.metaTxReady,
+        options: {
+          0: { name: "pre-approve",  available: true,                    ready: result.metaTxReady  },
+          1: { name: "eip-2612",     available: result.supportsEip2612,  ready: result.supportsEip2612 },
+          2: { name: "permit2",      available: true,                    ready: result.permit2Ready },
+        },
+      },
+    };
   }
 
   /**
