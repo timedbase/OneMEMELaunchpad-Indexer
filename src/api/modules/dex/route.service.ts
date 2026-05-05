@@ -38,6 +38,7 @@ import {
   quoteFlapShSell,
   defaultTickSpacing,
   aggregatorAddress,
+  batchAggregatorAddress,
 } from "./dex-rpc";
 import type { Hex } from "viem";
 import { isAddress, normalizeAddress } from "../../helpers";
@@ -359,11 +360,30 @@ export class RouteService {
     const ctTokenIn  = nativeIn  ? (NATIVE_BNB as Hex) : tokenIn;
     const ctTokenOut = nativeOut ? (NATIVE_BNB as Hex) : tokenOut;
 
+    // When all steps use the same V2 adapter, collapse to a single swap() call with a
+    // multi-hop path array. The V2 router handles the hops internally — no batchSwap
+    // contract required. Cross-adapter routes (e.g. V3 + BC) use batchSwap.
+    const v2Adapter = steps[0]!.adapter;
+    const collapseToV2 = isMulti &&
+      (v2Adapter === "PANCAKE_V2" || v2Adapter === "UNISWAP_V2") &&
+      steps.every(s => s.adapter === v2Adapter);
+
     let calldata: Hex;
-    if (!isMulti) {
-      const step = steps[0]!;
-      calldata = buildSwapCalldata(step.adapterId, ctTokenIn, amountIn, ctTokenOut, minOut, to, deadline, step.adapterData);
+    let useAggregator: boolean;
+
+    if (!isMulti || collapseToV2) {
+      useAggregator = true;
+      if (!isMulti) {
+        const step = steps[0]!;
+        calldata = buildSwapCalldata(step.adapterId, ctTokenIn, amountIn, ctTokenOut, minOut, to, deadline, step.adapterData);
+      } else {
+        // Full V2 path: [tokenIn, intermediate..., tokenOut] using WBNB addresses.
+        const fullPath: Hex[] = [tokenIn, ...steps.slice(1).map(s => s.tokenIn as Hex), tokenOut];
+        const adapterData = encodeV2AdapterData(fullPath, deadline);
+        calldata = buildSwapCalldata(steps[0]!.adapterId, ctTokenIn, amountIn, ctTokenOut, minOut, to, deadline, adapterData);
+      }
     } else {
+      useAggregator = false;
       const lastIdx   = steps.length - 1;
       const swapSteps: SwapStep[] = steps.map((s, i) => ({
         adapterId:   s.adapterId,
@@ -376,20 +396,19 @@ export class RouteService {
     }
 
     // Conservative per-step gas budget covering ERC20 transfers + V2/V3 swap overhead.
-    // batchSwap needs more base overhead for the loop and intermediate transfers.
-    const gasLimit = isMulti
-      ? (100_000n + BigInt(steps.length) * 150_000n).toString()
-      : "250000";
+    const gasLimit = (!isMulti || collapseToV2)
+      ? "250000"
+      : (100_000n + BigInt(steps.length) * 150_000n).toString();
 
     return {
       data: {
-        to:          aggregatorAddress(),
+        to:          useAggregator ? aggregatorAddress() : batchAggregatorAddress(),
         calldata,
         value:       nativeIn ? amountIn.toString() : "0",
         gasLimit,
         nativeIn,
         nativeOut,
-        singleStep:  !isMulti,
+        singleStep:  !isMulti || collapseToV2,
         tokenIn:     nativeIn  ? NATIVE_BNB : tokenIn,
         tokenOut:    nativeOut ? NATIVE_BNB : tokenOut,
         amountIn:    amountIn.toString(),
@@ -434,7 +453,7 @@ export class RouteService {
 
     return {
       data: {
-        to:          aggregatorAddress(),
+        to:          batchAggregatorAddress(),
         calldata,
         nativeIn,
         nativeOut,
