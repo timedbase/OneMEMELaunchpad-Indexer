@@ -19,7 +19,9 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 6. [GET /dex/tokens/:address/trades](#get-dextokensaddresstrades)
 7. [GET /dex/swaps](#get-dexswaps)
 8. [GET /dex/metatx/relayer-fee](#get-dexmetatxrelayer-fee)
-9. [GET /dex/metatx/nonce/:user](#get-dexmetatxnonceuser)
+9. [GET /dex/metatx/permit-digest](#get-dexmetatxpermit-digest)
+10. [GET /dex/metatx/permit2-digest](#get-dexmetatxpermit2-digest)
+11. [GET /dex/metatx/nonce/:user](#get-dexmetatxnonceuser)
 9. [GET /dex/quote](#get-dexquote)
 10. [POST /dex/swap](#post-dexswap)
 11. [POST /dex/metatx/digest](#post-dexmetatxdigest)
@@ -647,6 +649,151 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relayer-fee?steps=1&tokenOut=
 
 ---
 
+## GET /dex/metatx/permit-digest
+
+Returns the EIP-712 typed data for an **EIP-2612 permit** signature. The user passes this to `eth_signTypedData_v4` in their wallet. The resulting `(v, r, s)` are then ABI-encoded into `permitData` for `POST /dex/metatx/relay`.
+
+> Works for tokens that implement EIP-2612 (USDC, DAI, most modern ERC-20s). Does **not** work for USDT-BSC — use Permit2 instead.
+
+**Query Parameters**
+
+| Parameter | Required | Description |
+|---|---|---|
+| `token` | Yes | ERC-20 token address |
+| `owner` | Yes | User wallet address |
+| `amount` | Yes | Amount in wei (must equal `grossAmountIn` in the order) |
+| `deadline` | Yes | Unix timestamp — how long the permit is valid |
+
+```bash
+curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/permit-digest?token=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d&owner=0x71be63f3384f5fb98995aa9b7a5b6e1234567890&amount=5000000000000000000&deadline=1745133600'
+```
+
+```json
+{
+  "data": {
+    "permitType": 1,
+    "spender":    "0xOneMEMEMetaTxAddress",
+    "typedData": {
+      "domain": {
+        "name":             "USD Coin",
+        "version":          "1",
+        "chainId":          56,
+        "verifyingContract": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d"
+      },
+      "types": {
+        "Permit": [
+          { "name": "owner",    "type": "address" },
+          { "name": "spender",  "type": "address" },
+          { "name": "value",    "type": "uint256" },
+          { "name": "nonce",    "type": "uint256" },
+          { "name": "deadline", "type": "uint256" }
+        ]
+      },
+      "primaryType": "Permit",
+      "message": {
+        "owner":    "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+        "spender":  "0xOneMEMEMetaTxAddress",
+        "value":    "5000000000000000000",
+        "nonce":    "0",
+        "deadline": "1745133600"
+      }
+    },
+    "nonce": "0",
+    "permitDataEncoding": "abi.encode(uint256 deadline, uint8 v, bytes32 r, bytes32 s)",
+    "note": "Sign typedData with eth_signTypedData_v4. Encode result as abi.encode(deadline, v, r, s) for the permitData field in /relay."
+  }
+}
+```
+
+**Client-side encoding** (after signing):
+```typescript
+// sig = wallet.signTypedData(typedData)  →  { v, r, s }
+const permitData = encodeAbiParameters(
+  [{ type: "uint256" }, { type: "uint8" }, { type: "bytes32" }, { type: "bytes32" }],
+  [deadline, v, r, s],
+);
+// then POST /dex/metatx/relay with permitType: 1, permitData
+```
+
+---
+
+## GET /dex/metatx/permit2-digest
+
+Returns the EIP-712 typed data for a **Permit2 PermitTransferFrom** signature. Works for any ERC-20 including USDT-BSC, after a **one-time** `token.approve(permit2Address, type(uint256).max)` per token.
+
+**Query Parameters**
+
+| Parameter | Required | Description |
+|---|---|---|
+| `token` | Yes | ERC-20 token address |
+| `owner` | Yes | User wallet address |
+| `amount` | Yes | Amount in wei |
+| `deadline` | Yes | Unix timestamp |
+| `nonce` | No | Permit2 nonce (random uint248, auto-generated if omitted) |
+
+```bash
+curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/permit2-digest?token=0x55d398326f99059ff775485246999027b3197955&owner=0x71be63f3384f5fb98995aa9b7a5b6e1234567890&amount=5000000000000000000&deadline=1745133600'
+```
+
+```json
+{
+  "data": {
+    "permitType": 2,
+    "permit2":    "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "spender":    "0xOneMEMEMetaTxAddress",
+    "typedData": {
+      "domain": {
+        "name":             "Permit2",
+        "chainId":          56,
+        "verifyingContract": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+      },
+      "types": {
+        "PermitTransferFrom": [
+          { "name": "permitted", "type": "TokenPermissions" },
+          { "name": "spender",   "type": "address" },
+          { "name": "nonce",     "type": "uint256" },
+          { "name": "deadline",  "type": "uint256" }
+        ],
+        "TokenPermissions": [
+          { "name": "token",  "type": "address" },
+          { "name": "amount", "type": "uint256" }
+        ]
+      },
+      "primaryType": "PermitTransferFrom",
+      "message": {
+        "permitted": {
+          "token":  "0x55d398326f99059ff775485246999027b3197955",
+          "amount": "5000000000000000000"
+        },
+        "spender":  "0xOneMEMEMetaTxAddress",
+        "nonce":    "183764823764823764823764",
+        "deadline": "1745133600"
+      }
+    },
+    "nonce": "183764823764823764823764",
+    "permitDataEncoding": "abi.encode(uint256 nonce, uint256 deadline, bytes signature)",
+    "note": "Sign typedData with eth_signTypedData_v4. Encode result as abi.encode(nonce, deadline, signature) for the permitData field in /relay. Requires prior token.approve(permit2, type(uint256).max)."
+  }
+}
+```
+
+**Client-side encoding** (after signing):
+```typescript
+// signature = wallet.signTypedData(typedData)  →  hex string
+const permitData = encodeAbiParameters(
+  [{ type: "uint256" }, { type: "uint256" }, { type: "bytes" }],
+  [nonce, deadline, signature],
+);
+// then POST /dex/metatx/relay with permitType: 2, permitData
+```
+
+**One-time Permit2 setup per token** (user pays gas once, then all future swaps are gasless):
+```typescript
+await token.approve("0x000000000022D473030F116dDEE9F6B43aC78BA3", maxUint256);
+```
+
+---
+
 ## GET /dex/metatx/nonce/:user
 
 Returns the current nonce for a user on the OneMEMEMetaTx contract.
@@ -968,7 +1115,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relay' \
 }'
 ```
 
-**EIP-2612 permit (single approve + swap)**
+**EIP-2612 permit** — `permitData` = `abi.encode(deadline, v, r, s)` from `GET /dex/metatx/permit-digest`
 
 ```bash
 curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relay' \
@@ -977,7 +1124,20 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relay' \
   "order":      { "...": "MetaTxOrder from digest response" },
   "sig":        "0x...",
   "permitType": 1,
-  "permitData": "0x<abi-encoded EIP-2612 permit signature>"
+  "permitData": "0x<abi.encode(deadline, v, r, s)>"
+}'
+```
+
+**Permit2** — `permitData` = `abi.encode(nonce, deadline, signature)` from `GET /dex/metatx/permit2-digest`
+
+```bash
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relay' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "order":      { "...": "MetaTxOrder from digest response" },
+  "sig":        "0x...",
+  "permitType": 2,
+  "permitData": "0x<abi.encode(nonce, deadline, signature)>"
 }'
 ```
 

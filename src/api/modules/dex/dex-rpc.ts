@@ -83,6 +83,13 @@ export function metaTxAddress(): Hex {
   return process.env.METATX_ADDRESS as Hex;
 }
 
+// Permit2 universal contract — same address on every EVM chain.
+const DEFAULT_PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+
+export function permit2Address(): Hex {
+  return (process.env.PERMIT2_ADDRESS ?? DEFAULT_PERMIT2) as Hex;
+}
+
 // ─── Adapter IDs ──────────────────────────────────────────────────────────────
 
 /**
@@ -977,4 +984,127 @@ export async function relayBatchMetaTx(
     functionName: "batchExecuteMetaTx",
     args:         [order, sig, permit],
   });
+}
+
+// ─── Permit helpers ───────────────────────────────────────────────────────────
+
+const ERC20_PERMIT_ABI = parseAbi([
+  "function name() view returns (string)",
+  "function nonces(address owner) view returns (uint256)",
+]);
+
+/**
+ * Builds the EIP-712 typed data the user must sign for an EIP-2612 permit,
+ * and returns the abi.encode recipe for converting (v, r, s) → permitData.
+ *
+ * Not all tokens support EIP-2612 (USDT-BSC does not). Callers should catch
+ * errors and fall back to Permit2 or a pre-approval.
+ */
+export async function buildEip2612TypedData(
+  token:    Hex,
+  owner:    Hex,
+  spender:  Hex,
+  amount:   bigint,
+  deadline: bigint,
+): Promise<{
+  typedData: object;
+  nonce:     string;
+  permitDataEncoding: string;
+}> {
+  const client  = getDexPublicClient();
+  const chainId = client.chain?.id ?? 56;
+
+  const [name, nonce] = await Promise.all([
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "name" }) as Promise<string>,
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "nonces", args: [owner] }) as Promise<bigint>,
+  ]);
+
+  const typedData = {
+    domain: {
+      name,
+      version:           "1",
+      chainId,
+      verifyingContract: token,
+    },
+    types: {
+      Permit: [
+        { name: "owner",    type: "address" },
+        { name: "spender",  type: "address" },
+        { name: "value",    type: "uint256" },
+        { name: "nonce",    type: "uint256" },
+        { name: "deadline", type: "uint256" },
+      ],
+    },
+    primaryType: "Permit",
+    message: {
+      owner,
+      spender,
+      value:    amount.toString(),
+      nonce:    nonce.toString(),
+      deadline: deadline.toString(),
+    },
+  };
+
+  return {
+    typedData,
+    nonce: nonce.toString(),
+    permitDataEncoding: "abi.encode(uint256 deadline, uint8 v, bytes32 r, bytes32 s)",
+  };
+}
+
+/**
+ * Builds the EIP-712 typed data the user must sign for a Permit2
+ * PermitTransferFrom authorisation, and the abi.encode recipe for
+ * converting the signature → permitData.
+ *
+ * The user must have previously called token.approve(permit2, type(uint256).max)
+ * once. After that, all authorisations are signed off-chain with this flow.
+ */
+export async function buildPermit2TypedData(
+  token:    Hex,
+  spender:  Hex,
+  amount:   bigint,
+  nonce:    bigint,
+  deadline: bigint,
+): Promise<{
+  typedData: object;
+  nonce:     string;
+  permitDataEncoding: string;
+}> {
+  const client  = getDexPublicClient();
+  const chainId = client.chain?.id ?? 56;
+  const p2Addr  = permit2Address();
+
+  const typedData = {
+    domain: {
+      name:              "Permit2",
+      chainId,
+      verifyingContract: p2Addr,
+    },
+    types: {
+      PermitTransferFrom: [
+        { name: "permitted", type: "TokenPermissions" },
+        { name: "spender",   type: "address" },
+        { name: "nonce",     type: "uint256" },
+        { name: "deadline",  type: "uint256" },
+      ],
+      TokenPermissions: [
+        { name: "token",  type: "address" },
+        { name: "amount", type: "uint256" },
+      ],
+    },
+    primaryType: "PermitTransferFrom",
+    message: {
+      permitted: { token, amount: amount.toString() },
+      spender,
+      nonce:    nonce.toString(),
+      deadline: deadline.toString(),
+    },
+  };
+
+  return {
+    typedData,
+    nonce: nonce.toString(),
+    permitDataEncoding: "abi.encode(uint256 nonce, uint256 deadline, bytes signature)",
+  };
 }

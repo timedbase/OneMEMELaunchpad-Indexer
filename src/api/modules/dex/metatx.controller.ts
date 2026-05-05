@@ -28,6 +28,26 @@ export class MetaTxController {
   }
 
   /**
+   * GET /dex/metatx/permit-digest
+   * Returns EIP-712 typed data for an EIP-2612 permit signature.
+   * Query: token, owner, amount, deadline
+   */
+  @Get("permit-digest")
+  buildPermitDigest(@Query() query: Record<string, string>) {
+    return this.metatx.buildPermitDigest(query);
+  }
+
+  /**
+   * GET /dex/metatx/permit2-digest
+   * Returns EIP-712 typed data for a Permit2 PermitTransferFrom signature.
+   * Query: token, owner, amount, deadline, nonce?
+   */
+  @Get("permit2-digest")
+  buildPermit2Digest(@Query() query: Record<string, string>) {
+    return this.metatx.buildPermit2Digest(query);
+  }
+
+  /**
    * GET /dex/metatx/relayer-fee
    * Returns a suggested relayerFee in BNB wei.
    * Based on live BSC gas price + a 30% relayer premium.

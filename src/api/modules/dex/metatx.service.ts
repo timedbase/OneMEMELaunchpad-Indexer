@@ -23,7 +23,10 @@ import {
   verifyOrderSignature,
   verifyBatchOrderSignature,
   metaTxAddress,
+  permit2Address,
   estimateRelayerFee,
+  buildEip2612TypedData,
+  buildPermit2TypedData,
 } from "./dex-rpc";
 import {
   parseSteps,
@@ -73,6 +76,77 @@ export class MetaTxService {
     }
 
     return { data: { user: addr, nonce: nonce.toString() } };
+  }
+
+  /**
+   * GET /dex/metatx/permit-digest
+   * Returns the EIP-712 typed data for an EIP-2612 permit signature.
+   * The user signs this with eth_signTypedData_v4; the resulting (v, r, s)
+   * are encoded as abi.encode(deadline, v, r, s) → permitData for /relay.
+   *
+   * Query: { token, owner, amount, deadline }
+   */
+  async buildPermitDigest(query: Record<string, string | undefined>) {
+    const token    = requireAddress(query["token"],  "token");
+    const owner    = requireAddress(query["owner"],  "owner");
+    const amount   = requireBigInt(query["amount"],  "amount");
+    const deadline = requireBigInt(query["deadline"], "deadline");
+
+    let result: Awaited<ReturnType<typeof buildEip2612TypedData>>;
+    try {
+      result = await buildEip2612TypedData(token, owner, metaTxAddress(), amount, deadline);
+    } catch (err) {
+      throw new BadRequestException(
+        `Token does not support EIP-2612 permit or RPC error: ${(err as Error).message}`,
+      );
+    }
+
+    return {
+      data: {
+        permitType:   1,
+        spender:      metaTxAddress(),
+        ...result,
+        note: "Sign typedData with eth_signTypedData_v4. Encode result as abi.encode(deadline, v, r, s) for the permitData field in /relay.",
+      },
+    };
+  }
+
+  /**
+   * GET /dex/metatx/permit2-digest
+   * Returns the EIP-712 typed data for a Permit2 PermitTransferFrom signature.
+   * The user must have approved the Permit2 contract once (token.approve(permit2, max)).
+   * Sign with eth_signTypedData_v4; encode as abi.encode(nonce, deadline, sig) → permitData.
+   *
+   * Query: { token, owner, amount, deadline, nonce? }
+   */
+  async buildPermit2Digest(query: Record<string, string | undefined>) {
+    const token    = requireAddress(query["token"],  "token");
+    const amount   = requireBigInt(query["amount"],  "amount");
+    const deadline = requireBigInt(query["deadline"], "deadline");
+
+    // Permit2 uses a random uint248 nonce (bitmap-based — any unused value works).
+    // If the caller supplies one, use it; otherwise generate a random one.
+    let nonce: bigint;
+    if (query["nonce"] !== undefined) {
+      nonce = requireBigInt(query["nonce"], "nonce");
+    } else {
+      // Random 128-bit nonce — collision probability is negligible.
+      const rand = BigInt("0x" + Array.from(crypto.getRandomValues(new Uint8Array(16)))
+        .map(b => b.toString(16).padStart(2, "0")).join(""));
+      nonce = rand;
+    }
+
+    const result = await buildPermit2TypedData(token, metaTxAddress(), amount, nonce, deadline);
+
+    return {
+      data: {
+        permitType:   2,
+        permit2:      permit2Address(),
+        spender:      metaTxAddress(),
+        ...result,
+        note: "Sign typedData with eth_signTypedData_v4. Encode result as abi.encode(nonce, deadline, signature) for the permitData field in /relay. Requires prior token.approve(permit2, type(uint256).max).",
+      },
+    };
   }
 
   /**
