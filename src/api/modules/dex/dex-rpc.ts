@@ -712,7 +712,7 @@ export const AGGREGATOR_ABI = parseAbi([
 ]);
 
 export const METATX_ABI = parseAbi([
-  "function executeMetaTx((address user, uint256 nonce, uint256 deadline, bytes32 adapterId, address tokenIn, uint256 grossAmountIn, address tokenOut, uint256 minUserOut, address recipient, uint256 swapDeadline, bytes adapterData, uint256 relayerFee) order, bytes sig, (uint8 permitType, bytes data) permit) returns (uint256 amountOut)",
+  "function executeMetaTx((address user, uint256 nonce, uint256 deadline, bytes32 adapterId, address tokenIn, uint256 grossAmountIn, address tokenOut, uint256 minUserOut, address recipient, uint256 swapDeadline, bytes adapterData, uint256 relayerFee) order, bytes sig, (uint8 permitType, bytes data) permit)",
   "function orderDigest((address user, uint256 nonce, uint256 deadline, bytes32 adapterId, address tokenIn, uint256 grossAmountIn, address tokenOut, uint256 minUserOut, address recipient, uint256 swapDeadline, bytes adapterData, uint256 relayerFee) order) view returns (bytes32)",
   "function nonces(address user) view returns (uint256)",
 ]);
