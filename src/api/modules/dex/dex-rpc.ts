@@ -725,6 +725,7 @@ export const BATCH_AGGREGATOR_ABI = parseAbi([
 export const BATCH_METATX_ABI = parseAbi([
   "function batchExecuteMetaTx((address user, uint256 nonce, uint256 deadline, (bytes32 adapterId, address tokenIn, address tokenOut, uint256 minOut, bytes adapterData)[] steps, uint256 grossAmountIn, uint256 minFinalOut, address recipient, uint256 swapDeadline, uint256 relayerFee) order, bytes sig, (uint8 permitType, bytes data) permit) returns (uint256 amountOut)",
   "function batchOrderDigest((address user, uint256 nonce, uint256 deadline, (bytes32 adapterId, address tokenIn, address tokenOut, uint256 minOut, bytes adapterData)[] steps, uint256 grossAmountIn, uint256 minFinalOut, address recipient, uint256 swapDeadline, uint256 relayerFee) order) view returns (bytes32)",
+  "event BatchMetaTxExecuted(address indexed user, address indexed relayer, address tokenIn, address tokenOut, uint256 grossAmountIn, uint256 amountOut, uint256 relayerFee, uint256 nonce, uint256 stepCount)",
 ]);
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
