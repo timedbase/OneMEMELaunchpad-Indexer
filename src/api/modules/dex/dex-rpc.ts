@@ -870,6 +870,104 @@ export async function getOrderDigest(order: MetaTxOrder): Promise<Hex> {
   }) as Promise<Hex>;
 }
 
+// ─── EIP-712 typed data builders ─────────────────────────────────────────────
+
+// MetaTx domain — name and version match the contract constructor.
+function metaTxDomain() {
+  return {
+    name:              "OneMEMEMetaTx",
+    version:           "1",
+    chainId:           getDexPublicClient().chain?.id ?? 56,
+    verifyingContract: metaTxAddress(),
+  };
+}
+
+const META_ORDER_TYPES = {
+  MetaTxOrder: [
+    { name: "user",                  type: "address" },
+    { name: "nonce",                 type: "uint256" },
+    { name: "deadline",              type: "uint256" },
+    { name: "adapterId",             type: "bytes32" },
+    { name: "tokenIn",               type: "address" },
+    { name: "grossAmountIn",         type: "uint256" },
+    { name: "tokenOut",              type: "address" },
+    { name: "minUserOut",            type: "uint256" },
+    { name: "recipient",             type: "address" },
+    { name: "swapDeadline",          type: "uint256" },
+    { name: "adapterData",           type: "bytes"   },
+    { name: "relayerFee",            type: "uint256" },
+    { name: "relayerFeeTokenAmount", type: "uint256" },
+    { name: "relayerFeeAdapterId",   type: "bytes32" },
+    { name: "relayerFeeAdapterData", type: "bytes"   },
+  ],
+} as const;
+
+const BATCH_META_ORDER_TYPES = {
+  BatchMetaTxOrder: [
+    { name: "user",                  type: "address"   },
+    { name: "nonce",                 type: "uint256"   },
+    { name: "deadline",              type: "uint256"   },
+    { name: "steps",                 type: "SwapStep[]"},
+    { name: "grossAmountIn",         type: "uint256"   },
+    { name: "minFinalOut",           type: "uint256"   },
+    { name: "recipient",             type: "address"   },
+    { name: "swapDeadline",          type: "uint256"   },
+    { name: "relayerFee",            type: "uint256"   },
+    { name: "relayerFeeTokenAmount", type: "uint256"   },
+    { name: "relayerFeeAdapterId",   type: "bytes32"   },
+    { name: "relayerFeeAdapterData", type: "bytes"     },
+  ],
+  SwapStep: [
+    { name: "adapterId",   type: "bytes32" },
+    { name: "tokenIn",     type: "address" },
+    { name: "tokenOut",    type: "address" },
+    { name: "minOut",      type: "uint256" },
+    { name: "adapterData", type: "bytes"   },
+  ],
+} as const;
+
+/** EIP-712 typed data for eth_signTypedData_v4 — single-step MetaTxOrder. */
+export function buildMetaTxTypedData(order: MetaTxOrder) {
+  return {
+    domain:      metaTxDomain(),
+    types:       META_ORDER_TYPES,
+    primaryType: "MetaTxOrder" as const,
+    message: {
+      ...order,
+      nonce:                 order.nonce.toString(),
+      deadline:              order.deadline.toString(),
+      grossAmountIn:         order.grossAmountIn.toString(),
+      minUserOut:            order.minUserOut.toString(),
+      swapDeadline:          order.swapDeadline.toString(),
+      relayerFee:            order.relayerFee.toString(),
+      relayerFeeTokenAmount: order.relayerFeeTokenAmount.toString(),
+    },
+  };
+}
+
+/** EIP-712 typed data for eth_signTypedData_v4 — BatchMetaTxOrder. */
+export function buildBatchMetaTxTypedData(order: BatchMetaTxOrder) {
+  return {
+    domain:      metaTxDomain(),
+    types:       BATCH_META_ORDER_TYPES,
+    primaryType: "BatchMetaTxOrder" as const,
+    message: {
+      ...order,
+      nonce:                 order.nonce.toString(),
+      deadline:              order.deadline.toString(),
+      grossAmountIn:         order.grossAmountIn.toString(),
+      minFinalOut:           order.minFinalOut.toString(),
+      swapDeadline:          order.swapDeadline.toString(),
+      relayerFee:            order.relayerFee.toString(),
+      relayerFeeTokenAmount: order.relayerFeeTokenAmount.toString(),
+      steps:                 order.steps.map(s => ({
+        ...s,
+        minOut: s.minOut.toString(),
+      })),
+    },
+  };
+}
+
 // ─── Relay execution ──────────────────────────────────────────────────────────
 
 export async function relayMetaTx(

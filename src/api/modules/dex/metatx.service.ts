@@ -27,6 +27,8 @@ import {
   estimateRelayerFee,
   buildEip2612TypedData,
   buildPermit2TypedData,
+  buildMetaTxTypedData,
+  buildBatchMetaTxTypedData,
   detectPermitType,
 } from "./dex-rpc";
 import {
@@ -321,6 +323,7 @@ export class MetaTxService {
     return {
       data: {
         digest,
+        typedData:      buildMetaTxTypedData(order),
         metaTxContract: metaTxAddress(),
         order: {
           ...order,
@@ -332,7 +335,7 @@ export class MetaTxService {
           relayerFee:             order.relayerFee.toString(),
           relayerFeeTokenAmount:  order.relayerFeeTokenAmount.toString(),
         },
-        aggregatorFeeEstimate: (grossAmountIn / 200n).toString() /* 0.5% protocol fee */,
+        aggregatorFeeEstimate: (grossAmountIn / 200n).toString(),
       },
     };
   }
@@ -505,18 +508,20 @@ export class MetaTxService {
     return {
       data: {
         digest,
+        typedData:      buildBatchMetaTxTypedData(order),
         metaTxContract: metaTxAddress(),
         order: {
           ...order,
-          nonce:         order.nonce.toString(),
-          deadline:      order.deadline.toString(),
-          grossAmountIn: order.grossAmountIn.toString(),
-          minFinalOut:   order.minFinalOut.toString(),
-          swapDeadline:  order.swapDeadline.toString(),
-          relayerFee:    order.relayerFee.toString(),
-          steps:         order.steps.map(s => ({ ...s, minOut: s.minOut.toString() })),
+          nonce:                 order.nonce.toString(),
+          deadline:              order.deadline.toString(),
+          grossAmountIn:         order.grossAmountIn.toString(),
+          minFinalOut:           order.minFinalOut.toString(),
+          swapDeadline:          order.swapDeadline.toString(),
+          relayerFee:            order.relayerFee.toString(),
+          relayerFeeTokenAmount: order.relayerFeeTokenAmount.toString(),
+          steps:                 order.steps.map(s => ({ ...s, minOut: s.minOut.toString() })),
         },
-        aggregatorFeeEstimate: (grossAmountIn / 200n).toString() /* 0.5% protocol fee */,
+        aggregatorFeeEstimate: (grossAmountIn / 200n).toString(),
       },
     };
   }

@@ -1062,9 +1062,9 @@ Step 5c [if recommended=0] user calls token.approve(metaTxAddress, grossAmountIn
 Step 6  POST /dex/metatx/digest  { order fields }
         → returns digest + echo of the full order
 
-Step 7  user signs digest with eth_sign or personal_sign (NOT signTypedData — the contract
-        uses ecrecover on the raw digest returned by orderDigest())
-        → 65-byte signature (0x + 130 hex chars)
+Step 7  user signs with eth_signTypedData_v4 using the typedData field from Step 6
+        → wallet shows human-readable breakdown of what is being signed
+        → produces a 65-byte signature (0x + 130 hex chars)
 
 Step 8  POST /dex/metatx/relay  { order, sig, permitType, permitData }
         → relayer submits on-chain, user receives tokenOut
@@ -1117,6 +1117,35 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
 {
   "data": {
     "digest": "0x9f1e2d3c4b5a6f7e8d9c0b1a2f3e4d5c6b7a8f9e0d1c2b3a4f5e6d7c8b9a0f1e",
+    "typedData": {
+      "domain": {
+        "name":             "OneMEMEMetaTx",
+        "version":          "1",
+        "chainId":          56,
+        "verifyingContract": "0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c"
+      },
+      "types": {
+        "MetaTxOrder": [
+          { "name": "user",                  "type": "address" },
+          { "name": "nonce",                 "type": "uint256" },
+          { "name": "deadline",              "type": "uint256" },
+          { "name": "adapterId",             "type": "bytes32" },
+          { "name": "tokenIn",               "type": "address" },
+          { "name": "grossAmountIn",         "type": "uint256" },
+          { "name": "tokenOut",              "type": "address" },
+          { "name": "minUserOut",            "type": "uint256" },
+          { "name": "recipient",             "type": "address" },
+          { "name": "swapDeadline",          "type": "uint256" },
+          { "name": "adapterData",           "type": "bytes"   },
+          { "name": "relayerFee",            "type": "uint256" },
+          { "name": "relayerFeeTokenAmount", "type": "uint256" },
+          { "name": "relayerFeeAdapterId",   "type": "bytes32" },
+          { "name": "relayerFeeAdapterData", "type": "bytes"   }
+        ]
+      },
+      "primaryType": "MetaTxOrder",
+      "message": { "...": "all order fields as strings" }
+    },
     "metaTxContract": "0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c",
     "order": {
       "user":                   "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
@@ -1139,6 +1168,8 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
   }
 }
 ```
+
+> **Signing:** pass `typedData` to `eth_signTypedData_v4` — the wallet shows the user a human-readable breakdown and signs the EIP-712 hash. Do **not** use `eth_sign` or `personal_sign` — they add a prefix that breaks `ecrecover` in the contract. The `digest` field is provided for verification only.
 
 **Amount breakdown**
 
