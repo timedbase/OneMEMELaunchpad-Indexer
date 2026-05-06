@@ -872,6 +872,28 @@ export async function getOrderDigest(order: MetaTxOrder): Promise<Hex> {
 
 // ─── EIP-712 typed data builders ─────────────────────────────────────────────
 
+// Known ORDER_TYPEHASH values — used to detect which contract version is deployed.
+const ORDER_TYPEHASH_V1 = "0xbff009319ca9d7794c33c6589eda4a9c8144963ab5b3d6043a41978cf100d0d4"; // 12-field (without relayerFee token fields)
+const ORDER_TYPEHASH_V2 = "0xf56bc6a21a048cfc9303611ca49f874028a372572e2a42a06c56774f991a98a0"; // 15-field (current)
+
+let _contractTypehashVersion: 1 | 2 | null = null;
+
+/** Reads the ORDER_TYPEHASH from the deployed contract and caches the result. */
+async function getContractTypehashVersion(): Promise<1 | 2> {
+  if (_contractTypehashVersion !== null) return _contractTypehashVersion;
+  try {
+    const typehash = await getDexPublicClient().readContract({
+      address:      metaTxAddress(),
+      abi:          parseAbi(["function ORDER_TYPEHASH() view returns (bytes32)"]),
+      functionName: "ORDER_TYPEHASH",
+    }) as Hex;
+    _contractTypehashVersion = typehash.toLowerCase() === ORDER_TYPEHASH_V1 ? 1 : 2;
+  } catch {
+    _contractTypehashVersion = 2; // assume current version if call fails
+  }
+  return _contractTypehashVersion;
+}
+
 // MetaTx domain — name and version match the contract constructor.
 function metaTxDomain() {
   return {
@@ -926,23 +948,49 @@ const BATCH_META_ORDER_TYPES = {
   ],
 } as const;
 
-/** EIP-712 typed data for eth_signTypedData_v4 — single-step MetaTxOrder. */
-export function buildMetaTxTypedData(order: MetaTxOrder) {
-  return {
-    domain:      metaTxDomain(),
-    types:       META_ORDER_TYPES,
-    primaryType: "MetaTxOrder" as const,
-    message: {
-      ...order,
-      nonce:                 order.nonce.toString(),
-      deadline:              order.deadline.toString(),
-      grossAmountIn:         order.grossAmountIn.toString(),
-      minUserOut:            order.minUserOut.toString(),
-      swapDeadline:          order.swapDeadline.toString(),
-      relayerFee:            order.relayerFee.toString(),
-      relayerFeeTokenAmount: order.relayerFeeTokenAmount.toString(),
-    },
+// V1 types — 12-field schema for contracts deployed before relayerFee token fields.
+const META_ORDER_TYPES_V1 = {
+  MetaTxOrder: [
+    { name: "user",          type: "address" },
+    { name: "nonce",         type: "uint256" },
+    { name: "deadline",      type: "uint256" },
+    { name: "adapterId",     type: "bytes32" },
+    { name: "tokenIn",       type: "address" },
+    { name: "grossAmountIn", type: "uint256" },
+    { name: "tokenOut",      type: "address" },
+    { name: "minUserOut",    type: "uint256" },
+    { name: "recipient",     type: "address" },
+    { name: "swapDeadline",  type: "uint256" },
+    { name: "adapterData",   type: "bytes"   },
+    { name: "relayerFee",    type: "uint256" },
+  ],
+} as const;
+
+/** EIP-712 typed data for eth_signTypedData_v4 — single-step MetaTxOrder.
+ *  Detects the deployed contract version and uses the matching field schema. */
+export async function buildMetaTxTypedData(order: MetaTxOrder) {
+  const version = await getContractTypehashVersion();
+  const types   = version === 1 ? META_ORDER_TYPES_V1 : META_ORDER_TYPES;
+  const message: Record<string, unknown> = {
+    user:          order.user,
+    nonce:         order.nonce.toString(),
+    deadline:      order.deadline.toString(),
+    adapterId:     order.adapterId,
+    tokenIn:       order.tokenIn,
+    grossAmountIn: order.grossAmountIn.toString(),
+    tokenOut:      order.tokenOut,
+    minUserOut:    order.minUserOut.toString(),
+    recipient:     order.recipient,
+    swapDeadline:  order.swapDeadline.toString(),
+    adapterData:   order.adapterData,
+    relayerFee:    order.relayerFee.toString(),
   };
+  if (version === 2) {
+    message["relayerFeeTokenAmount"] = order.relayerFeeTokenAmount.toString();
+    message["relayerFeeAdapterId"]   = order.relayerFeeAdapterId;
+    message["relayerFeeAdapterData"] = order.relayerFeeAdapterData;
+  }
+  return { domain: metaTxDomain(), types, primaryType: "MetaTxOrder" as const, message };
 }
 
 /** EIP-712 typed data for eth_signTypedData_v4 — BatchMetaTxOrder. */
