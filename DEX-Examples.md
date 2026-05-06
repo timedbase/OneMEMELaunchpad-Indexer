@@ -7,6 +7,8 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 
 **Native BNB:** Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in any swap, quote, or route endpoint. The API normalises it to WBNB internally. Responses include `nativeIn: true` / `nativeOut: true` flags and a `value` field (wei string) indicating how much `msg.value` the caller must attach.
 
+**MetaTx exception:** For `POST /dex/metatx/digest` and `/batch-digest`, pass `tokenOut = address(0)` literally when you want native BNB output — do **not** substitute WBNB. The MetaTx contract uses `tokenOut == address(0)` to detect native BNB and split the relayer fee directly from BNB output. Passing WBNB triggers the ERC-20 fee-swap path and requires `relayerFeeTokenAmount > 0`.
+
 ---
 
 ## Table of Contents
@@ -1212,7 +1214,10 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
 Submits a signed MetaTxOrder to `OneMEMEMetaTx.executeMetaTx()` on-chain.
 Requires `RELAYER_PRIVATE_KEY` to be configured on the server.
 
-**No permit (token already approved)**
+> **Signing reminder:** sign the `typedData` field from the digest response using `eth_signTypedData_v4`.
+> Do **not** sign the raw `digest` bytes32 — `eth_sign`/`personal_sign` add a prefix that breaks `ecrecover`.
+
+**BNB output (token already approved)**
 
 ```bash
 curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relay' \
@@ -1225,21 +1230,23 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relay' \
     "adapterId":             "0xbed4079be2b2085074c8e018c29e583ba528d02bf887af9ab44f3ec550095725",
     "tokenIn":               "0x55d398326f99059ff775485246999027b3197955",
     "grossAmountIn":         "5000000000000000000",
-    "tokenOut":              "0x67c8b64fbcc780acbcff90f7a848eec5bccb9d45",
-    "minUserOut":            "95000000000000000000000000",
+    "tokenOut":              "0x0000000000000000000000000000000000000000",
+    "minUserOut":            "8200000000000000",
     "recipient":             "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
     "swapDeadline":          "1745130000",
     "adapterData":           "0x...",
-    "relayerFee":            "481000000000000",
-    "relayerFeeTokenAmount": "125000000000000000000",
-    "relayerFeeAdapterId":   "0xbed4079be2b2085074c8e018c29e583ba528d02bf887af9ab44f3ec550095725",
-    "relayerFeeAdapterData": "0x..."
+    "relayerFee":            "325000000000000",
+    "relayerFeeTokenAmount": "0",
+    "relayerFeeAdapterId":   "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "relayerFeeAdapterData": "0x"
   },
   "sig":        "0x4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b1b",
   "permitType": 0,
   "permitData": "0x"
 }'
 ```
+
+> For **ERC-20 output** swaps, set `tokenOut` to the ERC-20 address and supply non-zero `relayerFeeTokenAmount` + `relayerFeeAdapterId` + `relayerFeeAdapterData` (from `GET /dex/metatx/relayer-fee?tokenOut=...`).
 
 **EIP-2612 permit** — `permitData` = `abi.encode(deadline, v, r, s)` from `GET /dex/metatx/permit-digest`
 
