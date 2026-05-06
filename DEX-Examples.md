@@ -1518,8 +1518,41 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
 ```json
 {
   "data": {
-    "digest":          "0xabcdef...",
-    "metaTxContract":  "0xOneMEMEMetaTxAddress",
+    "digest": "0xabcdef...",
+    "typedData": {
+      "domain": {
+        "name":             "OneMEMEMetaTx",
+        "version":          "1",
+        "chainId":          56,
+        "verifyingContract": "0xOneMEMEMetaTxAddress"
+      },
+      "types": {
+        "BatchMetaTxOrder": [
+          { "name": "user",                  "type": "address"    },
+          { "name": "nonce",                 "type": "uint256"    },
+          { "name": "deadline",              "type": "uint256"    },
+          { "name": "steps",                 "type": "SwapStep[]" },
+          { "name": "grossAmountIn",         "type": "uint256"    },
+          { "name": "minFinalOut",           "type": "uint256"    },
+          { "name": "recipient",             "type": "address"    },
+          { "name": "swapDeadline",          "type": "uint256"    },
+          { "name": "relayerFee",            "type": "uint256"    },
+          { "name": "relayerFeeTokenAmount", "type": "uint256"    },
+          { "name": "relayerFeeAdapterId",   "type": "bytes32"    },
+          { "name": "relayerFeeAdapterData", "type": "bytes"      }
+        ],
+        "SwapStep": [
+          { "name": "adapterId",   "type": "bytes32" },
+          { "name": "tokenIn",     "type": "address" },
+          { "name": "tokenOut",    "type": "address" },
+          { "name": "minOut",      "type": "uint256" },
+          { "name": "adapterData", "type": "bytes"   }
+        ]
+      },
+      "primaryType": "BatchMetaTxOrder",
+      "message": { "...": "all order fields as strings" }
+    },
+    "metaTxContract": "0xOneMEMEMetaTxAddress",
     "order": {
       "user":          "0xUserWalletAddress",
       "nonce":         "7",
@@ -1554,7 +1587,9 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
 }
 ```
 
-Sign the returned `digest` (step 7), then submit via `POST /dex/metatx/batch-relay` (step 8).
+> **Signing:** pass `typedData` to `eth_signTypedData_v4` — same as the single-step flow. Do **not** sign the raw `digest` directly.
+
+Sign the `typedData` (step 7), then submit via `POST /dex/metatx/batch-relay` (step 8).
 
 ---
 
