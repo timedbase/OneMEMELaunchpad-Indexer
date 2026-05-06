@@ -1063,9 +1063,25 @@ Step 5c [if recommended=0] user calls token.approve(metaTxAddress, grossAmountIn
 Step 6  POST /dex/metatx/digest  { order fields }
         → returns digest + echo of the full order
 
-Step 7  user signs with eth_signTypedData_v4 using the typedData field from Step 6
-        → wallet shows human-readable breakdown of what is being signed
-        → produces a 65-byte signature (0x + 130 hex chars)
+Step 7  sign typedData — use eth_signTypedData_v4 ONLY (NOT eth_sign / personal_sign / signMessage)
+
+        // ✅ MetaMask / EIP-1193 wallet
+        const sig = await window.ethereum.request({
+          method: 'eth_signTypedData_v4',
+          params: [userAddress, JSON.stringify(typedData)],  // must be JSON string
+        });
+
+        // ✅ wagmi useSignTypedData
+        signTypedData({
+          domain:      typedData.domain,
+          types:       typedData.types,
+          primaryType: typedData.primaryType,
+          message:     typedData.message,  // keep uint256 values as strings
+        });
+
+        ❌ DO NOT use eth_sign / personal_sign / signMessage(digest) — those methods
+           add a "\x19Ethereum Signed Message:" prefix that breaks ecrecover.
+           The digest field in the response is for verification only, not for signing.
 
 Step 8  POST /dex/metatx/relay  { order, sig, permitType, permitData }
         → relayer submits on-chain, user receives tokenOut
@@ -1170,7 +1186,8 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
 }
 ```
 
-> **Signing:** pass `typedData` to `eth_signTypedData_v4` — the wallet shows the user a human-readable breakdown and signs the EIP-712 hash. Do **not** use `eth_sign` or `personal_sign` — they add a prefix that breaks `ecrecover` in the contract. The `digest` field is provided for verification only.
+> **Signing:** use `eth_signTypedData_v4` with `JSON.stringify(typedData)` — see Step 7 above for exact code.
+> The `digest` field in the response is for verification only — **do not sign it**. Signing the bytes32 digest with `eth_sign` / `personal_sign` / `signMessage` adds a prefix that breaks `ecrecover` in the contract.
 
 **Amount breakdown**
 
@@ -1511,7 +1528,7 @@ Step 6  POST /dex/metatx/batch-digest  { user, steps[], grossAmountIn, minFinalO
                                           relayerFeeAdapterId, relayerFeeAdapterData }
         → returns digest + echo of the full BatchMetaTxOrder
 
-Step 7  user signs digest
+Step 7  sign typedData — same code as single-step Step 7 above (eth_signTypedData_v4, JSON.stringify)
 Step 8  POST /dex/metatx/batch-relay  { order, sig, permitType, permitData }
 ```
 
@@ -1622,7 +1639,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
 }
 ```
 
-> **Signing:** pass `typedData` to `eth_signTypedData_v4` — same as the single-step flow. Do **not** sign the raw `digest` directly.
+> **Signing:** use `eth_signTypedData_v4` with `JSON.stringify(typedData)` — same as the single-step flow. Do **not** sign the raw `digest`.
 
 Sign the `typedData` (step 7), then submit via `POST /dex/metatx/batch-relay` (step 8).
 
