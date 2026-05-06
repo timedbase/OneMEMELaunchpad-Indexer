@@ -27,6 +27,7 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 10. [POST /dex/swap](#post-dexswap)
 11. [POST /dex/metatx/digest](#post-dexmetatxdigest)
 12. [POST /dex/metatx/relay](#post-dexmetatxrelay)
+13. [POST /dex/metatx/verify-sig](#post-dexmetatxverify-sig)
 13. [GET /dex/route](#get-dexroute)
 14. [POST /dex/batch-swap](#post-dexbatch-swap)
 15. [POST /dex/metatx/batch-digest](#post-dexmetatxbatch-digest)
@@ -1265,6 +1266,40 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/relay' \
 
 ---
 
+## POST /dex/metatx/verify-sig
+
+Debug endpoint — recovers the signer address from an order + signature and compares it to `order.user`. Use this to diagnose `"Signature does not match order.user"` errors before attempting relay.
+
+```bash
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/verify-sig' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "order": { "...": "MetaTxOrder from POST /dex/metatx/digest" },
+  "sig":   "0x<65-byte signature from wallet>"
+}'
+```
+
+```json
+{
+  "data": {
+    "digest":        "0x9f1e2d3c...",
+    "recovered":     "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+    "expected":      "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+    "match":         true,
+    "metaTxContract": "0x1dEc224F47a84505a00584Ce7B23D0455D064c5b"
+  }
+}
+```
+
+| `match` | Meaning |
+|---|---|
+| `true` | Signature is valid — if relay still fails, check deadline/nonce/permitData |
+| `false` | Wrong signing method or wrong `typedData` — use `eth_signTypedData_v4` with the `typedData` field from the digest response |
+
+> **Common cause of `match: false`:** signing the raw `digest` bytes32 with `eth_sign` / `personal_sign` (adds a prefix that breaks ecrecover) instead of signing `typedData` with `eth_signTypedData_v4`.
+
+---
+
 ## GET /dex/route
 
 Returns an optimally routed swap plan with pre-encoded `adapterData` for each step.
@@ -1661,8 +1696,8 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-relay' \
 
 | Variable | Required | Description |
 |---|---|---|
-| `AGGREGATOR_ADDRESS` | Yes (`POST /dex/swap`, `POST /dex/batch-swap`, `POST /dex/metatx/*`) | OneMEMEAggregator contract — must expose both `swap()` and `batchSwap()` |
-| `METATX_ADDRESS` | Yes (`POST /dex/metatx/*`) | OneMEMEMetaTx contract address |
+| `AGGREGATOR_ADDRESS` | Yes (`POST /dex/swap`, `POST /dex/batch-swap`, `POST /dex/metatx/*`) | OneMEMEAggregator — BSC mainnet: `0x6F66042eab4D01BC1F7C87968481Bbad46a1Da5B` |
+| `METATX_ADDRESS` | Yes (`POST /dex/metatx/*`) | OneMEMEMetaTx — BSC mainnet: `0x1dEc224F47a84505a00584Ce7B23D0455D064c5b` |
 | `RELAYER_PRIVATE_KEY` | Yes (`POST /dex/metatx/relay`) | 0x-prefixed private key of the funded relayer EOA |
 | `BSC_RPC_URL` | Yes (quotes, relay) | BSC HTTP RPC for contract reads and relay broadcast |
 | `FOURMEME_HELPER_ADDRESS` | No | TokenManagerHelper3 address (default: BSC mainnet) |
