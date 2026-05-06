@@ -24,16 +24,16 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 9. [GET /dex/metatx/permit-type](#get-dexmetatxpermit-type)
 10. [GET /dex/metatx/permit-digest](#get-dexmetatxpermit-digest)
 11. [GET /dex/metatx/permit2-digest](#get-dexmetatxpermit2-digest)
-11. [GET /dex/metatx/nonce/:user](#get-dexmetatxnonceuser)
-9. [GET /dex/quote](#get-dexquote)
-10. [POST /dex/swap](#post-dexswap)
-11. [POST /dex/metatx/digest](#post-dexmetatxdigest)
-12. [POST /dex/metatx/relay](#post-dexmetatxrelay)
-13. [POST /dex/metatx/verify-sig](#post-dexmetatxverify-sig)
-13. [GET /dex/route](#get-dexroute)
-14. [POST /dex/batch-swap](#post-dexbatch-swap)
-15. [POST /dex/metatx/batch-digest](#post-dexmetatxbatch-digest)
-16. [POST /dex/metatx/batch-relay](#post-dexmetatxbatch-relay)
+12. [GET /dex/metatx/nonce/:user](#get-dexmetatxnonceuser)
+13. [GET /dex/quote](#get-dexquote)
+14. [POST /dex/swap](#post-dexswap)
+15. [POST /dex/metatx/digest](#post-dexmetatxdigest)
+16. [POST /dex/metatx/relay](#post-dexmetatxrelay)
+17. [POST /dex/metatx/verify-sig](#post-dexmetatxverify-sig)
+18. [GET /dex/route](#get-dexroute)
+19. [POST /dex/batch-swap](#post-dexbatch-swap)
+20. [POST /dex/metatx/batch-digest](#post-dexmetatxbatch-digest)
+21. [POST /dex/metatx/batch-relay](#post-dexmetatxbatch-relay)
 
 ---
 
@@ -680,7 +680,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/permit-type?token=0x55d398326
     "permit2":         "0x000000000022D473030F116dDEE9F6B43aC78BA3",
     "permit2Allowance": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
     "permit2Ready":    true,
-    "metaTxAddress":   "0xOneMEMEMetaTxAddress",
+    "metaTxAddress":   "0x1dEc224F47a84505a00584Ce7B23D0455D064c5b",
     "metaTxAllowance": "0",
     "metaTxReady":     false,
     "options": {
@@ -723,7 +723,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/permit-digest?token=0x8ac76a5
 {
   "data": {
     "permitType": 1,
-    "spender":    "0xOneMEMEMetaTxAddress",
+    "spender":    "0x1dEc224F47a84505a00584Ce7B23D0455D064c5b",
     "typedData": {
       "domain": {
         "name":             "USD Coin",
@@ -743,7 +743,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/permit-digest?token=0x8ac76a5
       "primaryType": "Permit",
       "message": {
         "owner":    "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-        "spender":  "0xOneMEMEMetaTxAddress",
+        "spender":  "0x1dEc224F47a84505a00584Ce7B23D0455D064c5b",
         "value":    "5000000000000000000",
         "nonce":    "0",
         "deadline": "1745133600"
@@ -791,7 +791,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/permit2-digest?token=0x55d398
   "data": {
     "permitType": 2,
     "permit2":    "0x000000000022D473030F116dDEE9F6B43aC78BA3",
-    "spender":    "0xOneMEMEMetaTxAddress",
+    "spender":    "0x1dEc224F47a84505a00584Ce7B23D0455D064c5b",
     "typedData": {
       "domain": {
         "name":             "Permit2",
@@ -816,7 +816,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/metatx/permit2-digest?token=0x55d398
           "token":  "0x55d398326f99059ff775485246999027b3197955",
           "amount": "5000000000000000000"
         },
-        "spender":  "0xOneMEMEMetaTxAddress",
+        "spender":  "0x1dEc224F47a84505a00584Ce7B23D0455D064c5b",
         "nonce":    "183764823764823764823764",
         "deadline": "1745133600"
       }
@@ -952,7 +952,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
 ```json
 {
   "data": {
-    "to":          "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+    "to":          "0x6F66042eab4D01BC1F7C87968481Bbad46a1Da5B",
     "calldata":    "0x...",
     "value":       "0",
     "gasLimit":    "250000",
@@ -994,7 +994,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
 ```json
 {
   "data": {
-    "to":          "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+    "to":          "0x6F66042eab4D01BC1F7C87968481Bbad46a1Da5B",
     "calldata":    "0x...",
     "gasLimit":    "400000",
     "singleStep":  false,
@@ -1148,7 +1148,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
         "name":             "OneMEMEMetaTx",
         "version":          "1",
         "chainId":          56,
-        "verifyingContract": "0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c"
+        "verifyingContract": "0x1dEc224F47a84505a00584Ce7B23D0455D064c5b"
       },
       "types": {
         "MetaTxOrder": [
@@ -1172,7 +1172,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/digest' \
       "primaryType": "MetaTxOrder",
       "message": { "...": "all order fields as strings" }
     },
-    "metaTxContract": "0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c",
+    "metaTxContract": "0x1dEc224F47a84505a00584Ce7B23D0455D064c5b",
     "order": {
       "user":                   "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
       "nonce":                  "3",
@@ -1483,7 +1483,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
 ```json
 {
   "data": {
-    "to":          "0xOneMEMEAggregatorAddress",
+    "to":          "0x6F66042eab4D01BC1F7C87968481Bbad46a1Da5B",
     "calldata":    "0x...",
     "nativeIn":    false,
     "nativeOut":   false,
@@ -1519,6 +1519,9 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
 
 Computes the EIP-712 digest the user must sign for a gasless multi-hop swap.
 Same permit detection and signing flow as the single-step digest — use `steps=N` in the relayer-fee call.
+
+> `adapterData` in each step is automatically refreshed to use `swapDeadline` as its deadline,
+> preventing "swap past deadline" reverts if the relay is submitted long after the route was built.
 
 ### Gasless batch swap flow
 
@@ -1590,7 +1593,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
         "name":             "OneMEMEMetaTx",
         "version":          "1",
         "chainId":          56,
-        "verifyingContract": "0xOneMEMEMetaTxAddress"
+        "verifyingContract": "0x1dEc224F47a84505a00584Ce7B23D0455D064c5b"
       },
       "types": {
         "BatchMetaTxOrder": [
@@ -1618,7 +1621,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/metatx/batch-digest' \
       "primaryType": "BatchMetaTxOrder",
       "message": { "...": "all order fields as strings" }
     },
-    "metaTxContract": "0xOneMEMEMetaTxAddress",
+    "metaTxContract": "0x1dEc224F47a84505a00584Ce7B23D0455D064c5b",
     "order": {
       "user":          "0xUserWalletAddress",
       "nonce":         "7",
