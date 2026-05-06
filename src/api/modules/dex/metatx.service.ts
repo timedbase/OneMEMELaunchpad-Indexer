@@ -42,10 +42,37 @@ import {
 } from "./route.service";
 import { isAddress, normalizeAddress } from "../../helpers";
 import type { Hex } from "viem";
+import {
+  ADAPTER_IDS,
+  encodeV2AdapterData,
+  encodeOneMemeAdapterData,
+} from "./dex-rpc";
+import { decodeAbiParameters } from "viem";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const WBNB_BSC = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Re-encodes the adapterData deadline to `swapDeadline` for adapters that
+ * embed a deadline (V2, ONEMEME_BC). Prevents "swap past deadline" reverts
+ * when the relay is submitted long after the route was originally built.
+ */
+function refreshAdapterDataDeadline(adapterId: Hex, adapterData: Hex, swapDeadline: bigint): Hex {
+  try {
+    if (adapterId === ADAPTER_IDS["PANCAKE_V2"] || adapterId === ADAPTER_IDS["UNISWAP_V2"]) {
+      const [path] = decodeAbiParameters([{ type: "address[]" }, { type: "uint256" }], adapterData);
+      return encodeV2AdapterData(path as Hex[], swapDeadline);
+    }
+    if (adapterId === ADAPTER_IDS["ONEMEME_BC"]) {
+      const [token] = decodeAbiParameters([{ type: "address" }, { type: "uint256" }], adapterData);
+      return encodeOneMemeAdapterData(token as Hex, swapDeadline);
+    }
+  } catch { /* unrecognised encoding — return as-is */ }
+  return adapterData;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -367,9 +394,14 @@ export class MetaTxService {
       throw err;
     }
 
+    // Refresh the deadline embedded in adapterData to match swapDeadline.
+    // The route endpoint sets adapterData deadline to now+1800s; if the relay
+    // is submitted more than 30 min after routing, the V2 router reverts.
+    const freshAdapterData = refreshAdapterDataDeadline(adapterId, adapterData, swapDeadline);
+
     const order: MetaTxOrder = {
       user, nonce, deadline, adapterId, tokenIn, grossAmountIn,
-      tokenOut, minUserOut, recipient, swapDeadline, adapterData, relayerFee,
+      tokenOut, minUserOut, recipient, swapDeadline, adapterData: freshAdapterData, relayerFee,
       relayerFeeTokenAmount, relayerFeeAdapterId, relayerFeeAdapterData,
     };
 
@@ -549,7 +581,12 @@ export class MetaTxService {
     // Do NOT convert last step's tokenOut — address(0) must stay as-is so the
     // contract takes the direct BNB fee split path instead of the ERC-20 fee swap path.
     if (isNative(steps[0]!.tokenIn)) steps[0]!.tokenIn = WBNB_BSC as Hex;
-    validatePathContinuity(steps);
+    // Refresh each step's adapterData deadline to match swapDeadline.
+    const freshSteps = steps.map(s => ({
+      ...s,
+      adapterData: refreshAdapterDataDeadline(s.adapterId, s.adapterData, swapDeadline),
+    }));
+    validatePathContinuity(freshSteps);
 
     let nonce: bigint;
     try {
@@ -561,7 +598,7 @@ export class MetaTxService {
     }
 
     const order: BatchMetaTxOrder = {
-      user, nonce, deadline, steps, grossAmountIn, minFinalOut, recipient, swapDeadline, relayerFee,
+      user, nonce, deadline, steps: freshSteps, grossAmountIn, minFinalOut, recipient, swapDeadline, relayerFee,
       relayerFeeTokenAmount, relayerFeeAdapterId, relayerFeeAdapterData,
     };
 
