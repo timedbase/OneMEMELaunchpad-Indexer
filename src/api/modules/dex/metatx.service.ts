@@ -323,7 +323,7 @@ export class MetaTxService {
     return {
       data: {
         digest,
-        typedData:      buildMetaTxTypedData(order),
+        typedData:      await buildMetaTxTypedData(order),
         metaTxContract: metaTxAddress(),
         order: {
           ...order,
@@ -508,7 +508,7 @@ export class MetaTxService {
     return {
       data: {
         digest,
-        typedData:      buildBatchMetaTxTypedData(order),
+        typedData:      await buildBatchMetaTxTypedData(order),
         metaTxContract: metaTxAddress(),
         order: {
           ...order,

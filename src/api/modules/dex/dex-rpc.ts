@@ -994,7 +994,7 @@ export async function buildMetaTxTypedData(order: MetaTxOrder) {
 }
 
 /** EIP-712 typed data for eth_signTypedData_v4 — BatchMetaTxOrder. */
-export function buildBatchMetaTxTypedData(order: BatchMetaTxOrder) {
+export async function buildBatchMetaTxTypedData(order: BatchMetaTxOrder) {
   return {
     domain:      metaTxDomain(),
     types:       BATCH_META_ORDER_TYPES,
