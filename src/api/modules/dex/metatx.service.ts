@@ -30,6 +30,7 @@ import {
   buildMetaTxTypedData,
   buildBatchMetaTxTypedData,
   detectPermitType,
+  recoverOrderSigner,
 } from "./dex-rpc";
 import {
   parseSteps,
@@ -79,6 +80,62 @@ export class MetaTxService {
     }
 
     return { data: { user: addr, nonce: nonce.toString() } };
+  }
+
+  /**
+   * POST /dex/metatx/verify-sig
+   * Debug endpoint: recovers the signer address from an order + signature
+   * and compares it to order.user. Use this to diagnose signature failures.
+   * Body: { order, sig }
+   */
+  async verifySig(body: Record<string, unknown>) {
+    const rawOrder = body["order"];
+    if (!rawOrder || typeof rawOrder !== "object") throw new BadRequestException("order is required");
+    const o = rawOrder as Record<string, unknown>;
+
+    const sig = body["sig"];
+    if (typeof sig !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(sig)) {
+      throw new BadRequestException("sig must be a 65-byte hex signature (0x + 130 hex chars)");
+    }
+
+    // Minimal order parse — only fields needed for digest
+    const order: MetaTxOrder = {
+      user:          requireAddress(o["user"],         "order.user"),
+      nonce:         requireBigInt(o["nonce"],          "order.nonce"),
+      deadline:      requireBigInt(o["deadline"],       "order.deadline"),
+      adapterId:     (() => { const v = o["adapterId"]; if (typeof v !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(v)) throw new BadRequestException("order.adapterId"); return v as Hex; })(),
+      tokenIn:       requireAddress(o["tokenIn"],       "order.tokenIn"),
+      grossAmountIn: requireBigInt(o["grossAmountIn"],  "order.grossAmountIn"),
+      tokenOut:      requireAddress(o["tokenOut"],      "order.tokenOut"),
+      minUserOut:    requireBigInt(o["minUserOut"],      "order.minUserOut"),
+      recipient:     requireAddress(o["recipient"],     "order.recipient"),
+      swapDeadline:  requireBigInt(o["swapDeadline"],   "order.swapDeadline"),
+      adapterData:   (() => { const v = o["adapterData"] ?? "0x"; if (typeof v !== "string") throw new BadRequestException("order.adapterData"); return v as Hex; })(),
+      relayerFee:    requireBigInt(o["relayerFee"],     "order.relayerFee"),
+      relayerFeeTokenAmount: o["relayerFeeTokenAmount"] !== undefined ? requireBigInt(o["relayerFeeTokenAmount"], "order.relayerFeeTokenAmount") : 0n,
+      relayerFeeAdapterId:   (() => { const v = o["relayerFeeAdapterId"] ?? "0x0000000000000000000000000000000000000000000000000000000000000000"; if (typeof v !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(v)) throw new BadRequestException("order.relayerFeeAdapterId"); return v as Hex; })(),
+      relayerFeeAdapterData: (() => { const v = o["relayerFeeAdapterData"] ?? "0x"; if (typeof v !== "string") throw new BadRequestException("order.relayerFeeAdapterData"); return v as Hex; })(),
+    };
+
+    let recovered: string;
+    let digest: string;
+    try {
+      const imp = await import("./dex-rpc");
+      digest    = await imp.getOrderDigest(order);
+      recovered = await recoverOrderSigner(order, sig as Hex);
+    } catch (err) {
+      throw new ServiceUnavailableException(`RPC error: ${String(err)}`);
+    }
+
+    return {
+      data: {
+        digest,
+        recovered,
+        expected:  order.user,
+        match:     recovered.toLowerCase() === order.user.toLowerCase(),
+        metaTxContract: metaTxAddress(),
+      },
+    };
   }
 
   /**
@@ -410,9 +467,14 @@ export class MetaTxService {
     if (order.deadline < nowSec) throw new BadRequestException("Meta-tx deadline has expired");
 
     let sigValid: boolean;
-    try { sigValid = await verifyOrderSignature(order, sig as Hex); }
-    catch { sigValid = false; }
-    if (!sigValid) throw new BadRequestException("Signature does not match order.user");
+    try {
+      sigValid = await verifyOrderSignature(order, sig as Hex);
+    } catch (err: unknown) {
+      const msg = String(err);
+      if (msg.includes("METATX_ADDRESS")) throw new ServiceUnavailableException("METATX_ADDRESS is not configured — set it to 0x1dEc224F47a84505a00584Ce7B23D0455D064c5b");
+      throw new ServiceUnavailableException(`Signature verification RPC error: ${msg}`);
+    }
+    if (!sigValid) throw new BadRequestException("Signature does not match order.user — ensure you signed typedData with eth_signTypedData_v4, not the raw digest");
 
     const currentNonce = await getUserNonce(order.user).catch(() => null);
     if (currentNonce !== null && currentNonce !== order.nonce) {
@@ -585,8 +647,13 @@ export class MetaTxService {
     if (order.deadline < nowSec) throw new BadRequestException("Meta-tx deadline has expired");
 
     let sigValid: boolean;
-    try { sigValid = await verifyBatchOrderSignature(order, sig as Hex); }
-    catch { sigValid = false; }
+    try {
+      sigValid = await verifyBatchOrderSignature(order, sig as Hex);
+    } catch (err: unknown) {
+      const msg = String(err);
+      if (msg.includes("METATX_ADDRESS")) throw new ServiceUnavailableException("METATX_ADDRESS is not configured — set it to 0x1dEc224F47a84505a00584Ce7B23D0455D064c5b");
+      throw new ServiceUnavailableException(`Signature verification RPC error: ${msg}`);
+    }
     if (!sigValid) throw new BadRequestException("Signature does not match order.user");
 
     const currentNonce = await getUserNonce(order.user).catch(() => null);

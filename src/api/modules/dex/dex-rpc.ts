@@ -870,6 +870,12 @@ export async function getOrderDigest(order: MetaTxOrder): Promise<Hex> {
   }) as Promise<Hex>;
 }
 
+/** Recovers the signer address from an order + signature for debugging. */
+export async function recoverOrderSigner(order: MetaTxOrder, sig: Hex): Promise<Hex> {
+  const digest = await getOrderDigest(order);
+  return recoverAddress({ hash: digest, signature: sig });
+}
+
 // ─── EIP-712 typed data builders ─────────────────────────────────────────────
 
 // Known ORDER_TYPEHASH values — used to detect which contract version is deployed.

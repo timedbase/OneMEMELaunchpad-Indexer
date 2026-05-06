@@ -28,6 +28,15 @@ export class MetaTxController {
   }
 
   /**
+   * POST /dex/metatx/verify-sig
+   * Debug: recovers signer from order + sig, compares to order.user.
+   */
+  @Post("verify-sig")
+  verifySig(@Body() body: Record<string, unknown>) {
+    return this.metatx.verifySig(body);
+  }
+
+  /**
    * GET /dex/metatx/permit-type
    * Detects which permit mode(s) a token supports for a given owner and amount.
    * Query: token, owner, amount
