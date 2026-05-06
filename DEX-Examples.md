@@ -7,7 +7,7 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 
 **Native BNB:** Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in any swap, quote, or route endpoint. The API normalises it to WBNB internally. Responses include `nativeIn: true` / `nativeOut: true` flags and a `value` field (wei string) indicating how much `msg.value` the caller must attach.
 
-**MetaTx exception:** For `POST /dex/metatx/digest` and `/batch-digest`, pass `tokenOut = address(0)` literally when you want native BNB output — do **not** substitute WBNB. The MetaTx contract uses `tokenOut == address(0)` to detect native BNB and split the relayer fee directly from BNB output. Passing WBNB triggers the ERC-20 fee-swap path and requires `relayerFeeTokenAmount > 0`.
+> **Gasless swaps (MetaTx) are temporarily disabled.** All `/dex/metatx/*` endpoints return 404 until re-enabled. Direct swaps via `POST /dex/swap`, `POST /dex/batch-swap`, `GET /dex/route`, and `GET /dex/quote` are fully operational.
 
 ---
 
@@ -20,20 +20,22 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 5. [GET /dex/tokens/:address/pools](#get-dextokensaddresspools)
 6. [GET /dex/tokens/:address/trades](#get-dextokensaddresstrades)
 7. [GET /dex/swaps](#get-dexswaps)
-8. [GET /dex/metatx/relayer-fee](#get-dexmetatxrelayer-fee)
-9. [GET /dex/metatx/permit-type](#get-dexmetatxpermit-type)
-10. [GET /dex/metatx/permit-digest](#get-dexmetatxpermit-digest)
-11. [GET /dex/metatx/permit2-digest](#get-dexmetatxpermit2-digest)
-12. [GET /dex/metatx/nonce/:user](#get-dexmetatxnonceuser)
-13. [GET /dex/quote](#get-dexquote)
-14. [POST /dex/swap](#post-dexswap)
-15. [POST /dex/metatx/digest](#post-dexmetatxdigest)
-16. [POST /dex/metatx/relay](#post-dexmetatxrelay)
-17. [POST /dex/metatx/verify-sig](#post-dexmetatxverify-sig)
-18. [GET /dex/route](#get-dexroute)
-19. [POST /dex/batch-swap](#post-dexbatch-swap)
-20. [POST /dex/metatx/batch-digest](#post-dexmetatxbatch-digest)
-21. [POST /dex/metatx/batch-relay](#post-dexmetatxbatch-relay)
+8. [GET /dex/quote](#get-dexquote)
+9. [POST /dex/swap](#post-dexswap)
+10. [GET /dex/route](#get-dexroute)
+11. [POST /dex/batch-swap](#post-dexbatch-swap)
+
+**Gasless (MetaTx) — disabled, coming soon:**
+- GET /dex/metatx/relayer-fee
+- GET /dex/metatx/permit-type
+- GET /dex/metatx/permit-digest
+- GET /dex/metatx/permit2-digest
+- GET /dex/metatx/nonce/:user
+- POST /dex/metatx/digest
+- POST /dex/metatx/relay
+- POST /dex/metatx/verify-sig
+- POST /dex/metatx/batch-digest
+- POST /dex/metatx/batch-relay
 
 ---
 
