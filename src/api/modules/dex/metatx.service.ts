@@ -350,8 +350,13 @@ export class MetaTxService {
       throw new BadRequestException("tokenIn and tokenOut cannot both be native BNB");
     }
 
+    // tokenIn must be WBNB — MetaTx contract does not support native BNB input.
+    // tokenOut must stay as address(0) for native BNB — the contract checks
+    // tokenOut == address(0) to decide whether to split the relayer fee directly
+    // from BNB output or to swap ERC-20 output → BNB. Converting to WBNB here
+    // would route into the ERC-20 fee path and require relayerFeeTokenAmount > 0.
     const tokenIn  = toWbnbIfNative(rawTokenIn);
-    const tokenOut = toWbnbIfNative(rawTokenOut);
+    const tokenOut = rawTokenOut;  // preserve address(0) for native BNB output
 
     let nonce: bigint;
     try {
@@ -540,8 +545,10 @@ export class MetaTxService {
     if (relayerFee >= grossAmountIn) throw new BadRequestException("relayerFee must be less than grossAmountIn");
 
     const steps = parseSteps(body["steps"], "steps");
-    if (isNative(steps[0]!.tokenIn))                     steps[0]!.tokenIn                 = WBNB_BSC as Hex;
-    if (isNative(steps[steps.length - 1]!.tokenOut))     steps[steps.length - 1]!.tokenOut = WBNB_BSC as Hex;
+    // Convert first step's tokenIn to WBNB (MetaTx doesn't support native input).
+    // Do NOT convert last step's tokenOut — address(0) must stay as-is so the
+    // contract takes the direct BNB fee split path instead of the ERC-20 fee swap path.
+    if (isNative(steps[0]!.tokenIn)) steps[0]!.tokenIn = WBNB_BSC as Hex;
     validatePathContinuity(steps);
 
     let nonce: bigint;
@@ -602,8 +609,7 @@ export class MetaTxService {
     const o = rawOrder as Record<string, unknown>;
 
     const steps = parseSteps(o["steps"], "order.steps");
-    if (isNative(steps[0]!.tokenIn))                     steps[0]!.tokenIn                 = WBNB_BSC as Hex;
-    if (isNative(steps[steps.length - 1]!.tokenOut))     steps[steps.length - 1]!.tokenOut = WBNB_BSC as Hex;
+    if (isNative(steps[0]!.tokenIn)) steps[0]!.tokenIn = WBNB_BSC as Hex;
     validatePathContinuity(steps);
 
     const order: BatchMetaTxOrder = {

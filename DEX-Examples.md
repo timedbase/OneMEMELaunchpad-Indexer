@@ -1029,6 +1029,11 @@ Computes the EIP-712 digest the user must sign for a gasless single-step swap.
 
 > Only Token → BNB and Token → Token swaps are supported (not BNB → Token).
 > `adapterId` and `adapterData` come directly from `GET /dex/route` — treat them as opaque bytes.
+>
+> **Native BNB output:** pass `tokenOut = 0x0000000000000000000000000000000000000000` (not WBNB).
+> The contract uses `address(0)` to detect native BNB and split the relayer fee directly from the output.
+> Passing `tokenOut = WBNB` forces the ERC-20 fee-swap path, which requires `relayerFeeTokenAmount > 0`
+> and will revert if that field is zero.
 
 ### Complete gasless swap flow
 
