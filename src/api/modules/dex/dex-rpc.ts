@@ -990,8 +990,10 @@ export async function relayBatchMetaTx(
 
 const ERC20_PERMIT_ABI = parseAbi([
   "function name() view returns (string)",
+  "function version() view returns (string)",
   "function nonces(address owner) view returns (uint256)",
   "function allowance(address owner, address spender) view returns (uint256)",
+  "function DOMAIN_SEPARATOR() view returns (bytes32)",
 ]);
 
 /**
@@ -1023,13 +1025,30 @@ export async function detectPermitType(
   const p2     = permit2Address();
   const metaTx = metaTxAddress();
 
-  const [eip2612, p2Allow, metaTxAllow] = await Promise.allSettled([
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "nonces",    args: [owner]        }) as Promise<bigint>,
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "allowance", args: [owner, p2]    }) as Promise<bigint>,
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "allowance", args: [owner, metaTx]}) as Promise<bigint>,
+  const [eip2612, domSep, p2Allow, metaTxAllow] = await Promise.allSettled([
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "nonces",           args: [owner]        }) as Promise<bigint>,
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "DOMAIN_SEPARATOR"                       }) as Promise<Hex>,
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "allowance",        args: [owner, p2]    }) as Promise<bigint>,
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "allowance",        args: [owner, metaTx]}) as Promise<bigint>,
   ]);
 
-  const supportsEip2612  = eip2612.status === "fulfilled";
+  // EIP-2612 is only considered supported if nonces() works AND we can verify
+  // the domain separator — a domain mismatch causes silent permit failures on-chain.
+  let supportsEip2612 = eip2612.status === "fulfilled";
+  if (supportsEip2612 && domSep.status === "fulfilled") {
+    const { hashDomain } = await import("viem");
+    const chainId = client.chain?.id ?? 56;
+    let nameStr = token as string;
+    try {
+      nameStr = await client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "name" }) as string;
+    } catch { /* use address as fallback */ }
+    const verified = ["1", "2", ""].some(v => {
+      const d = v ? { name: nameStr, version: v, chainId, verifyingContract: token }
+                  : { name: nameStr, chainId, verifyingContract: token };
+      return hashDomain({ domain: d }).toLowerCase() === (domSep.value as string).toLowerCase();
+    });
+    if (!verified) supportsEip2612 = false; // domain mismatch — permit would fail silently
+  }
   const permit2Allowance = p2Allow.status      === "fulfilled" ? p2Allow.value      : 0n;
   const metaTxAllowance  = metaTxAllow.status  === "fulfilled" ? metaTxAllow.value  : 0n;
   const permit2Ready     = permit2Allowance >= amount;
@@ -1041,11 +1060,14 @@ export async function detectPermitType(
 }
 
 /**
- * Builds the EIP-712 typed data the user must sign for an EIP-2612 permit,
- * and returns the abi.encode recipe for converting (v, r, s) → permitData.
+ * Builds the EIP-712 typed data the user must sign for an EIP-2612 permit.
  *
- * Not all tokens support EIP-2612 (USDT-BSC does not). Callers should catch
- * errors and fall back to Permit2 or a pre-approval.
+ * Probes the token for its actual domain version and verifies the computed
+ * domain separator matches the on-chain value. This prevents silent permit
+ * failures caused by domain mismatches (the MetaTx contract swallows permit
+ * errors and reverts InsufficientAllowance, triggering a normal approval).
+ *
+ * Throws if the token does not support EIP-2612 or the domain cannot be verified.
  */
 export async function buildEip2612TypedData(
   token:    Hex,
@@ -1056,23 +1078,76 @@ export async function buildEip2612TypedData(
 ): Promise<{
   typedData: object;
   nonce:     string;
+  version:   string;
   permitDataEncoding: string;
 }> {
   const client  = getDexPublicClient();
   const chainId = client.chain?.id ?? 56;
 
-  const [name, nonce] = await Promise.all([
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "name" }) as Promise<string>,
+  // Read all token properties in parallel; version() and DOMAIN_SEPARATOR() may not exist.
+  const [nameRes, versionRes, nonceRes, domainSepRes] = await Promise.allSettled([
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "name"             }) as Promise<string>,
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "version"          }) as Promise<string>,
     client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "nonces", args: [owner] }) as Promise<bigint>,
+    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "DOMAIN_SEPARATOR" }) as Promise<Hex>,
   ]);
 
+  if (nonceRes.status === "rejected") {
+    throw new Error("Token does not implement EIP-2612 (nonces() call failed)");
+  }
+
+  const name    = nameRes.status    === "fulfilled" ? nameRes.value    : token;
+  const nonce   = nonceRes.value;
+
+  // Determine domain version: read from contract, else try "1" then "2".
+  const onChainVersion = versionRes.status === "fulfilled" ? versionRes.value : null;
+  const onChainDomainSep = domainSepRes.status === "fulfilled" ? domainSepRes.value : null;
+
+  // Build and verify domain — if the token exposes DOMAIN_SEPARATOR we confirm ours matches.
+  // This catches non-standard domains before the user signs a useless permit.
+  const { hashDomain } = await import("viem");
+  const candidateVersions = onChainVersion ? [onChainVersion] : ["1", "2"];
+  let resolvedVersion = candidateVersions[0]!;
+  let domainMismatch  = false;
+
+  if (onChainDomainSep) {
+    let matched = false;
+    for (const v of candidateVersions) {
+      const computed = hashDomain({
+        domain: { name: String(name), version: v, chainId, verifyingContract: token },
+      });
+      if (computed.toLowerCase() === onChainDomainSep.toLowerCase()) {
+        resolvedVersion = v;
+        matched = true;
+        break;
+      }
+    }
+    // Also try without version field (some tokens omit it)
+    if (!matched) {
+      const computedNoVersion = hashDomain({
+        domain: { name: String(name), chainId, verifyingContract: token },
+      });
+      if (computedNoVersion.toLowerCase() === onChainDomainSep.toLowerCase()) {
+        resolvedVersion = "";
+        matched = true;
+      }
+    }
+    if (!matched) domainMismatch = true;
+  }
+
+  if (domainMismatch) {
+    throw new Error(
+      "Token has a non-standard EIP-712 domain — permit signature would fail silently. Use Permit2 instead.",
+    );
+  }
+
+  // Build domain object (omit version if token doesn't use it)
+  const domain: Record<string, unknown> = resolvedVersion
+    ? { name: String(name), version: resolvedVersion, chainId, verifyingContract: token }
+    : { name: String(name), chainId, verifyingContract: token };
+
   const typedData = {
-    domain: {
-      name,
-      version:           "1",
-      chainId,
-      verifyingContract: token,
-    },
+    domain,
     types: {
       Permit: [
         { name: "owner",    type: "address" },
@@ -1094,7 +1169,8 @@ export async function buildEip2612TypedData(
 
   return {
     typedData,
-    nonce: nonce.toString(),
+    nonce:   nonce.toString(),
+    version: resolvedVersion,
     permitDataEncoding: "abi.encode(uint256 deadline, uint8 v, bytes32 r, bytes32 s)",
   };
 }
