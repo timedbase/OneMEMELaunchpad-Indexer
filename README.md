@@ -219,6 +219,7 @@ All `bigint` / `numeric` fields are returned as **strings** to preserve precisio
 | `/api/v1/{chain}/dex/quote` | 20 req / min (live RPC) |
 | `/api/v1/{chain}/dex/route` | 20 req / min (live RPC) |
 | `/api/v1/{chain}/stats` | 10 req / min (heavy aggregation) |
+| `/api/v1/{chain}/dex/tokens/*/security` | 10 req / min (GoPlus upstream) |
 | `POST *` | 10 req / min |
 | Everything else (GET) | 60 req / min |
 
@@ -602,6 +603,7 @@ All DEX endpoints live under `/api/v1/{chain}/dex/`. They require the aggregator
 | `GET` | `/api/v1/{chain}/dex/tokens/:address` | Single DEX token with pools and price |
 | `GET` | `/api/v1/{chain}/dex/tokens/:address/pools` | Liquidity pools for a token |
 | `GET` | `/api/v1/{chain}/dex/tokens/:address/trades` | Trade history for a DEX token |
+| `GET` | `/api/v1/{chain}/dex/tokens/:address/security` | GoPlus security report: tax rates, honeypot check, risk level, warnings |
 | `GET` | `/api/v1/{chain}/dex/swaps` | All DEX swap events, paginated |
 
 **Swap / quote endpoints**
@@ -803,6 +805,7 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 | `UNISWAP_V4_QUOTER_ADDRESS` | Uniswap V4 quoter _(unused while V4 routing is disabled)_ |
 | `FOURMEME_HELPER_ADDRESS` | Override FourMEME TokenManagerHelper3 (default: BSC mainnet) |
 | `FLAPSH_PORTAL_ADDRESS` | Override Flap.SH Portal contract (default: BSC mainnet) |
+| `GOPLUS_API_KEY` | GoPlus Security API key — omit for free tier (rate-limited); required for `/dex/tokens/:address/security` at scale |
 
 ---
 
@@ -844,6 +847,8 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 │       │   ├── dex-rpc.ts           # viem quoters, swap builders, relay execution
 │       │   ├── route.service.ts     # aggregation: multi-source routing, calldata building
 │       │   ├── route.controller.ts
+│       │   ├── security.service.ts  # GoPlus security reports + tax-bps lookup
+│       │   ├── goplus.ts            # GoPlus API client (cached, in-flight dedup)
 │       │   ├── metatx.service.ts    # gasless: EIP-712 digest, nonce, relay
 │       │   └── metatx.controller.ts
 │       └── index/               # GET /api/v1/{chain} — route index

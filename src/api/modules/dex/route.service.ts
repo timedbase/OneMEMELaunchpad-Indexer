@@ -39,6 +39,7 @@ import {
   defaultTickSpacing,
   aggregatorAddress,
 } from "./dex-rpc";
+import { SecurityService } from "./security.service";
 import type { Hex } from "viem";
 import { isAddress, normalizeAddress } from "../../helpers";
 
@@ -62,6 +63,16 @@ const HUB_TOKENS: Hex[] = [
   "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d", // USDC (BSC)
   "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c", // BTCB
 ];
+
+// Tokens known to have no transfer tax — skip GoPlus for these to avoid unnecessary
+// latency and API quota use on every V2 quote leg involving a major token.
+const SAFE_TOKENS = new Set<string>([
+  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", // WBNB
+  "0x55d398326f99059ff775485246999027b3197955", // USDT BSC
+  "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d", // USDC BSC
+  "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c", // BTCB
+  "0xe9e7cea3dedca5984780bafc599bd69add087d56", // BUSD
+]);
 
 // Pool pair discovery query — works for V3 and V4 subgraphs.
 // V4 subgraphs expose tickSpacing explicitly; V3 subgraphs do not (derived from fee).
@@ -176,6 +187,7 @@ interface StepData {
   fees:        number[] | null;
   tickSpacing: number[] | null;
   hooks:       string[] | null;
+  taxBps?:     number | null;
 }
 
 interface RouteCandidate {
@@ -189,6 +201,8 @@ interface RouteCandidate {
 @Injectable()
 export class RouteService {
   private readonly logger = new Logger(RouteService.name);
+
+  constructor(private readonly security: SecurityService) {}
 
   // ── Quote ──────────────────────────────────────────────────────────────────
 
@@ -667,8 +681,63 @@ export class RouteService {
     let adapterData: Hex;
 
     if (adapter === "PANCAKE_V2" || adapter === "UNISWAP_V2") {
-      amountOut   = await quoteV2(adapter, [tokenIn, tokenOut], quoteAmountIn);
+      // getAmountsOut() ignores transfer tax. We query GoPlus for both sides of the
+      // pair (skipping well-known safe tokens) and apply:
+      //   • sell (tokenIn tax): (1-sellTax)^3 — worst-case 3 taxed transfers on the
+      //     sell path: user→aggregator, aggregator→adapter, adapter→pair via router.
+      //   • buy (tokenOut tax): (1-buyTax)^1 — pair sends tokens directly to
+      //     recipient via swapExactTokensForETHSupportingFeeOnTransferTokens; one hit.
+      // Both corrections are applied independently so token→token pairs are covered.
+      // GoPlus tax values > 10000 bps (>100%) are clamped — they indicate honeypots
+      // or data errors that would produce a negative amountOut without capping.
+      const skipIn  = SAFE_TOKENS.has(tokenIn.toLowerCase());
+      const skipOut = SAFE_TOKENS.has(tokenOut.toLowerCase());
+      const ZERO_TAX = { buyBps: 0n, sellBps: 0n };
+
+      const [rawAmountOut, inTaxInfo, outTaxInfo] = await Promise.all([
+        quoteV2(adapter, [tokenIn, tokenOut], quoteAmountIn),
+        skipIn  ? Promise.resolve(ZERO_TAX) : this.security.getTokenTaxBps(tokenIn),
+        skipOut ? Promise.resolve(ZERO_TAX) : this.security.getTokenTaxBps(tokenOut),
+      ]);
+
+      const sellTaxBps = inTaxInfo.sellBps  > 10_000n ? 10_000n : inTaxInfo.sellBps;
+      const buyTaxBps  = outTaxInfo.buyBps  > 10_000n ? 10_000n : outTaxInfo.buyBps;
+
+      // Apply (1-sellTax)^3 in three sequential steps to stay within safe bigint range.
+      let taxedAmountOut = rawAmountOut;
+      if (sellTaxBps > 0n) {
+        const f = 10_000n - sellTaxBps;
+        taxedAmountOut = (taxedAmountOut * f) / 10_000n;
+        taxedAmountOut = (taxedAmountOut * f) / 10_000n;
+        taxedAmountOut = (taxedAmountOut * f) / 10_000n;
+      }
+      if (buyTaxBps > 0n) {
+        taxedAmountOut = (taxedAmountOut * (10_000n - buyTaxBps)) / 10_000n;
+      }
+
+      if (taxedAmountOut <= 0n) throw new Error(`${adapter} returned zero output`);
       adapterData = encodeV2AdapterData([tokenIn, tokenOut], deadline);
+      const minOut     = (taxedAmountOut * (10_000n - slippageBps)) / 10_000n;
+      const topTaxBps  = sellTaxBps > buyTaxBps ? sellTaxBps : buyTaxBps;
+
+      return {
+        finalAmountOut: taxedAmountOut,
+        minFinalOut:    minOut,
+        steps: [{
+          adapter,
+          adapterId:   ADAPTER_IDS[adapter],
+          tokenIn,
+          tokenOut,
+          amountIn:    amountIn.toString(),
+          amountOut:   taxedAmountOut.toString(),
+          minOut:      minOut.toString(),
+          adapterData,
+          fees:        null,
+          tickSpacing: null,
+          hooks:       null,
+          taxBps:      topTaxBps > 0n ? Number(topTaxBps) : null,
+        }],
+      };
 
     } else if (adapter === "PANCAKE_V3" || adapter === "UNISWAP_V3") {
       const fee   = fees[0]!;

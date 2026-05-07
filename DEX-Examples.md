@@ -19,11 +19,12 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 4. [GET /dex/tokens/:address](#get-dextokensaddress)
 5. [GET /dex/tokens/:address/pools](#get-dextokensaddresspools)
 6. [GET /dex/tokens/:address/trades](#get-dextokensaddresstrades)
-7. [GET /dex/swaps](#get-dexswaps)
-8. [GET /dex/quote](#get-dexquote)
-9. [POST /dex/swap](#post-dexswap)
-10. [GET /dex/route](#get-dexroute)
-11. [POST /dex/batch-swap](#post-dexbatch-swap)
+7. [GET /dex/tokens/:address/security](#get-dextokensaddresssecurity)
+8. [GET /dex/swaps](#get-dexswaps)
+9. [GET /dex/quote](#get-dexquote)
+10. [POST /dex/swap](#post-dexswap)
+11. [GET /dex/route](#get-dexroute)
+12. [POST /dex/batch-swap](#post-dexbatch-swap)
 
 **Gasless (MetaTx) — disabled, coming soon:**
 - GET /dex/metatx/relayer-fee
@@ -519,6 +520,96 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f
 
 ---
 
+## GET /dex/tokens/:address/security
+
+GoPlus Security report for a token. Returns honeypot status, transfer tax rates, ownership risks, trading restrictions, and a derived `riskLevel` + `warnings[]` array ready for frontend display.
+
+**`dataAvailable: false`** means GoPlus has no record for this address (token is very new or not yet indexed). All flags will be `false` / `null` — this does **not** mean the token is safe; treat it as unknown.
+
+Tax rates from this endpoint are also used internally by `GET /dex/quote`, `GET /dex/route`, and `POST /dex/swap` to correct `minOut` for fee-on-transfer tokens.
+
+```bash
+curl 'https://api.1coin.meme/api/v1/bsc/dex/tokens/0xe43ef1fe041ba9e8da87e8c5bfd583b3b46a1111/security'
+```
+
+```json
+{
+  "address":               "0xe43ef1fe041ba9e8da87e8c5bfd583b3b46a1111",
+  "tokenName":             "1COIN",
+  "tokenSymbol":           "1COIN",
+  "isHoneypot":            false,
+  "cannotBuy":             false,
+  "cannotSellAll":         false,
+  "transferPausable":      false,
+  "buyTax":                "0.05",
+  "sellTax":               "0.05",
+  "buyTaxBps":             500,
+  "sellTaxBps":            500,
+  "isBlacklisted":         true,
+  "isMintable":            false,
+  "isProxy":               false,
+  "isOpenSource":          true,
+  "canTakeBackOwnership":  false,
+  "ownerChangeBalance":    false,
+  "hiddenOwner":           false,
+  "selfDestruct":          false,
+  "externalCall":          false,
+  "isFakeToken":           false,
+  "isAntiWhale":           false,
+  "antiWhaleModifiable":   false,
+  "tradingCooldown":       false,
+  "slippageModifiable":    false,
+  "holderCount":           "1842",
+  "totalSupply":           "1000000000000000000000000000",
+  "ownerAddress":          "0x0000000000000000000000000000000000000000",
+  "creatorAddress":        "0xdeadbeef...",
+  "isInDex":               true,
+  "dex": [
+    { "name": "PancakeV2", "liquidity": "142300", "pair": "0xpair..." }
+  ],
+  "holders": [
+    { "address": "0x...", "tag": "PancakeV2", "is_locked": 0, "balance": "5e+26", "percent": "0.5", "is_contract": 1 }
+  ],
+  "riskLevel":   "medium",
+  "warnings": [
+    "Contract has a blacklist function",
+    "Buy tax: 5.00%",
+    "Sell tax: 5.00%"
+  ],
+  "note":          null,
+  "dataAvailable": true
+}
+```
+
+**`riskLevel` values:**
+
+| Level | Triggered by |
+|---|---|
+| `unknown` | GoPlus has no data for this token |
+| `low` | Minor flags only (small tax, anti-whale, unverified source) |
+| `medium` | Tax > 10%, mintable supply, upgradeable proxy, owner can modify balances or slippage |
+| `high` | Blacklist, cannot buy, cannot sell all, hidden owner, pausable transfers, owner can reclaim ownership |
+| `critical` | Honeypot or fake/imitation token |
+
+**`taxBps` in swap responses:**
+
+When a V2 route involves a fee-on-transfer token, each step in `steps[]` will include a `taxBps` field:
+
+```json
+{
+  "adapter":   "PANCAKE_V2",
+  "tokenIn":   "0xe43ef1fe041ba9e8da87e8c5bfd583b3b46a1111",
+  "tokenOut":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+  "amountOut": "47500000000000000",
+  "minOut":    "47025000000000000",
+  "taxBps":    500
+}
+```
+
+`taxBps` is `null` for non-tax tokens and non-V2 adapters.
+
+---
+
 ## GET /dex/swaps
 
 Paginated list of all aggregator swaps (OneMEMEAggregator `Swapped` events).
@@ -1001,3 +1092,9 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
 | `UNISWAP_V3_QUOTER_ADDRESS` | No | Uniswap V3 Quoter (no BSC default; set if deployed) |
 | `PANCAKE_V4_QUOTER_ADDRESS` | No | PancakeSwap V4 Quoter _(unused while V4 routing is disabled)_ |
 | `UNISWAP_V4_QUOTER_ADDRESS` | No | Uniswap V4 Quoter _(unused while V4 routing is disabled)_ |
+
+### Security
+
+| Variable | Required | Description |
+|---|---|---|
+| `GOPLUS_API_KEY` | No | GoPlus Security API key. Without a key the unauthenticated free tier is used (rate-limited). Powers `GET /dex/tokens/:address/security` and the transfer-tax correction applied to all V2 route quotes. Get a key at [docs.gopluslabs.io](https://docs.gopluslabs.io). |

@@ -1,11 +1,14 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Param,
   Query,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { DexService } from "./dex.service";
+import { DexService }      from "./dex.service";
+import { SecurityService } from "./security.service";
+import { isAddress }       from "../../helpers";
 
 /**
  * All read endpoints under /dex.
@@ -20,7 +23,10 @@ import { DexService } from "./dex.service";
  */
 @Controller("dex")
 export class DexController {
-  constructor(private readonly dex: DexService) {}
+  constructor(
+    private readonly dex:      DexService,
+    private readonly security: SecurityService,
+  ) {}
 
   /**
    * GET /dex/adapters
@@ -64,6 +70,21 @@ export class DexController {
   @Get("tokens/:address")
   getToken(@Param("address") address: string) {
     return this.wrapSubgraph(() => this.dex.getToken(address));
+  }
+
+  /**
+   * GET /dex/tokens/:address/security
+   * GoPlus Security report for a token: tax rates, honeypot check, ownership risks,
+   * trading restrictions, and a derived riskLevel + warnings array.
+   *
+   * `dataAvailable: false` means GoPlus has no record for this token (newly deployed
+   * or not yet indexed) — the report fields will be null/false but that does NOT
+   * mean the token is safe.
+   */
+  @Get("tokens/:address/security")
+  getTokenSecurity(@Param("address") address: string) {
+    if (!isAddress(address)) throw new BadRequestException("address must be a valid EVM address");
+    return this.security.getTokenSecurity(address);
   }
 
   /**
