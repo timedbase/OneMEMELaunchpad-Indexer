@@ -79,7 +79,7 @@ interface GoPlusResponse {
 const _cache    = new Map<string, { data: GoPlusRawToken | null; expiresAt: number }>();
 const _inflight = new Map<string, Promise<GoPlusRawToken | null>>();
 
-const CACHE_TTL_HIT  = 10 * 60 * 1_000; // 10 min — normal result
+const CACHE_TTL_HIT  = 12 * 60 * 60 * 1_000; // 12 hr — normal result
 const CACHE_TTL_MISS =      60 * 1_000;  //  1 min — error / not found (retry sooner)
 
 const GOPLUS_BASE = "https://api.gopluslabs.io/api/v1";
