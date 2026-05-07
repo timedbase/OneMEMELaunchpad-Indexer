@@ -1112,4 +1112,5 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
 
 | Variable | Required | Description |
 |---|---|---|
-| `GOPLUS_API_KEY` | No | GoPlus Security API key. Without a key the unauthenticated free tier is used (rate-limited). Powers `GET /dex/tokens/:address/security` and the transfer-tax correction applied to all V2 route quotes. Get a key at [docs.gopluslabs.io](https://docs.gopluslabs.io). |
+| `GOPLUS_APP_KEY` | No | GoPlus app key. Paired with `GOPLUS_APP_SECRET` to obtain a Bearer access token via `POST /api/v1/token` (sign = SHA1(app_key + unix_time + app_secret)). Omit both to use the unauthenticated free tier (rate-limited). Get credentials at [docs.gopluslabs.io](https://docs.gopluslabs.io). |
+| `GOPLUS_APP_SECRET` | No | GoPlus app secret. Required alongside `GOPLUS_APP_KEY`. |

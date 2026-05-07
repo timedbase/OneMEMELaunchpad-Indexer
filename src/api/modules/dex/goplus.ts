@@ -2,9 +2,15 @@
  * GoPlus Security API client.
  * https://docs.gopluslabs.io/reference/api-reference/token-security-details
  *
- * Set GOPLUS_API_KEY in env to use an authenticated (higher-rate) plan.
- * Unauthenticated requests hit the free tier (rate-limited).
+ * Authentication (two-step):
+ *   1. POST /api/v1/token  — exchange GOPLUS_APP_KEY + GOPLUS_APP_SECRET for a
+ *      short-lived access token (sign = SHA1(app_key + time + app_secret)).
+ *   2. Subsequent requests carry  Authorization: Bearer <access_token>.
+ *
+ * Omit both env vars to use the free (unauthenticated, rate-limited) tier.
  */
+
+import { createHash } from "node:crypto";
 
 // ─── Raw API types ────────────────────────────────────────────────────────────
 
@@ -74,17 +80,58 @@ interface GoPlusResponse {
   result:  Record<string, GoPlusRawToken>;
 }
 
-// ─── Cache + in-flight dedup ──────────────────────────────────────────────────
+interface GoPlusTokenResponse {
+  code:   number;
+  result: { access_token: string };
+}
+
+// ─── Access-token cache ───────────────────────────────────────────────────────
+
+// Access tokens are cached for 50 min (conservative — actual GoPlus TTL is ~1 hr).
+const TOKEN_TTL = 50 * 60 * 1_000;
+let _accessToken: { token: string; expiresAt: number } | null = null;
+
+async function getAccessToken(): Promise<string | null> {
+  const appKey    = process.env.GOPLUS_APP_KEY    ?? "";
+  const appSecret = process.env.GOPLUS_APP_SECRET ?? "";
+  if (!appKey || !appSecret) return null;
+
+  const now = Date.now();
+  if (_accessToken && _accessToken.expiresAt > now) return _accessToken.token;
+
+  const time = Math.floor(now / 1_000);
+  const sign = createHash("sha1").update(`${appKey}${time}${appSecret}`).digest("hex");
+
+  try {
+    const res = await fetch(`${GOPLUS_BASE}/token`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ app_key: appKey, time, sign }),
+      signal:  AbortSignal.timeout(3_000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = (await res.json()) as GoPlusTokenResponse;
+    if (json.code !== 1) throw new Error(`code ${json.code}`);
+
+    _accessToken = { token: json.result.access_token, expiresAt: now + TOKEN_TTL };
+    return _accessToken.token;
+  } catch (err) {
+    console.warn(`[GoPlus] token fetch failed: ${String(err)}`);
+    return null;
+  }
+}
+
+// ─── Token-data cache + in-flight dedup ──────────────────────────────────────
 
 const _cache    = new Map<string, { data: GoPlusRawToken | null; expiresAt: number }>();
 const _inflight = new Map<string, Promise<GoPlusRawToken | null>>();
 
 const CACHE_TTL_HIT  = 12 * 60 * 60 * 1_000; // 12 hr — normal result
-const CACHE_TTL_MISS =      60 * 1_000;  //  1 min — error / not found (retry sooner)
+const CACHE_TTL_MISS =      60 * 1_000;        //  1 min — error / not found (retry sooner)
 
 const GOPLUS_BASE = "https://api.gopluslabs.io/api/v1";
 
-// ─── Fetch ────────────────────────────────────────────────────────────────────
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
  * Evicts the cached entry for a specific token so the next call re-fetches from GoPlus.
@@ -123,15 +170,17 @@ export async function fetchGoPlusTokenSecurity(
   return p;
 }
 
+// ─── Internal fetch ───────────────────────────────────────────────────────────
+
 async function _doFetch(
   chainId: number,
   address: string,
   cacheKey: string,
   now: number,
 ): Promise<GoPlusRawToken | null> {
-  const apiKey  = process.env.GOPLUS_API_KEY ?? "";
   const headers: Record<string, string> = {};
-  if (apiKey) headers["Authorization"] = apiKey;
+  const token = await getAccessToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
 
   // Address is user-supplied — encode to prevent query-string injection.
   const url = `${GOPLUS_BASE}/token_security/${chainId}?contract_addresses=${encodeURIComponent(address.toLowerCase())}`;

@@ -806,7 +806,8 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 | `UNISWAP_V4_QUOTER_ADDRESS` | Uniswap V4 quoter _(unused while V4 routing is disabled)_ |
 | `FOURMEME_HELPER_ADDRESS` | Override FourMEME TokenManagerHelper3 (default: BSC mainnet) |
 | `FLAPSH_PORTAL_ADDRESS` | Override Flap.SH Portal contract (default: BSC mainnet) |
-| `GOPLUS_API_KEY` | GoPlus Security API key — omit for free tier (rate-limited); required for `/dex/tokens/:address/security` at scale |
+| `GOPLUS_APP_KEY` | GoPlus app key — used with `GOPLUS_APP_SECRET` to obtain a Bearer access token; omit both for free tier (rate-limited) |
+| `GOPLUS_APP_SECRET` | GoPlus app secret — paired with `GOPLUS_APP_KEY`; sign = SHA1(app_key + unix_time + app_secret) |
 
 ---
 
