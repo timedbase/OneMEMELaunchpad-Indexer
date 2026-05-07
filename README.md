@@ -616,16 +616,6 @@ All DEX endpoints live under `/api/v1/{chain}/dex/`. They require the aggregator
 | `POST` | `/api/v1/{chain}/dex/swap` | Build `OneMEMEAggregator.swap()` calldata — adapter selection is automatic |
 | `POST` | `/api/v1/{chain}/dex/batch-swap` | Build `OneMEMEAggregator.batchSwap()` calldata (self-broadcast) |
 
-**Gasless / meta-transaction endpoints**
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/{chain}/dex/metatx/nonce/:user` | On-chain nonce for a user |
-| `POST` | `/api/v1/{chain}/dex/metatx/digest` | EIP-712 digest for a single-hop gasless swap |
-| `POST` | `/api/v1/{chain}/dex/metatx/relay` | Relay a signed `MetaTxOrder` on-chain |
-| `POST` | `/api/v1/{chain}/dex/metatx/batch-digest` | EIP-712 digest for a multi-hop gasless swap |
-| `POST` | `/api/v1/{chain}/dex/metatx/batch-relay` | Relay a signed `BatchMetaTxOrder` on-chain |
-
 **Native BNB support**
 
 Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in any swap/quote/route endpoint. The API automatically normalises it to WBNB for routing. Responses include:
@@ -649,25 +639,6 @@ Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in 
 | `UNISWAP_V2` | amm-v2 | Uniswap V2 on BSC |
 | `UNISWAP_V3` | amm-v3 | Uniswap V3 on BSC |
 | `UNISWAP_V4` | amm-v4 | Uniswap V4 on BSC _(registered on-chain; routing disabled)_ |
-
-**Gasless swap flow (single-hop)**
-
-```
-1. GET  /dex/metatx/nonce/:user   → nonce
-2. POST /dex/metatx/digest        → { digest, order }
-3. wallet.signMessage(digest)     → sig
-4. POST /dex/metatx/relay         → { txHash }
-```
-
-**Gasless swap flow (multi-hop)**
-
-```
-1. GET  /dex/route                → { steps[] }
-2. GET  /dex/metatx/nonce/:user   → nonce
-3. POST /dex/metatx/batch-digest  → { digest, order }
-4. wallet.signMessage(digest)     → sig
-5. POST /dex/metatx/batch-relay   → { txHash }
-```
 
 ---
 
@@ -796,8 +767,6 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 | `UNISWAP_V3_SUBGRAPH_URL` | Override for Uniswap V3 subgraph |
 | `UNISWAP_V4_SUBGRAPH_URL` | Override for Uniswap V4 subgraph _(unused while V4 routing is disabled)_ |
 | `AGGREGATOR_ADDRESS` | `OneMEMEAggregator` contract address (required for swap calldata) |
-| `METATX_ADDRESS` | `OneMEMEMetaTx` contract address (required for gasless relay) |
-| `RELAYER_PRIVATE_KEY` | 0x-prefixed EOA private key for the gas-paying relayer account |
 | `PANCAKE_V2_ROUTER_ADDRESS` | Override PancakeSwap V2 router (default: BSC mainnet) |
 | `PANCAKE_V3_QUOTER_ADDRESS` | Override PancakeSwap V3 quoter (default: BSC mainnet) |
 | `UNISWAP_V2_ROUTER_ADDRESS` | Override Uniswap V2 router (default: BSC mainnet) |
@@ -851,8 +820,6 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 │       │   ├── route.controller.ts
 │       │   ├── security.service.ts  # GoPlus security reports + tax-bps lookup
 │       │   ├── goplus.ts            # GoPlus API client (cached, in-flight dedup)
-│       │   ├── metatx.service.ts    # gasless: EIP-712 digest, nonce, relay
-│       │   └── metatx.controller.ts
 │       └── index/               # GET /api/v1/{chain} — route index
 ├── docker-compose.yml           # local Postgres for off-chain tables
 ├── Dockerfile

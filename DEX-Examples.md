@@ -7,8 +7,6 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 
 **Native BNB:** Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in any swap, quote, or route endpoint. The API normalises it to WBNB internally. Responses include `nativeIn: true` / `nativeOut: true` flags and a `value` field (wei string) indicating how much `msg.value` the caller must attach.
 
-> **Gasless swaps (MetaTx) are temporarily disabled.** All `/dex/metatx/*` endpoints return 404 until re-enabled. Direct swaps via `POST /dex/swap`, `POST /dex/batch-swap`, `GET /dex/route`, and `GET /dex/quote` are fully operational.
-
 ---
 
 ## Table of Contents
@@ -26,18 +24,6 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 11. [POST /dex/swap](#post-dexswap)
 12. [GET /dex/route](#get-dexroute)
 13. [POST /dex/batch-swap](#post-dexbatch-swap)
-
-**Gasless (MetaTx) — disabled, coming soon:**
-- GET /dex/metatx/relayer-fee
-- GET /dex/metatx/permit-type
-- GET /dex/metatx/permit-digest
-- GET /dex/metatx/permit2-digest
-- GET /dex/metatx/nonce/:user
-- POST /dex/metatx/digest
-- POST /dex/metatx/relay
-- POST /dex/metatx/verify-sig
-- POST /dex/metatx/batch-digest
-- POST /dex/metatx/batch-relay
 
 ---
 
@@ -701,25 +687,6 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2'
 
 ---
 
-## Gasless Swaps (MetaTx) — Coming Soon
-
-All `/dex/metatx/*` endpoints are temporarily disabled and return `404`.
-The gasless swap feature is under development and will be re-enabled in a future release.
-
-**Planned endpoints:**
-- `GET  /dex/metatx/relayer-fee` — suggested relayer fee based on live gas price
-- `GET  /dex/metatx/permit-type` — auto-detect EIP-2612 / Permit2 / pre-approve
-- `GET  /dex/metatx/permit-digest` — EIP-2612 permit typed data
-- `GET  /dex/metatx/permit2-digest` — Permit2 PermitTransferFrom typed data
-- `GET  /dex/metatx/nonce/:user` — on-chain MetaTx nonce
-- `POST /dex/metatx/digest` — EIP-712 swap order digest
-- `POST /dex/metatx/relay` — submit signed order on-chain
-- `POST /dex/metatx/verify-sig` — debug signature recovery
-- `POST /dex/metatx/batch-digest` — EIP-712 multi-hop order digest
-- `POST /dex/metatx/batch-relay` — submit signed multi-hop order
-
----
-
 ## GET /dex/quote
 
 Live on-chain quote — simulates expected output before committing to a swap.
@@ -1095,10 +1062,8 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
 
 | Variable | Required | Description |
 |---|---|---|
-| `AGGREGATOR_ADDRESS` | Yes (`POST /dex/swap`, `POST /dex/batch-swap`, `POST /dex/metatx/*`) | OneMEMEAggregator — BSC mainnet: `0x6F66042eab4D01BC1F7C87968481Bbad46a1Da5B` |
-| `METATX_ADDRESS` | Yes (`POST /dex/metatx/*`) | OneMEMEMetaTx — BSC mainnet: `0x1dEc224F47a84505a00584Ce7B23D0455D064c5b` |
-| `RELAYER_PRIVATE_KEY` | Yes (`POST /dex/metatx/relay`) | 0x-prefixed private key of the funded relayer EOA |
-| `BSC_RPC_URL` | Yes (quotes, relay) | BSC HTTP RPC for contract reads and relay broadcast |
+| `AGGREGATOR_ADDRESS` | Yes (`POST /dex/swap`, `POST /dex/batch-swap`) | OneMEMEAggregator — BSC mainnet: `0x6F66042eab4D01BC1F7C87968481Bbad46a1Da5B` |
+| `BSC_RPC_URL` | Yes (quotes) | BSC HTTP RPC for contract reads |
 | `FOURMEME_HELPER_ADDRESS` | No | TokenManagerHelper3 address (default: BSC mainnet) |
 | `FLAPSH_PORTAL_ADDRESS` | No | Flap.SH Portal address (default: BSC mainnet) |
 | `PANCAKE_V2_ROUTER_ADDRESS` | No | PancakeSwap V2 Router (default: BSC mainnet) |

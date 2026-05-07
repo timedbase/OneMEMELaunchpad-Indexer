@@ -1,14 +1,13 @@
 /**
- * On-chain client for OneMEMEAggregator and OneMEMEMetaTx contracts.
+ * On-chain client for OneMEMEAggregator.
  *
  * Intentionally separate from src/api/rpc.ts — owns its own viem client
- * instances and reads only AGGREGATOR_ADDRESS / METATX_ADDRESS / RELAYER_PRIVATE_KEY.
+ * instance and reads only AGGREGATOR_ADDRESS.
  * Never imports from or modifies the existing rpc.ts.
  */
 
 import {
   createPublicClient,
-  createWalletClient,
   http,
   parseAbi,
   keccak256,
@@ -17,11 +16,9 @@ import {
   encodeAbiParameters,
   parseAbiParameters,
   encodeFunctionData,
-  recoverAddress,
   defineChain,
   type Hex,
 } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
 
 // ─── Chain / Clients ──────────────────────────────────────────────────────────
 
@@ -37,7 +34,7 @@ function dexChain() {
 
 let _dexPublicClient: ReturnType<typeof createPublicClient> | null = null;
 
-/** Lazily-initialised read-only client for aggregator/metatx view calls. */
+/** Lazily-initialised read-only client for aggregator view calls. */
 export function getDexPublicClient() {
   if (!_dexPublicClient) {
     _dexPublicClient = createPublicClient({
@@ -48,25 +45,6 @@ export function getDexPublicClient() {
   return _dexPublicClient;
 }
 
-let _dexWalletClient: ReturnType<typeof createWalletClient> | null = null;
-let _dexAccount:      ReturnType<typeof privateKeyToAccount>  | null = null;
-
-/** Lazily-initialised wallet client for relay execution. Cached for the lifetime of the process. */
-function getDexWalletClient(): { wallet: ReturnType<typeof createWalletClient>; account: ReturnType<typeof privateKeyToAccount> } {
-  if (!process.env.RELAYER_PRIVATE_KEY) {
-    throw new Error("RELAYER_PRIVATE_KEY is not configured. Meta-tx relay requires a funded relayer account.");
-  }
-  if (!_dexWalletClient || !_dexAccount) {
-    _dexAccount      = privateKeyToAccount(process.env.RELAYER_PRIVATE_KEY as Hex);
-    _dexWalletClient = createWalletClient({
-      account:   _dexAccount,
-      chain:     dexChain(),
-      transport: http(process.env.BSC_RPC_URL, { timeout: 30_000, retryCount: 2, retryDelay: 500 }),
-    });
-  }
-  return { wallet: _dexWalletClient, account: _dexAccount };
-}
-
 // ─── Contract addresses ───────────────────────────────────────────────────────
 
 export function aggregatorAddress(): Hex {
@@ -74,20 +52,6 @@ export function aggregatorAddress(): Hex {
     throw new Error("AGGREGATOR_ADDRESS is not configured.");
   }
   return process.env.AGGREGATOR_ADDRESS as Hex;
-}
-
-export function metaTxAddress(): Hex {
-  if (!process.env.METATX_ADDRESS) {
-    throw new Error("METATX_ADDRESS is not configured.");
-  }
-  return process.env.METATX_ADDRESS as Hex;
-}
-
-// Permit2 universal contract — same address on every EVM chain.
-const DEFAULT_PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
-
-export function permit2Address(): Hex {
-  return (process.env.PERMIT2_ADDRESS ?? DEFAULT_PERMIT2) as Hex;
 }
 
 // ─── Adapter IDs ──────────────────────────────────────────────────────────────
@@ -720,21 +684,6 @@ export interface SwapStep {
   adapterData: Hex;
 }
 
-export interface BatchMetaTxOrder {
-  user:                  Hex;
-  nonce:                 bigint;
-  deadline:              bigint;
-  steps:                 SwapStep[];
-  grossAmountIn:         bigint;
-  minFinalOut:           bigint;
-  recipient:             Hex;
-  swapDeadline:          bigint;
-  relayerFee:            bigint;
-  relayerFeeTokenAmount: bigint;
-  relayerFeeAdapterId:   Hex;
-  relayerFeeAdapterData: Hex;
-}
-
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
 
 export const AGGREGATOR_ABI = parseAbi([
@@ -742,269 +691,17 @@ export const AGGREGATOR_ABI = parseAbi([
   "event Swapped(address indexed user, bytes32 indexed adapterId, address tokenIn, address tokenOut, uint256 grossAmountIn, uint256 feeCharged, uint256 amountOut)",
 ]);
 
-// Shorthand for the MetaTxOrder tuple — used in both executeMetaTx and orderDigest.
-const META_ORDER_TUPLE =
-  "(address user, uint256 nonce, uint256 deadline, bytes32 adapterId, address tokenIn, uint256 grossAmountIn, address tokenOut, uint256 minUserOut, address recipient, uint256 swapDeadline, bytes adapterData, uint256 relayerFee, uint256 relayerFeeTokenAmount, bytes32 relayerFeeAdapterId, bytes relayerFeeAdapterData)";
-
-export const METATX_ABI = parseAbi([
-  `function executeMetaTx(${META_ORDER_TUPLE} order, bytes sig, (uint8 permitType, bytes data) permit)`,
-  `function orderDigest(${META_ORDER_TUPLE} order) view returns (bytes32)`,
-  "function nonces(address user) view returns (uint256)",
-]);
-
 export const BATCH_AGGREGATOR_ABI = parseAbi([
   "function batchSwap((bytes32 adapterId, address tokenIn, address tokenOut, uint256 minOut, bytes adapterData)[] steps, uint256 amountIn, uint256 minFinalOut, address to, uint256 deadline) payable returns (uint256 finalAmountOut)",
   "event BatchSwapped(address indexed user, address tokenIn, address tokenOut, uint256 grossAmountIn, uint256 feeCharged, uint256 amountOut, uint256 stepCount)",
 ]);
 
-const BATCH_META_ORDER_TUPLE =
-  "(address user, uint256 nonce, uint256 deadline, (bytes32 adapterId, address tokenIn, address tokenOut, uint256 minOut, bytes adapterData)[] steps, uint256 grossAmountIn, uint256 minFinalOut, address recipient, uint256 swapDeadline, uint256 relayerFee, uint256 relayerFeeTokenAmount, bytes32 relayerFeeAdapterId, bytes relayerFeeAdapterData)";
-
-export const BATCH_METATX_ABI = parseAbi([
-  `function batchExecuteMetaTx(${BATCH_META_ORDER_TUPLE} order, bytes sig, (uint8 permitType, bytes data) permit) returns (uint256 amountOut)`,
-  `function batchOrderDigest(${BATCH_META_ORDER_TUPLE} order) view returns (bytes32)`,
-  "event BatchMetaTxExecuted(address indexed user, address indexed relayer, address tokenIn, address tokenOut, uint256 grossAmountIn, uint256 amountOut, uint256 relayerFee, uint256 nonce, uint256 stepCount)",
-]);
-
-// ─── Shared types ─────────────────────────────────────────────────────────────
-
-export interface MetaTxOrder {
-  user:                   Hex;
-  nonce:                  bigint;
-  deadline:               bigint;
-  adapterId:              Hex;
-  tokenIn:                Hex;
-  grossAmountIn:          bigint;
-  tokenOut:               Hex;
-  minUserOut:             bigint;
-  recipient:              Hex;
-  swapDeadline:           bigint;
-  adapterData:            Hex;
-  relayerFee:             bigint;
-  // ERC-20 output fee: deduct relayerFeeTokenAmount of tokenOut, swap→BNB, send to relayer.
-  // All three must be set together; leave at zero/empty for BNB-output swaps.
-  relayerFeeTokenAmount:  bigint;
-  relayerFeeAdapterId:    Hex;
-  relayerFeeAdapterData:  Hex;
-}
-
-export interface PermitData {
-  permitType: 0 | 1 | 2;  // 0 = PERMIT_NONE, 1 = EIP-2612, 2 = Permit2
-  data:       Hex;
-}
-
-// ─── Relayer fee estimation ───────────────────────────────────────────────────
-
-// Conservative gas budgets for MetaTx relay transactions.
-// Single-step: MetaTx overhead (~100k) + single aggregator swap (~150k).
-// Batch: MetaTx overhead (~130k) + batchSwap base (~70k) + per-step (~120k).
-const GAS_META_SINGLE    = 250_000n;
-const GAS_META_BATCH_BASE = 200_000n;
-const GAS_META_PER_STEP   = 120_000n;
-
-// Premium paid to the relayer above gas break-even, in basis points.
-const RELAYER_PREMIUM_BPS = 3_000n; // 30%
-
-const WBNB = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c" as Hex;
-const ZERO_BYTES32 = "0x0000000000000000000000000000000000000000000000000000000000000000" as Hex;
-
-export async function estimateRelayerFee(
-  stepCount:  number,
-  tokenOut?:  Hex,   // ERC-20 output token; omit or pass address(0) for BNB-output swaps
-  deadline?:  bigint,
-): Promise<{
-  gasPrice:              bigint;
-  gasEstimate:           bigint;
-  relayerFee:            bigint;
-  relayerFeeTokenAmount: bigint;
-  relayerFeeAdapterId:   Hex;
-  relayerFeeAdapterData: Hex;
-}> {
-  // Extra gas for the secondary fee-conversion swap when output is ERC-20.
-  const feeSwapGas = (tokenOut && tokenOut !== WBNB && tokenOut !== "0x0000000000000000000000000000000000000000")
-    ? 120_000n : 0n;
-
-  const gasPrice    = await getDexPublicClient().getGasPrice();
-  const gasEstimate = (stepCount <= 1 ? GAS_META_SINGLE : GAS_META_BATCH_BASE + BigInt(stepCount) * GAS_META_PER_STEP)
-    + feeSwapGas;
-  const relayerFee  = (gasEstimate * gasPrice * (10_000n + RELAYER_PREMIUM_BPS)) / 10_000n;
-
-  // For ERC-20 output: quote how many tokenOut tokens the fee swap will cost.
-  // Uses V2 getAmountsIn([tokenOut, WBNB], relayerFee) — exact amount needed.
-  // Add 1% buffer to cover slippage between quote time and execution.
-  let relayerFeeTokenAmount = 0n;
-  let relayerFeeAdapterId: Hex   = ZERO_BYTES32;
-  let relayerFeeAdapterData: Hex = "0x";
-
-  if (feeSwapGas > 0n && tokenOut) {
-    try {
-      const exactIn = await quoteV2AmountsIn("PANCAKE_V2", [tokenOut, WBNB], relayerFee);
-      relayerFeeTokenAmount = (exactIn * 10_100n) / 10_000n; // +1% slippage buffer
-      relayerFeeAdapterId   = ADAPTER_IDS["PANCAKE_V2"];
-      relayerFeeAdapterData = encodeV2AdapterData([tokenOut, WBNB], deadline ?? BigInt(Math.floor(Date.now() / 1000)) + 1800n);
-    } catch {
-      // Pool may not exist — caller should handle relayerFeeTokenAmount === 0n as "not available"
-    }
-  }
-
-  return { gasPrice, gasEstimate, relayerFee, relayerFeeTokenAmount, relayerFeeAdapterId, relayerFeeAdapterData };
-}
-
-// ─── Contract reads ───────────────────────────────────────────────────────────
-
-export async function getUserNonce(user: Hex): Promise<bigint> {
-  return getDexPublicClient().readContract({
-    address:      metaTxAddress(),
-    abi:          METATX_ABI,
-    functionName: "nonces",
-    args:         [user],
-  }) as Promise<bigint>;
-}
-
-export async function getOrderDigest(order: MetaTxOrder): Promise<Hex> {
-  return getDexPublicClient().readContract({
-    address:      metaTxAddress(),
-    abi:          METATX_ABI,
-    functionName: "orderDigest",
-    args:         [order],
-  }) as Promise<Hex>;
-}
-
-/** Recovers the signer address from an order + signature for debugging. */
-export async function recoverOrderSigner(order: MetaTxOrder, sig: Hex): Promise<Hex> {
-  const digest = await getOrderDigest(order);
-  return recoverAddress({ hash: digest, signature: sig });
-}
-
-// ─── EIP-712 typed data builders ─────────────────────────────────────────────
-
-
-// MetaTx domain — name and version match the contract constructor.
-function metaTxDomain() {
-  return {
-    name:              "OneMEMEMetaTx",
-    version:           "1",
-    chainId:           getDexPublicClient().chain?.id ?? 56,
-    verifyingContract: metaTxAddress(),
-  };
-}
-
-const META_ORDER_TYPES = {
-  MetaTxOrder: [
-    { name: "user",                  type: "address" },
-    { name: "nonce",                 type: "uint256" },
-    { name: "deadline",              type: "uint256" },
-    { name: "adapterId",             type: "bytes32" },
-    { name: "tokenIn",               type: "address" },
-    { name: "grossAmountIn",         type: "uint256" },
-    { name: "tokenOut",              type: "address" },
-    { name: "minUserOut",            type: "uint256" },
-    { name: "recipient",             type: "address" },
-    { name: "swapDeadline",          type: "uint256" },
-    { name: "adapterData",           type: "bytes"   },
-    { name: "relayerFee",            type: "uint256" },
-    { name: "relayerFeeTokenAmount", type: "uint256" },
-    { name: "relayerFeeAdapterId",   type: "bytes32" },
-    { name: "relayerFeeAdapterData", type: "bytes"   },
-  ],
-} as const;
-
-const BATCH_META_ORDER_TYPES = {
-  BatchMetaTxOrder: [
-    { name: "user",                  type: "address"   },
-    { name: "nonce",                 type: "uint256"   },
-    { name: "deadline",              type: "uint256"   },
-    { name: "steps",                 type: "SwapStep[]"},
-    { name: "grossAmountIn",         type: "uint256"   },
-    { name: "minFinalOut",           type: "uint256"   },
-    { name: "recipient",             type: "address"   },
-    { name: "swapDeadline",          type: "uint256"   },
-    { name: "relayerFee",            type: "uint256"   },
-    { name: "relayerFeeTokenAmount", type: "uint256"   },
-    { name: "relayerFeeAdapterId",   type: "bytes32"   },
-    { name: "relayerFeeAdapterData", type: "bytes"     },
-  ],
-  SwapStep: [
-    { name: "adapterId",   type: "bytes32" },
-    { name: "tokenIn",     type: "address" },
-    { name: "tokenOut",    type: "address" },
-    { name: "minOut",      type: "uint256" },
-    { name: "adapterData", type: "bytes"   },
-  ],
-} as const;
-
-/** EIP-712 typed data for eth_signTypedData_v4 — single-step MetaTxOrder. */
-export async function buildMetaTxTypedData(order: MetaTxOrder) {
-  return {
-    domain:      metaTxDomain(),
-    types:       META_ORDER_TYPES,
-    primaryType: "MetaTxOrder" as const,
-    message: {
-      user:                  order.user,
-      nonce:                 order.nonce.toString(),
-      deadline:              order.deadline.toString(),
-      adapterId:             order.adapterId,
-      tokenIn:               order.tokenIn,
-      grossAmountIn:         order.grossAmountIn.toString(),
-      tokenOut:              order.tokenOut,
-      minUserOut:            order.minUserOut.toString(),
-      recipient:             order.recipient,
-      swapDeadline:          order.swapDeadline.toString(),
-      adapterData:           order.adapterData,
-      relayerFee:            order.relayerFee.toString(),
-      relayerFeeTokenAmount: order.relayerFeeTokenAmount.toString(),
-      relayerFeeAdapterId:   order.relayerFeeAdapterId,
-      relayerFeeAdapterData: order.relayerFeeAdapterData,
-    },
-  };
-}
-
-/** EIP-712 typed data for eth_signTypedData_v4 — BatchMetaTxOrder. */
-export async function buildBatchMetaTxTypedData(order: BatchMetaTxOrder) {
-  return {
-    domain:      metaTxDomain(),
-    types:       BATCH_META_ORDER_TYPES,
-    primaryType: "BatchMetaTxOrder" as const,
-    message: {
-      ...order,
-      nonce:                 order.nonce.toString(),
-      deadline:              order.deadline.toString(),
-      grossAmountIn:         order.grossAmountIn.toString(),
-      minFinalOut:           order.minFinalOut.toString(),
-      swapDeadline:          order.swapDeadline.toString(),
-      relayerFee:            order.relayerFee.toString(),
-      relayerFeeTokenAmount: order.relayerFeeTokenAmount.toString(),
-      steps:                 order.steps.map(s => ({
-        ...s,
-        minOut: s.minOut.toString(),
-      })),
-    },
-  };
-}
-
-// ─── Relay execution ──────────────────────────────────────────────────────────
-
-export async function relayMetaTx(
-  order:  MetaTxOrder,
-  sig:    Hex,
-  permit: PermitData,
-): Promise<Hex> {
-  const { wallet, account } = getDexWalletClient();
-  return wallet.writeContract({
-    chain:        null,
-    account,
-    address:      metaTxAddress(),
-    abi:          METATX_ABI,
-    functionName: "executeMetaTx",
-    args:         [order, sig, permit],
-  });
-}
 
 // ─── Calldata builders ────────────────────────────────────────────────────────
 
 /**
  * Builds calldata for OneMEMEAggregator.swap().
- * The caller broadcasts this transaction themselves (non-gasless path).
+ * The caller broadcasts this transaction themselves.
  */
 export function buildSwapCalldata(
   adapterId:   Hex,
@@ -1024,22 +721,6 @@ export function buildSwapCalldata(
 }
 
 /**
- * Builds calldata for OneMEMEMetaTx.executeMetaTx().
- * The relayer broadcasts this on behalf of the user (gasless path).
- */
-export function buildMetaTxCalldata(
-  order:  MetaTxOrder,
-  sig:    Hex,
-  permit: PermitData,
-): Hex {
-  return encodeFunctionData({
-    abi:          METATX_ABI,
-    functionName: "executeMetaTx",
-    args:         [order, sig, permit],
-  });
-}
-
-/**
  * Builds calldata for OneMEMEAggregator.batchSwap().
  * Chains multiple adapter hops atomically in one transaction.
  */
@@ -1055,291 +736,4 @@ export function buildBatchSwapCalldata(
     functionName: "batchSwap",
     args:         [steps, amountIn, minFinalOut, to, deadline],
   });
-}
-
-export async function getBatchOrderDigest(order: BatchMetaTxOrder): Promise<Hex> {
-  return getDexPublicClient().readContract({
-    address:      metaTxAddress(),
-    abi:          BATCH_METATX_ABI,
-    functionName: "batchOrderDigest",
-    args:         [order],
-  }) as Promise<Hex>;
-}
-
-/**
- * Verifies that `sig` was produced by `order.user` over the on-chain EIP-712 digest.
- * Returns true if valid. Call this before relaying to avoid burning gas on bad sigs.
- */
-export async function verifyOrderSignature(order: MetaTxOrder, sig: Hex): Promise<boolean> {
-  const digest   = await getOrderDigest(order);
-  const recovered = await recoverAddress({ hash: digest, signature: sig });
-  return recovered.toLowerCase() === order.user.toLowerCase();
-}
-
-export async function verifyBatchOrderSignature(order: BatchMetaTxOrder, sig: Hex): Promise<boolean> {
-  const digest    = await getBatchOrderDigest(order);
-  const recovered = await recoverAddress({ hash: digest, signature: sig });
-  return recovered.toLowerCase() === order.user.toLowerCase();
-}
-
-export async function relayBatchMetaTx(
-  order:  BatchMetaTxOrder,
-  sig:    Hex,
-  permit: PermitData,
-): Promise<Hex> {
-  const { wallet, account } = getDexWalletClient();
-  return wallet.writeContract({
-    chain:        null,
-    account,
-    address:      metaTxAddress(),
-    abi:          BATCH_METATX_ABI,
-    functionName: "batchExecuteMetaTx",
-    args:         [order, sig, permit],
-  });
-}
-
-// ─── Permit helpers ───────────────────────────────────────────────────────────
-
-const ERC20_PERMIT_ABI = parseAbi([
-  "function name() view returns (string)",
-  "function version() view returns (string)",
-  "function nonces(address owner) view returns (uint256)",
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function DOMAIN_SEPARATOR() view returns (bytes32)",
-]);
-
-/**
- * Detects which permit modes are available for a token/owner pair.
- *
- * Probes on-chain in parallel:
- *   - EIP-2612: calls nonces(owner) — succeeds only if the token implements it
- *   - Permit2 readiness: reads token.allowance(owner, permit2) — max means ready
- *   - MetaTx direct allowance: reads token.allowance(owner, metaTx) — for type 0
- *
- * Returns a recommended permitType:
- *   1 (EIP-2612)  — token supports it; no prior setup needed
- *   2 (Permit2)   — fallback; needs one-time token.approve(permit2, max) if not ready
- *   0 (pre-approve) — last resort; user must approve MetaTx contract directly
- */
-export async function detectPermitType(
-  token:  Hex,
-  owner:  Hex,
-  amount: bigint,
-): Promise<{
-  supportsEip2612:   boolean;
-  permit2Allowance:  bigint;
-  permit2Ready:      boolean;
-  metaTxAllowance:   bigint;
-  metaTxReady:       boolean;
-  recommended:       0 | 1 | 2;
-}> {
-  const client = getDexPublicClient();
-  const p2     = permit2Address();
-  const metaTx = metaTxAddress();
-
-  const [eip2612, domSep, p2Allow, metaTxAllow] = await Promise.allSettled([
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "nonces",           args: [owner]        }) as Promise<bigint>,
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "DOMAIN_SEPARATOR"                       }) as Promise<Hex>,
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "allowance",        args: [owner, p2]    }) as Promise<bigint>,
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "allowance",        args: [owner, metaTx]}) as Promise<bigint>,
-  ]);
-
-  // EIP-2612 is only considered supported if nonces() works AND we can verify
-  // the domain separator — a domain mismatch causes silent permit failures on-chain.
-  let supportsEip2612 = eip2612.status === "fulfilled";
-  if (supportsEip2612 && domSep.status === "fulfilled") {
-    const { hashDomain } = await import("viem");
-    const chainId = client.chain?.id ?? 56;
-    let nameStr = token as string;
-    try {
-      nameStr = await client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "name" }) as string;
-    } catch { /* use address as fallback */ }
-    const verified = ["1", "2", ""].some(v => {
-      const d = v ? { name: nameStr, version: v, chainId, verifyingContract: token }
-                  : { name: nameStr, chainId, verifyingContract: token };
-      return hashDomain({ domain: d }).toLowerCase() === (domSep.value as string).toLowerCase();
-    });
-    if (!verified) supportsEip2612 = false; // domain mismatch — permit would fail silently
-  }
-  const permit2Allowance = p2Allow.status      === "fulfilled" ? p2Allow.value      : 0n;
-  const metaTxAllowance  = metaTxAllow.status  === "fulfilled" ? metaTxAllow.value  : 0n;
-  const permit2Ready     = permit2Allowance >= amount;
-  const metaTxReady      = metaTxAllowance  >= amount;
-
-  const recommended: 0 | 1 | 2 = supportsEip2612 ? 1 : 2;
-
-  return { supportsEip2612, permit2Allowance, permit2Ready, metaTxAllowance, metaTxReady, recommended };
-}
-
-/**
- * Builds the EIP-712 typed data the user must sign for an EIP-2612 permit.
- *
- * Probes the token for its actual domain version and verifies the computed
- * domain separator matches the on-chain value. This prevents silent permit
- * failures caused by domain mismatches (the MetaTx contract swallows permit
- * errors and reverts InsufficientAllowance, triggering a normal approval).
- *
- * Throws if the token does not support EIP-2612 or the domain cannot be verified.
- */
-export async function buildEip2612TypedData(
-  token:    Hex,
-  owner:    Hex,
-  spender:  Hex,
-  amount:   bigint,
-  deadline: bigint,
-): Promise<{
-  typedData: object;
-  nonce:     string;
-  version:   string;
-  permitDataEncoding: string;
-}> {
-  const client  = getDexPublicClient();
-  const chainId = client.chain?.id ?? 56;
-
-  // Read all token properties in parallel; version() and DOMAIN_SEPARATOR() may not exist.
-  const [nameRes, versionRes, nonceRes, domainSepRes] = await Promise.allSettled([
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "name"             }) as Promise<string>,
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "version"          }) as Promise<string>,
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "nonces", args: [owner] }) as Promise<bigint>,
-    client.readContract({ address: token, abi: ERC20_PERMIT_ABI, functionName: "DOMAIN_SEPARATOR" }) as Promise<Hex>,
-  ]);
-
-  if (nonceRes.status === "rejected") {
-    throw new Error("Token does not implement EIP-2612 (nonces() call failed)");
-  }
-
-  const name    = nameRes.status    === "fulfilled" ? nameRes.value    : token;
-  const nonce   = nonceRes.value;
-
-  // Determine domain version: read from contract, else try "1" then "2".
-  const onChainVersion = versionRes.status === "fulfilled" ? versionRes.value : null;
-  const onChainDomainSep = domainSepRes.status === "fulfilled" ? domainSepRes.value : null;
-
-  // Build and verify domain — if the token exposes DOMAIN_SEPARATOR we confirm ours matches.
-  // This catches non-standard domains before the user signs a useless permit.
-  const { hashDomain } = await import("viem");
-  const candidateVersions = onChainVersion ? [onChainVersion] : ["1", "2"];
-  let resolvedVersion = candidateVersions[0]!;
-  let domainMismatch  = false;
-
-  if (onChainDomainSep) {
-    let matched = false;
-    for (const v of candidateVersions) {
-      const computed = hashDomain({
-        domain: { name: String(name), version: v, chainId, verifyingContract: token },
-      });
-      if (computed.toLowerCase() === onChainDomainSep.toLowerCase()) {
-        resolvedVersion = v;
-        matched = true;
-        break;
-      }
-    }
-    // Also try without version field (some tokens omit it)
-    if (!matched) {
-      const computedNoVersion = hashDomain({
-        domain: { name: String(name), chainId, verifyingContract: token },
-      });
-      if (computedNoVersion.toLowerCase() === onChainDomainSep.toLowerCase()) {
-        resolvedVersion = "";
-        matched = true;
-      }
-    }
-    if (!matched) domainMismatch = true;
-  }
-
-  if (domainMismatch) {
-    throw new Error(
-      "Token has a non-standard EIP-712 domain — permit signature would fail silently. Use Permit2 instead.",
-    );
-  }
-
-  // Build domain object (omit version if token doesn't use it)
-  const domain: Record<string, unknown> = resolvedVersion
-    ? { name: String(name), version: resolvedVersion, chainId, verifyingContract: token }
-    : { name: String(name), chainId, verifyingContract: token };
-
-  const typedData = {
-    domain,
-    types: {
-      Permit: [
-        { name: "owner",    type: "address" },
-        { name: "spender",  type: "address" },
-        { name: "value",    type: "uint256" },
-        { name: "nonce",    type: "uint256" },
-        { name: "deadline", type: "uint256" },
-      ],
-    },
-    primaryType: "Permit",
-    message: {
-      owner,
-      spender,
-      value:    amount.toString(),
-      nonce:    nonce.toString(),
-      deadline: deadline.toString(),
-    },
-  };
-
-  return {
-    typedData,
-    nonce:   nonce.toString(),
-    version: resolvedVersion,
-    permitDataEncoding: "abi.encode(uint256 deadline, uint8 v, bytes32 r, bytes32 s)",
-  };
-}
-
-/**
- * Builds the EIP-712 typed data the user must sign for a Permit2
- * PermitTransferFrom authorisation, and the abi.encode recipe for
- * converting the signature → permitData.
- *
- * The user must have previously called token.approve(permit2, type(uint256).max)
- * once. After that, all authorisations are signed off-chain with this flow.
- */
-export async function buildPermit2TypedData(
-  token:    Hex,
-  spender:  Hex,
-  amount:   bigint,
-  nonce:    bigint,
-  deadline: bigint,
-): Promise<{
-  typedData: object;
-  nonce:     string;
-  permitDataEncoding: string;
-}> {
-  const client  = getDexPublicClient();
-  const chainId = client.chain?.id ?? 56;
-  const p2Addr  = permit2Address();
-
-  const typedData = {
-    domain: {
-      name:              "Permit2",
-      chainId,
-      verifyingContract: p2Addr,
-    },
-    types: {
-      PermitTransferFrom: [
-        { name: "permitted", type: "TokenPermissions" },
-        { name: "spender",   type: "address" },
-        { name: "nonce",     type: "uint256" },
-        { name: "deadline",  type: "uint256" },
-      ],
-      TokenPermissions: [
-        { name: "token",  type: "address" },
-        { name: "amount", type: "uint256" },
-      ],
-    },
-    primaryType: "PermitTransferFrom",
-    message: {
-      permitted: { token, amount: amount.toString() },
-      spender,
-      nonce:    nonce.toString(),
-      deadline: deadline.toString(),
-    },
-  };
-
-  return {
-    typedData,
-    nonce: nonce.toString(),
-    permitDataEncoding: "abi.encode(uint256 nonce, uint256 deadline, bytes signature)",
-  };
 }

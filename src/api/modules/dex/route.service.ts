@@ -8,8 +8,6 @@
  *   • Calldata building for direct (non-gasless) swap and batch-swap transactions
  *
  * Adapter selection is 100% internal — no public endpoint accepts an adapter name.
- * This service has no knowledge of meta-transactions, relayers, or EIP-712.
- * Those concerns belong to MetaTxService which sits above this layer.
  */
 
 import { Injectable, BadRequestException, ServiceUnavailableException, Logger } from "@nestjs/common";
@@ -98,7 +96,7 @@ interface DiscoveredPool {
   tickSpacing: number; // derived from fee when not present in subgraph
 }
 
-// ─── Shared helpers (exported for MetaTxService) ──────────────────────────────
+// ─── Shared helpers ───────────────────────────────────────────────────────────
 
 export function isNative(addr: string): boolean {
   return addr.toLowerCase() === NATIVE_BNB;
