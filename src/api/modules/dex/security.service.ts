@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { fetchGoPlusTokenSecurity, type GoPlusRawToken } from "./goplus";
+import { fetchGoPlusTokenSecurity, clearGoPlusCache, type GoPlusRawToken } from "./goplus";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -119,6 +119,13 @@ export class SecurityService {
 
   /** Full security report for a token (endpoint response). */
   async getTokenSecurity(address: string): Promise<TokenSecurityReport> {
+    const raw = await fetchGoPlusTokenSecurity(this.chainId, address);
+    return this.normalise(address, raw);
+  }
+
+  /** Evict cached data for a token and re-fetch immediately from GoPlus. */
+  async refreshTokenSecurity(address: string): Promise<TokenSecurityReport> {
+    clearGoPlusCache(this.chainId, address);
     const raw = await fetchGoPlusTokenSecurity(this.chainId, address);
     return this.normalise(address, raw);
   }

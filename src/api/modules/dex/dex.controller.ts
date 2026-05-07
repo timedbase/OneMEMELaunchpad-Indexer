@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Post,
   Query,
   ServiceUnavailableException,
 } from "@nestjs/common";
@@ -85,6 +86,17 @@ export class DexController {
   getTokenSecurity(@Param("address") address: string) {
     if (!isAddress(address)) throw new BadRequestException("address must be a valid EVM address");
     return this.security.getTokenSecurity(address);
+  }
+
+  /**
+   * POST /dex/tokens/:address/security/refresh
+   * Evict the GoPlus cache for this token and re-fetch immediately.
+   * Use when a token's on-chain properties have changed and the cached report is stale.
+   */
+  @Post("tokens/:address/security/refresh")
+  refreshTokenSecurity(@Param("address") address: string) {
+    if (!isAddress(address)) throw new BadRequestException("address must be a valid EVM address");
+    return this.security.refreshTokenSecurity(address);
   }
 
   /**

@@ -87,11 +87,21 @@ const GOPLUS_BASE = "https://api.gopluslabs.io/api/v1";
 // ─── Fetch ────────────────────────────────────────────────────────────────────
 
 /**
+ * Evicts the cached entry for a specific token so the next call re-fetches from GoPlus.
+ * Also cancels any in-flight request so the fresh fetch starts immediately.
+ */
+export function clearGoPlusCache(chainId: number, address: string): void {
+  const key = `${chainId}:${address.toLowerCase()}`;
+  _cache.delete(key);
+  _inflight.delete(key);
+}
+
+/**
  * Fetches raw token security data from GoPlus for one token address.
  * Returns `null` when GoPlus has no record for the token or the request fails.
  *
  * Concurrent calls for the same key share a single HTTP request (in-flight dedup).
- * Results are cached: 10 min on success, 1 min on failure.
+ * Results are cached: 12 hr on success, 1 min on failure.
  */
 export async function fetchGoPlusTokenSecurity(
   chainId: number,
