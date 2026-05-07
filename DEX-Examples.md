@@ -20,11 +20,12 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 5. [GET /dex/tokens/:address/pools](#get-dextokensaddresspools)
 6. [GET /dex/tokens/:address/trades](#get-dextokensaddresstrades)
 7. [GET /dex/tokens/:address/security](#get-dextokensaddresssecurity)
-8. [GET /dex/swaps](#get-dexswaps)
-9. [GET /dex/quote](#get-dexquote)
-10. [POST /dex/swap](#post-dexswap)
-11. [GET /dex/route](#get-dexroute)
-12. [POST /dex/batch-swap](#post-dexbatch-swap)
+8. [POST /dex/tokens/:address/security/refresh](#post-dextokensaddresssecurityrefresh)
+9. [GET /dex/swaps](#get-dexswaps)
+10. [GET /dex/quote](#get-dexquote)
+11. [POST /dex/swap](#post-dexswap)
+12. [GET /dex/route](#get-dexroute)
+13. [POST /dex/batch-swap](#post-dexbatch-swap)
 
 **Gasless (MetaTx) — disabled, coming soon:**
 - GET /dex/metatx/relayer-fee
@@ -607,6 +608,20 @@ When a V2 route involves a fee-on-transfer token, each step in `steps[]` will in
 ```
 
 `taxBps` is `null` for non-tax tokens and non-V2 adapters.
+
+---
+
+## POST /dex/tokens/:address/security/refresh
+
+Evicts the cached GoPlus report for a token and immediately re-fetches from GoPlus. Returns the fresh `TokenSecurityReport` in the same shape as `GET /dex/tokens/:address/security`.
+
+Use this when a token's on-chain properties have changed (e.g. ownership renounced, liquidity locked) and the 12-hour cached report is stale.
+
+```bash
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/tokens/0xe43ef1fe041ba9e8da87e8c5bfd583b3b46a1111/security/refresh'
+```
+
+Response is identical in shape to `GET /dex/tokens/:address/security` — see that section for the full field reference.
 
 ---
 

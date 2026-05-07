@@ -604,6 +604,7 @@ All DEX endpoints live under `/api/v1/{chain}/dex/`. They require the aggregator
 | `GET` | `/api/v1/{chain}/dex/tokens/:address/pools` | Liquidity pools for a token |
 | `GET` | `/api/v1/{chain}/dex/tokens/:address/trades` | Trade history for a DEX token |
 | `GET` | `/api/v1/{chain}/dex/tokens/:address/security` | GoPlus security report: tax rates, honeypot check, risk level, warnings |
+| `POST` | `/api/v1/{chain}/dex/tokens/:address/security/refresh` | Evict cached GoPlus report and re-fetch immediately |
 | `GET` | `/api/v1/{chain}/dex/swaps` | All DEX swap events, paginated |
 
 **Swap / quote endpoints**
