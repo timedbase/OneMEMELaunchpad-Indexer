@@ -145,7 +145,8 @@ ADMIN_SECRET=your-strong-random-secret
 # DEX layer (optional — omit to disable /dex/* endpoints)
 AGGREGATOR_SUBGRAPH_URL=
 THE_GRAPH_API_KEY=
-AGGREGATOR_ADDRESS=0x...
+ONEDEX_ADDRESS=
+BONDING_CURVE_ADDRESS=
 GOPLUS_APP_KEY=
 GOPLUS_APP_SECRET=
 ```

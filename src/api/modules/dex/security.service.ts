@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { fetchGoPlusTokenSecurity, clearGoPlusCache, type GoPlusRawToken } from "./goplus";
+import { KNOWN_TOKENS } from "./tokens";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -135,6 +136,7 @@ export class SecurityService {
    * Returns zeros when GoPlus is unavailable or the token has no recorded tax.
    */
   async getTokenTaxBps(address: string): Promise<{ buyBps: bigint; sellBps: bigint }> {
+    if (KNOWN_TOKENS.has(address.toLowerCase())) return { buyBps: 0n, sellBps: 0n };
     const raw = await fetchGoPlusTokenSecurity(this.chainId, address);
     if (!raw) return { buyBps: 0n, sellBps: 0n };
     return {

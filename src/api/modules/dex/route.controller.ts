@@ -54,29 +54,15 @@ export class RouteController {
 
   /**
    * POST /dex/swap
-   * Builds ABI-encoded calldata for OneMEMEAggregator.swap() or batchSwap().
+   * Builds ABI-encoded calldata for OneDex.execute().
    * The caller broadcasts the transaction — no relayer, no gasless.
    *
    * Body: { tokenIn, amountIn, tokenOut, to, deadline, slippage? }
    * Aggregates all sources, picks the best, computes minOut from slippage.
-   * Returns `sources[]` and `steps[]`. When the best route is a two-step bridge,
-   * batchSwap calldata is built automatically (`singleStep: false`).
+   * Returns `sources[]`, `steps[]`, and fully encoded `calldata`.
    */
   @Post("swap")
   buildSwap(@Body() body: Record<string, unknown>) {
     return this.route.buildSwap(body);
-  }
-
-  /**
-   * POST /dex/batch-swap
-   * Builds ABI-encoded calldata for OneMEMEAggregator.batchSwap().
-   * Use steps from GET /dex/route or compose manually from GET /dex/quote outputs.
-   *
-   * Body: { steps[], amountIn, minFinalOut, to, deadline }
-   * Returns: { to, calldata, value, nativeIn, nativeOut, steps, amountIn, feeEstimate, minFinalOut, deadline }
-   */
-  @Post("batch-swap")
-  buildBatchSwap(@Body() body: Record<string, unknown>) {
-    return this.route.buildBatchSwap(body);
   }
 }

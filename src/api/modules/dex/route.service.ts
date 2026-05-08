@@ -13,17 +13,18 @@
 import { Injectable, BadRequestException, ServiceUnavailableException, Logger } from "@nestjs/common";
 import { dexFetchFrom } from "./dex-subgraph";
 import {
-  ADAPTER_IDS,
   AdapterName,
-  SwapStep,
-  encodeV2AdapterData,
-  encodeV3SingleHopAdapterData,
-  encodeV4SingleHopAdapterData,
-  encodeOneMemeAdapterData,
-  encodeFourMemeAdapterData,
-  encodeFlapShAdapterData,
-  buildSwapCalldata,
-  buildBatchSwapCalldata,
+  FourMemeRouteInfo,
+  OneDexStep,
+  buildV2Step,
+  buildV3Step,
+  buildBcBuyStep,
+  buildBcSellStep,
+  buildFlapShStep,
+  buildFourMemeBuyStep,
+  buildFourMemeSellStep,
+  buildWbnbUnwrapStep,
+  buildOneDexCalldata,
   buildV3PackedPath,
   quoteV2,
   quoteV3,
@@ -35,15 +36,15 @@ import {
   quoteFlapShBuy,
   quoteFlapShSell,
   defaultTickSpacing,
-  aggregatorAddress,
+  oneDexAddress,
 } from "./dex-rpc";
+import { WBNB, KNOWN_TOKENS, HUB_TOKENS, feeOnInput as isFeeOnInput } from "./tokens";
 import { SecurityService } from "./security.service";
 import type { Hex } from "viem";
 import { isAddress, normalizeAddress } from "../../helpers";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const WBNB_BSC   = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c";
 const NATIVE_BNB = "0x0000000000000000000000000000000000000000";
 const ZERO_ADDR  = "0x0000000000000000000000000000000000000000" as Hex;
 
@@ -52,25 +53,6 @@ const BC_ADAPTERS: AdapterName[] = ["ONEMEME_BC", "FOURMEME", "FLAPSH"];
 
 // Protocol fee charged by OneMEMEAggregator on every swap (0.5% = 200 divisor).
 const AGGREGATOR_FEE_DIVISOR = 200n;
-
-// Well-known intermediate tokens used for two-hop routing when no direct pair exists.
-// For each hub, the router tries tokenIn→hub→tokenOut across all discovered pools.
-const HUB_TOKENS: Hex[] = [
-  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", // WBNB
-  "0x55d398326f99059ff775485246999027b3197955", // USDT (BSC)
-  "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d", // USDC (BSC)
-  "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c", // BTCB
-];
-
-// Tokens known to have no transfer tax — skip GoPlus for these to avoid unnecessary
-// latency and API quota use on every V2 quote leg involving a major token.
-const SAFE_TOKENS = new Set<string>([
-  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", // WBNB
-  "0x55d398326f99059ff775485246999027b3197955", // USDT BSC
-  "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d", // USDC BSC
-  "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c", // BTCB
-  "0xe9e7cea3dedca5984780bafc599bd69add087d56", // BUSD
-]);
 
 // Pool pair discovery query — works for V3 and V4 subgraphs.
 // V4 subgraphs expose tickSpacing explicitly; V3 subgraphs do not (derived from fee).
@@ -103,7 +85,7 @@ export function isNative(addr: string): boolean {
 }
 
 export function toWbnbIfNative(addr: Hex): Hex {
-  return isNative(addr) ? (WBNB_BSC as Hex) : addr;
+  return isNative(addr) ? (WBNB as Hex) : addr;
 }
 
 export function requireAddress(val: unknown, name: string): Hex {
@@ -128,64 +110,20 @@ export function requireBigInt(val: unknown, name: string): bigint {
   }
 }
 
-export function parseSteps(raw: unknown, prefix: string): SwapStep[] {
-  if (!Array.isArray(raw) || raw.length < 2) {
-    throw new BadRequestException(`${prefix} must be an array of at least 2 swap steps`);
-  }
-  return raw.map((s, idx) => {
-    if (!s || typeof s !== "object") {
-      throw new BadRequestException(`${prefix}[${idx}] must be an object`);
-    }
-    const step = s as Record<string, unknown>;
-    const adapterId = (() => {
-      const v = step["adapterId"];
-      if (typeof v !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(v)) {
-        throw new BadRequestException(`${prefix}[${idx}].adapterId must be a 32-byte hex string`);
-      }
-      return v as Hex;
-    })();
-    const adapterData = (() => {
-      const v = step["adapterData"] ?? "0x";
-      if (typeof v !== "string" || !/^0x[0-9a-fA-F]*$/.test(v)) {
-        throw new BadRequestException(`${prefix}[${idx}].adapterData must be a hex string`);
-      }
-      return v as Hex;
-    })();
-    return {
-      adapterId,
-      tokenIn:     requireAddress(step["tokenIn"],  `${prefix}[${idx}].tokenIn`),
-      tokenOut:    requireAddress(step["tokenOut"], `${prefix}[${idx}].tokenOut`),
-      minOut:      requireBigInt(step["minOut"],    `${prefix}[${idx}].minOut`),
-      adapterData,
-    };
-  });
-}
-
-export function validatePathContinuity(steps: SwapStep[]): void {
-  for (let i = 0; i < steps.length - 1; i++) {
-    if (steps[i]!.tokenOut.toLowerCase() !== steps[i + 1]!.tokenIn.toLowerCase()) {
-      throw new BadRequestException(
-        `steps[${i}].tokenOut (${steps[i]!.tokenOut}) must equal steps[${i + 1}].tokenIn (${steps[i + 1]!.tokenIn})`,
-      );
-    }
-  }
-}
-
 // ─── Internal route candidate type ───────────────────────────────────────────
 
 interface StepData {
-  adapter:     AdapterName;
-  adapterId:   Hex;
-  tokenIn:     Hex;
-  tokenOut:    Hex;
-  amountIn:    string;
-  amountOut:   string;
-  minOut:      string;
-  adapterData: Hex;
-  fees:        number[] | null;
-  tickSpacing: number[] | null;
-  hooks:       string[] | null;
-  taxBps?:     number | null;
+  adapter:      AdapterName;
+  tokenIn:      Hex;
+  tokenOut:     Hex;
+  amountIn:     string;
+  amountOut:    string;
+  minOut:       string;
+  fees:         number[] | null;
+  tickSpacing:  number[] | null;
+  hooks:        string[] | null;
+  taxBps?:      number | null;
+  fourMemeInfo?: FourMemeRouteInfo;
 }
 
 interface RouteCandidate {
@@ -365,58 +303,28 @@ export class RouteService {
     const minOut  = BigInt(route.data.minFinalOut);
     const isMulti = steps.length > 1;
 
-    // The aggregator contract identifies native BNB by tokenIn/tokenOut == address(0).
-    // Internal routing uses WBNB for quoting; the calldata must restore address(0)
-    // so the contract uses msg.value rather than calling WBNB.transferFrom.
+    // OneDex.execute() identifies native BNB by tokenIn/tokenOut == address(0).
+    // Internal routing uses WBNB for quoting; calldata restores address(0) for native BNB.
     const ctTokenIn  = nativeIn  ? (NATIVE_BNB as Hex) : tokenIn;
     const ctTokenOut = nativeOut ? (NATIVE_BNB as Hex) : tokenOut;
 
-    // When all steps use the same V2 adapter, collapse to a single swap() call with a
-    // multi-hop path array. The V2 router handles the hops internally — no batchSwap
-    // contract required. Cross-adapter routes (e.g. V3 + BC) use batchSwap.
-    const v2Adapter = steps[0]!.adapter;
-    const collapseToV2 = isMulti &&
-      (v2Adapter === "PANCAKE_V2" || v2Adapter === "UNISWAP_V2") &&
-      steps.every(s => s.adapter === v2Adapter);
+    // Determine where OneDex deducts its fee — from input (known-safe tokens) or output (FOT).
+    const feeOnInputFlag = isFeeOnInput(ctTokenIn);
+    const oneDex         = oneDexAddress();
+    const oneDexSteps    = this.buildOneDexSteps(steps, nativeIn, oneDex, deadline);
+    const calldata       = buildOneDexCalldata(ctTokenIn, amountIn, ctTokenOut, minOut, to, deadline, feeOnInputFlag, oneDexSteps);
 
-    let calldata: Hex;
-
-    if (!isMulti || collapseToV2) {
-      if (!isMulti) {
-        const step = steps[0]!;
-        calldata = buildSwapCalldata(step.adapterId, ctTokenIn, amountIn, ctTokenOut, minOut, to, deadline, step.adapterData);
-      } else {
-        // Full V2 path: [tokenIn, intermediate..., tokenOut] using WBNB addresses.
-        const fullPath: Hex[] = [tokenIn, ...steps.slice(1).map(s => s.tokenIn as Hex), tokenOut];
-        const adapterData = encodeV2AdapterData(fullPath, deadline);
-        calldata = buildSwapCalldata(steps[0]!.adapterId, ctTokenIn, amountIn, ctTokenOut, minOut, to, deadline, adapterData);
-      }
-    } else {
-      const lastIdx   = steps.length - 1;
-      const swapSteps: SwapStep[] = steps.map((s, i) => ({
-        adapterId:   s.adapterId,
-        tokenIn:     i === 0       && nativeIn  ? (NATIVE_BNB as Hex) : s.tokenIn,
-        tokenOut:    i === lastIdx && nativeOut ? (NATIVE_BNB as Hex) : s.tokenOut,
-        minOut:      BigInt(s.minOut),
-        adapterData: s.adapterData,
-      }));
-      calldata = buildBatchSwapCalldata(swapSteps, amountIn, minOut, to, deadline);
-    }
-
-    // Conservative per-step gas budget covering ERC20 transfers + V2/V3 swap overhead.
-    const gasLimit = (!isMulti || collapseToV2)
-      ? "250000"
-      : (100_000n + BigInt(steps.length) * 150_000n).toString();
+    const gasLimit = (100_000n + BigInt(oneDexSteps.length) * 150_000n).toString();
 
     return {
       data: {
-        to:          aggregatorAddress(),
+        to:          oneDex,
         calldata,
         value:       nativeIn ? amountIn.toString() : "0",
         gasLimit,
         nativeIn,
         nativeOut,
-        singleStep:  !isMulti || collapseToV2,
+        singleStep:  !isMulti,
         tokenIn:     nativeIn  ? NATIVE_BNB : tokenIn,
         tokenOut:    nativeOut ? NATIVE_BNB : tokenOut,
         amountIn:    amountIn.toString(),
@@ -425,53 +333,8 @@ export class RouteService {
         minOut:      route.data.minFinalOut,
         slippageBps: slippageBps.toString(),
         deadline:    deadline.toString(),
-        steps:       steps,
+        steps,
         sources:     route.data.sources,
-      },
-    };
-  }
-
-  /**
-   * POST /dex/batch-swap
-   * Builds calldata for OneMEMEAggregator.batchSwap().
-   * Chains multiple adapter hops atomically in one transaction.
-   */
-  async buildBatchSwap(body: Record<string, unknown>) {
-    const steps       = parseSteps(body["steps"], "steps");
-    const amountIn    = requireBigInt(body["amountIn"],    "amountIn");
-    const minFinalOut = requireBigInt(body["minFinalOut"], "minFinalOut");
-    const to          = requireAddress(body["to"],         "to");
-    const deadline    = requireBigInt(body["deadline"],    "deadline");
-
-    if (amountIn === 0n) throw new BadRequestException("amountIn must be greater than 0");
-    if (deadline <= BigInt(Math.floor(Date.now() / 1000))) {
-      throw new BadRequestException("deadline has already passed");
-    }
-
-    const nativeIn  = isNative(steps[0]!.tokenIn);
-    const nativeOut = isNative(steps[steps.length - 1]!.tokenOut);
-    if (nativeIn)  steps[0]!.tokenIn                 = WBNB_BSC as Hex;
-    if (nativeOut) steps[steps.length - 1]!.tokenOut = WBNB_BSC as Hex;
-
-    validatePathContinuity(steps);
-
-    const feeEstimate = amountIn / AGGREGATOR_FEE_DIVISOR;
-    const calldata    = buildBatchSwapCalldata(steps, amountIn, minFinalOut, to, deadline);
-    const gasLimit    = (100_000n + BigInt(steps.length) * 150_000n).toString();
-
-    return {
-      data: {
-        to:          aggregatorAddress(),
-        calldata,
-        nativeIn,
-        nativeOut,
-        value:       nativeIn ? amountIn.toString() : "0",
-        gasLimit,
-        steps:       steps.map(s => ({ ...s, minOut: s.minOut.toString() })),
-        amountIn:    amountIn.toString(),
-        feeEstimate: feeEstimate.toString(),
-        minFinalOut: minFinalOut.toString(),
-        deadline:    deadline.toString(),
       },
     };
   }
@@ -564,8 +427,8 @@ export class RouteService {
     nativeOut:     boolean,
     aggregatorFee: bigint,
   ) {
-    const isWbnbIn  = tokenIn.toLowerCase()  === WBNB_BSC;
-    const isWbnbOut = tokenOut.toLowerCase() === WBNB_BSC;
+    const isWbnbIn  = tokenIn.toLowerCase()  === WBNB;
+    const isWbnbOut = tokenOut.toLowerCase() === WBNB;
 
     // The aggregator deducts its fee from the gross input before calling the adapter.
     // Quote with netAmountIn so that amountOut/minOut reflect the adapter's actual input,
@@ -590,7 +453,7 @@ export class RouteService {
     // bestSingleHop quotes step1 with netAmountIn so step2 sees the accurate WBNB amount.
     const bridgeTasks: Promise<RouteCandidate>[] = [];
     if (!isWbnbIn && !isWbnbOut) {
-      const step1 = await this.bestSingleHop(tokenIn, WBNB_BSC as Hex, amountIn, netAmountIn, slippageBps, deadline);
+      const step1 = await this.bestSingleHop(tokenIn, WBNB as Hex, amountIn, netAmountIn, slippageBps, deadline);
       if (step1) {
         for (const bcAdapter of BC_ADAPTERS) {
           bridgeTasks.push(this.tryBcStep2(bcAdapter, step1, tokenOut, slippageBps, deadline));
@@ -602,7 +465,7 @@ export class RouteService {
     // Hop1 quotes with netAmountIn; hop2 uses hop1's output (already net-accurate).
     const hubTasks = HUB_TOKENS
       .filter(h => h.toLowerCase() !== tokenIn.toLowerCase() && h.toLowerCase() !== tokenOut.toLowerCase())
-      .map(hub => this.tryTwoHopRoute(hub, tokenIn, tokenOut, amountIn, netAmountIn, slippageBps, deadline));
+      .map(hub => this.tryTwoHopRoute(hub as Hex, tokenIn, tokenOut, amountIn, netAmountIn, slippageBps, deadline));
 
     const results = await Promise.allSettled([...singleStepTasks, ...bridgeTasks, ...hubTasks]);
 
@@ -676,7 +539,7 @@ export class RouteService {
     quoteAmountIn:  bigint = amountIn,
   ): Promise<RouteCandidate> {
     let amountOut: bigint;
-    let adapterData: Hex;
+    let fourMemeInfo: FourMemeRouteInfo | undefined;
 
     if (adapter === "PANCAKE_V2" || adapter === "UNISWAP_V2") {
       // getAmountsOut() ignores transfer tax. We query GoPlus for both sides of the
@@ -688,8 +551,8 @@ export class RouteService {
       // Both corrections are applied independently so token→token pairs are covered.
       // GoPlus tax values > 10000 bps (>100%) are clamped — they indicate honeypots
       // or data errors that would produce a negative amountOut without capping.
-      const skipIn  = SAFE_TOKENS.has(tokenIn.toLowerCase());
-      const skipOut = SAFE_TOKENS.has(tokenOut.toLowerCase());
+      const skipIn  = KNOWN_TOKENS.has(tokenIn.toLowerCase());
+      const skipOut = KNOWN_TOKENS.has(tokenOut.toLowerCase());
       const ZERO_TAX = { buyBps: 0n, sellBps: 0n };
 
       const [rawAmountOut, inTaxInfo, outTaxInfo] = await Promise.all([
@@ -714,7 +577,6 @@ export class RouteService {
       }
 
       if (taxedAmountOut <= 0n) throw new Error(`${adapter} returned zero output`);
-      adapterData = encodeV2AdapterData([tokenIn, tokenOut], deadline);
       const minOut     = (taxedAmountOut * (10_000n - slippageBps)) / 10_000n;
       const topTaxBps  = sellTaxBps > buyTaxBps ? sellTaxBps : buyTaxBps;
 
@@ -723,13 +585,11 @@ export class RouteService {
         minFinalOut:    minOut,
         steps: [{
           adapter,
-          adapterId:   ADAPTER_IDS[adapter],
           tokenIn,
           tokenOut,
           amountIn:    amountIn.toString(),
           amountOut:   taxedAmountOut.toString(),
           minOut:      minOut.toString(),
-          adapterData,
           fees:        null,
           tickSpacing: null,
           hooks:       null,
@@ -738,34 +598,31 @@ export class RouteService {
       };
 
     } else if (adapter === "PANCAKE_V3" || adapter === "UNISWAP_V3") {
-      const fee   = fees[0]!;
-      amountOut   = await quoteV3(adapter, buildV3PackedPath([tokenIn, tokenOut], [fee]), quoteAmountIn);
-      adapterData = encodeV3SingleHopAdapterData(fee);
+      const fee = fees[0]!;
+      amountOut = await quoteV3(adapter, buildV3PackedPath([tokenIn, tokenOut], [fee]), quoteAmountIn);
 
     } else if (adapter === "PANCAKE_V4" || adapter === "UNISWAP_V4") {
       const fee = fees[0]!;
       const ts  = tickSpacings[0] ?? defaultTickSpacing(fee);
-      amountOut   = await quoteV4(adapter, tokenIn, tokenOut, quoteAmountIn, fee, ts, ZERO_ADDR);
-      adapterData = encodeV4SingleHopAdapterData(tokenIn, tokenOut, fee, ts, ZERO_ADDR, "0x", deadline);
+      amountOut = await quoteV4(adapter, tokenIn, tokenOut, quoteAmountIn, fee, ts, ZERO_ADDR);
 
     } else if (adapter === "ONEMEME_BC") {
-      const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
+      const isBuy = tokenIn.toLowerCase() === WBNB;
       const token = isBuy ? tokenOut : tokenIn;
       amountOut   = (isBuy ? await quoteBcBuy(token, quoteAmountIn) : await quoteBcSell(token, quoteAmountIn)).amountOut;
-      adapterData = encodeOneMemeAdapterData(token, deadline);
 
     } else if (adapter === "FOURMEME") {
-      const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
-      const token = isBuy ? tokenOut : tokenIn;
-      amountOut   = (isBuy ? await quoteFourMemeBuy(token, quoteAmountIn) : await quoteFourMemeSell(token, quoteAmountIn)).amountOut;
-      adapterData = encodeFourMemeAdapterData(token);
+      const isBuy  = tokenIn.toLowerCase() === WBNB;
+      const token  = isBuy ? tokenOut : tokenIn;
+      const result = isBuy ? await quoteFourMemeBuy(token, quoteAmountIn) : await quoteFourMemeSell(token, quoteAmountIn);
+      amountOut    = result.amountOut;
+      fourMemeInfo = result.routeInfo;
 
     } else {
       // FLAPSH
-      const isBuy = tokenIn.toLowerCase() === WBNB_BSC;
+      const isBuy = tokenIn.toLowerCase() === WBNB;
       const token = isBuy ? tokenOut : tokenIn;
       amountOut   = isBuy ? await quoteFlapShBuy(token, quoteAmountIn) : await quoteFlapShSell(token, quoteAmountIn);
-      adapterData = encodeFlapShAdapterData();
     }
 
     if (amountOut === 0n) throw new Error(`${adapter} returned zero output`);
@@ -778,16 +635,15 @@ export class RouteService {
       minFinalOut:    minOut,
       steps: [{
         adapter,
-        adapterId:   ADAPTER_IDS[adapter],
         tokenIn,
         tokenOut,
         amountIn:    amountIn.toString(),
         amountOut:   amountOut.toString(),
         minOut:      minOut.toString(),
-        adapterData,
         fees:        fees.length ? fees : null,
         tickSpacing: isV4 && tickSpacings.length ? tickSpacings : null,
         hooks:       null,
+        ...(fourMemeInfo ? { fourMemeInfo } : {}),
       }],
     };
   }
@@ -830,20 +686,18 @@ export class RouteService {
     slippageBps: bigint,
     deadline:    bigint,
   ): Promise<RouteCandidate> {
-    const WBNB            = WBNB_BSC as Hex;
     const bridgeAmountOut = step1.finalAmountOut;
     let finalAmountOut: bigint;
-    let step2Data: Hex;
+    let fourMemeInfo: FourMemeRouteInfo | undefined;
 
     if (bcAdapter === "ONEMEME_BC") {
       finalAmountOut = (await quoteBcBuy(tokenOut, bridgeAmountOut)).amountOut;
-      step2Data      = encodeOneMemeAdapterData(tokenOut, deadline);
     } else if (bcAdapter === "FOURMEME") {
-      finalAmountOut = (await quoteFourMemeBuy(tokenOut, bridgeAmountOut)).amountOut;
-      step2Data      = encodeFourMemeAdapterData(tokenOut);
+      const result   = await quoteFourMemeBuy(tokenOut, bridgeAmountOut);
+      finalAmountOut = result.amountOut;
+      fourMemeInfo   = result.routeInfo;
     } else {
       finalAmountOut = await quoteFlapShBuy(tokenOut, bridgeAmountOut);
-      step2Data      = encodeFlapShAdapterData();
     }
 
     if (finalAmountOut === 0n) throw new Error(`${bcAdapter} returned zero output for bridge step2`);
@@ -856,17 +710,16 @@ export class RouteService {
       steps: [
         step1.steps[0]!,
         {
-          adapter:     bcAdapter,
-          adapterId:   ADAPTER_IDS[bcAdapter],
-          tokenIn:     WBNB,
+          adapter:  bcAdapter,
+          tokenIn:  WBNB as Hex,
           tokenOut,
-          amountIn:    bridgeAmountOut.toString(),
-          amountOut:   finalAmountOut.toString(),
-          minOut:      finalMinOut.toString(),
-          adapterData: step2Data,
-          fees:        null,
+          amountIn:  bridgeAmountOut.toString(),
+          amountOut: finalAmountOut.toString(),
+          minOut:    finalMinOut.toString(),
+          fees:      null,
           tickSpacing: null,
-          hooks:       null,
+          hooks:     null,
+          ...(fourMemeInfo ? { fourMemeInfo } : {}),
         },
       ],
     };
@@ -928,5 +781,69 @@ export class RouteService {
       minFinalOut:    hop2Best.minFinalOut,
       steps:          [hop1Best.steps[0]!, hop2Best.steps[0]!],
     };
+  }
+
+  /**
+   * Converts route StepData[] into concrete OneDexStep[] for calldata encoding.
+   *
+   * Rules:
+   *   • V2/V3 steps always use ERC20 token addresses (WBNB, never address(0)).
+   *   • BC/FourMeme buy (tokenIn == WBNB): if this is a bridge step (i > 0), insert
+   *     a WBNB unwrap before the buy so the contract has native BNB to forward.
+   *   • FlapSH first-step buy with nativeIn: pass address(0) so FlapSH reads msg.value.
+   *   • FlapSH bridge buy (i > 0): pass WBNB — FlapSH pulls ERC20 from OneDex.
+   */
+  private buildOneDexSteps(
+    steps:    StepData[],
+    nativeIn: boolean,
+    oneDex:   Hex,
+    deadline: bigint,
+  ): OneDexStep[] {
+    const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as Hex;
+    const result: OneDexStep[] = [];
+
+    for (let i = 0; i < steps.length; i++) {
+      const s         = steps[i]!;
+      const stepAmtIn = BigInt(s.amountIn);
+      const stepMin   = BigInt(s.minOut);
+      const tIn       = s.tokenIn;
+      const tOut      = s.tokenOut;
+
+      if (s.adapter === "PANCAKE_V2" || s.adapter === "UNISWAP_V2") {
+        result.push(buildV2Step(s.adapter, tIn, tOut, stepAmtIn, stepMin, oneDex, deadline));
+
+      } else if (s.adapter === "PANCAKE_V3" || s.adapter === "UNISWAP_V3") {
+        const fee = s.fees![0]!;
+        result.push(buildV3Step(s.adapter, tIn, tOut, fee, stepAmtIn, stepMin, oneDex));
+
+      } else if (s.adapter === "ONEMEME_BC") {
+        const isBuy = tIn.toLowerCase() === WBNB.toLowerCase();
+        if (isBuy) {
+          // Unwrap WBNB → native BNB unless this is the first step and the user sent native BNB.
+          // Covers: bridge routes (i > 0) AND direct WBNB-in buys (!nativeIn).
+          if (i > 0 || !nativeIn) result.push(buildWbnbUnwrapStep(tIn, stepAmtIn));
+          result.push(buildBcBuyStep(tOut, stepAmtIn, stepMin, deadline));
+        } else {
+          result.push(buildBcSellStep(tIn, stepAmtIn, stepMin, deadline));
+        }
+
+      } else if (s.adapter === "FOURMEME") {
+        const isBuy = tIn.toLowerCase() === WBNB.toLowerCase();
+        if (isBuy) {
+          if (i > 0 || !nativeIn) result.push(buildWbnbUnwrapStep(tIn, stepAmtIn));
+          result.push(buildFourMemeBuyStep(tOut, stepAmtIn, stepMin, oneDex, s.fourMemeInfo!));
+        } else {
+          result.push(buildFourMemeSellStep(tIn, stepAmtIn, stepMin, s.fourMemeInfo!));
+        }
+
+      } else if (s.adapter === "FLAPSH") {
+        // Direct native-BNB-in buy (first step): pass address(0) so FlapSH uses msg.value.
+        // Bridge buy (i > 0): tIn is WBNB — FlapSH pulls ERC20 from OneDex.
+        const flapShTokenIn = (i === 0 && nativeIn) ? ZERO_ADDR : tIn;
+        result.push(buildFlapShStep(flapShTokenIn, tOut, stepAmtIn, stepMin));
+      }
+    }
+
+    return result;
   }
 }

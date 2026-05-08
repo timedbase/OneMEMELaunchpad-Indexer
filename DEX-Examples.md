@@ -5,7 +5,7 @@ Base URL: `https://api.1coin.meme/api/v1/bsc/dex`
 All responses use JSON. Paginated responses wrap data in `{ data, pagination }`.
 Numeric amounts are always **strings in wei** unless noted otherwise.
 
-**Native BNB:** Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in any swap, quote, or route endpoint. The API normalises it to WBNB internally. Responses include `nativeIn: true` / `nativeOut: true` flags and a `value` field (wei string) indicating how much `msg.value` the caller must attach.
+**Native BNB:** Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in any swap, quote, or route endpoint. The API normalises it to WBNB internally for quoting. Responses include `nativeIn: true` / `nativeOut: true` flags and a `value` field (wei string) indicating how much `msg.value` the caller must attach.
 
 ---
 
@@ -23,16 +23,15 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 10. [GET /dex/quote](#get-dexquote)
 11. [POST /dex/swap](#post-dexswap)
 12. [GET /dex/route](#get-dexroute)
-13. [POST /dex/batch-swap](#post-dexbatch-swap)
 
 ---
 
 ## GET /dex/adapters
 
-Returns all supported routing adapters and their on-chain `bytes32` IDs.
+Returns all supported routing adapter labels and their categories.
 No configuration required — this is a static response.
 
-> **Note:** `PANCAKE_V4` and `UNISWAP_V4` are registered on-chain but currently excluded from automatic routing. Their IDs remain valid for manual `POST /dex/batch-swap` step construction.
+> **Note:** `PANCAKE_V4` and `UNISWAP_V4` are defined but currently excluded from automatic routing (pool discovery disabled). All other adapters are active.
 
 ```bash
 curl 'https://api.1coin.meme/api/v1/bsc/dex/adapters'
@@ -41,51 +40,15 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/adapters'
 ```json
 {
   "data": [
-    {
-      "name": "ONEMEME_BC",
-      "id": "0x3a6f3a6f3a6f3a6f3a6f3a6f3a6f3a6f3a6f3a6f3a6f3a6f3a6f3a6f3a6f3a6f",
-      "category": "bonding-curve"
-    },
-    {
-      "name": "FOURMEME",
-      "id": "0x7b2c7b2c7b2c7b2c7b2c7b2c7b2c7b2c7b2c7b2c7b2c7b2c7b2c7b2c7b2c7b2c",
-      "category": "bonding-curve"
-    },
-    {
-      "name": "FLAPSH",
-      "id": "0x9d4e9d4e9d4e9d4e9d4e9d4e9d4e9d4e9d4e9d4e9d4e9d4e9d4e9d4e9d4e9d4e",
-      "category": "bonding-curve"
-    },
-    {
-      "name": "PANCAKE_V2",
-      "id": "0xa1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2",
-      "category": "amm-v2"
-    },
-    {
-      "name": "PANCAKE_V3",
-      "id": "0xc3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4",
-      "category": "amm-v3"
-    },
-    {
-      "name": "PANCAKE_V4",
-      "id": "0xe5f6e5f6e5f6e5f6e5f6e5f6e5f6e5f6e5f6e5f6e5f6e5f6e5f6e5f6e5f6e5f6",
-      "category": "amm-v4"
-    },
-    {
-      "name": "UNISWAP_V2",
-      "id": "0xf7a8f7a8f7a8f7a8f7a8f7a8f7a8f7a8f7a8f7a8f7a8f7a8f7a8f7a8f7a8f7a8",
-      "category": "amm-v2"
-    },
-    {
-      "name": "UNISWAP_V3",
-      "id": "0x11b211b211b211b211b211b211b211b211b211b211b211b211b211b211b211b211",
-      "category": "amm-v3"
-    },
-    {
-      "name": "UNISWAP_V4",
-      "id": "0x22c322c322c322c322c322c322c322c322c322c322c322c322c322c322c322c322",
-      "category": "amm-v4"
-    }
+    { "name": "PANCAKE_V2",  "category": "amm-v2" },
+    { "name": "UNISWAP_V2",  "category": "amm-v2" },
+    { "name": "PANCAKE_V3",  "category": "amm-v3" },
+    { "name": "UNISWAP_V3",  "category": "amm-v3" },
+    { "name": "PANCAKE_V4",  "category": "amm-v4" },
+    { "name": "UNISWAP_V4",  "category": "amm-v4" },
+    { "name": "ONEMEME_BC",  "category": "bonding-curve" },
+    { "name": "FOURMEME",    "category": "bonding-curve" },
+    { "name": "FLAPSH",      "category": "bonding-curve" }
   ]
 }
 ```
@@ -428,7 +391,7 @@ Combined bonding-curve trades and aggregator swaps for a token, sorted by timest
 |---|---|
 | 1MEME bonding-curve buys/sells | `SUBGRAPH_URL` (main launchpad) |
 | FOURMEME / FLAPSH bonding-curve buys/sells | `AGGREGATOR_SUBGRAPH_URL` |
-| DEX swaps via OneMEMEAggregator | `AGGREGATOR_SUBGRAPH_URL` |
+| DEX swaps | `AGGREGATOR_SUBGRAPH_URL` |
 
 Bonding trades are deduplicated by `txHash` — the aggregator subgraph may re-index 1MEME
 trades, so AGGREGATOR always wins when both sources have the same hash.
@@ -463,7 +426,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/tokens/0xa3f1e2d4c5b6a7f8e9d0c1b2a3f
     {
       "id": "0xabc123def456abc123def456abc123def456abc123def456abc123def456abc123-3",
       "user": "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-      "adapterId": "0xa1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2",
+      "adapterId": "0xa1b2a1b2...",
       "adapterName": "PANCAKE_V2",
       "tokenIn": {
         "address": "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
@@ -613,7 +576,7 @@ Response is identical in shape to `GET /dex/tokens/:address/security` — see th
 
 ## GET /dex/swaps
 
-Paginated list of all aggregator swaps (OneMEMEAggregator `Swapped` events).
+Paginated list of all aggregator swaps indexed from the aggregator subgraph.
 Always reads from `AGGREGATOR_SUBGRAPH_URL`.
 
 **Query Parameters**
@@ -639,7 +602,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2'
     {
       "id": "0xabc123def456abc123def456abc123def456abc123def456abc123def456abc123-2",
       "user": "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
-      "adapterId": "0xc3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4",
+      "adapterId": "0xc3d4c3d4...",
       "adapterName": "PANCAKE_V3",
       "tokenIn": {
         "address": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
@@ -654,25 +617,6 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/swaps?adapter=PANCAKE_V3&limit=2'
       "amountOut": "1218432000000000000000000",
       "timestamp": 1745123456,
       "txHash": "0xabc123def456abc123def456abc123def456abc123def456abc123def456abc123"
-    },
-    {
-      "id": "0xbcd234efa567bcd234efa567bcd234efa567bcd234efa567bcd234efa567bcd234-0",
-      "user": "0x3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
-      "adapterId": "0xc3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4c3d4",
-      "adapterName": "PANCAKE_V3",
-      "tokenIn": {
-        "address": "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-        "symbol": "PEPEBSC"
-      },
-      "tokenOut": {
-        "address": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-        "symbol": "WBNB"
-      },
-      "grossAmountIn": "250000000000000000000000",
-      "feeCharged": "1250000000000000000000",
-      "amountOut": "201480000000000000",
-      "timestamp": 1745123200,
-      "txHash": "0xbcd234efa567bcd234efa567bcd234efa567bcd234efa567bcd234efa567bcd234"
     }
   ],
   "pagination": {
@@ -745,15 +689,15 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/quote?tokenIn=0xbb4cdb9cbd36b01bd1cb
 
 ## POST /dex/swap
 
-Builds ABI-encoded calldata for a direct `OneMEMEAggregator.swap()` or `batchSwap()` call.
+Builds ABI-encoded calldata for `OneDex.execute()`.
 The caller broadcasts this transaction themselves — no relayer, not gasless.
 
-The aggregator charges a **0.5% protocol fee** on `amountIn`; the response includes an estimate.
-Adapter selection is fully internal — the router picks the best source automatically.
+OneDex charges a **0.5% protocol fee** on `amountIn`; the response includes `feeEstimate`.
+The `feeOnInput` flag (encoded into `executionData`) tells OneDex whether to deduct the fee from the input (known-safe tokens: WBNB, USDT, USDC, etc.) or the output (fee-on-transfer tokens).
 
 **Body:** `{ tokenIn, amountIn, tokenOut, to, deadline, slippage? }`
 
-Aggregates all sources, picks the best, computes `minOut` from `slippage`. `sources[]` shows all tried. When the best route is a two-step bridge (tokenIn → WBNB → tokenOut via a BC adapter), `batchSwap` calldata is returned and `singleStep` is `false`.
+Aggregates all sources, picks the best, computes `minOut` from `slippage`. `sources[]` shows all tried. When the best route is a two-step bridge (tokenIn → WBNB → tokenOut via a BC adapter), multi-step `executionData` is returned automatically and `singleStep` is `false`.
 
 ```bash
 curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
@@ -770,11 +714,11 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
 
 > **Gas limit:** Always use the `gasLimit` field from the response when broadcasting. Do **not** rely on `eth_estimateGas` — if the simulation state differs from execution state the estimate fails and wallets fall back to a dangerously low default, causing out-of-gas reverts.
 
-**Response — single-step route**
+**Response — single-step route (WBNB → token via PANCAKE_V3)**
 ```json
 {
   "data": {
-    "to":          "0x6F66042eab4D01BC1F7C87968481Bbad46a1Da5B",
+    "to":          "0xOneDexContractAddress",
     "calldata":    "0x...",
     "value":       "0",
     "gasLimit":    "250000",
@@ -792,13 +736,11 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
     "steps": [
       {
         "adapter":     "PANCAKE_V3",
-        "adapterId":   "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
         "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
         "tokenOut":    "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
         "amountIn":    "1000000000000000000",
         "amountOut":   "1248300000000000000000000",
         "minOut":      "1235817000000000000000000",
-        "adapterData": "0x...",
         "fees":        [500],
         "tickSpacing": null,
         "hooks":       null
@@ -812,34 +754,106 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
 }
 ```
 
-**Response — two-step bridge route** (tokenIn → WBNB → BC token, `singleStep: false`)
+**Response — native BNB → 1MEME bonding-curve token (single step)**
+
+Pass `tokenIn: "0x0000000000000000000000000000000000000000"` for native BNB.
+Set `value` equal to `amountIn` when broadcasting.
+
+```bash
+curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "tokenIn":  "0x0000000000000000000000000000000000000000",
+  "amountIn": "500000000000000000",
+  "tokenOut": "0xc5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4",
+  "to":       "0x71be63f3384f5fb98995aa9b7a5b6e1234567890",
+  "deadline": "1745130000",
+  "slippage": "150"
+}'
+```
+
 ```json
 {
   "data": {
-    "to":          "0x6F66042eab4D01BC1F7C87968481Bbad46a1Da5B",
+    "to":          "0xOneDexContractAddress",
     "calldata":    "0x...",
-    "gasLimit":    "400000",
-    "singleStep":  false,
+    "value":       "500000000000000000",
+    "gasLimit":    "250000",
+    "nativeIn":    true,
+    "nativeOut":   false,
+    "singleStep":  true,
+    "tokenIn":     "0x0000000000000000000000000000000000000000",
+    "tokenOut":    "0xc5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4",
+    "amountIn":    "500000000000000000",
+    "feeEstimate": "2500000000000000",
+    "netAmountIn": "497500000000000000",
+    "minOut":      "3451820000000000000000",
+    "slippageBps": "150",
+    "deadline":    "1745130000",
     "steps": [
       {
-        "adapter":     "PANCAKE_V3",
-        "tokenIn":     "0xa3f1...",
-        "tokenOut":    "0xbb4c...",
-        "amountIn":    "500000000000000000000000",
-        "amountOut":   "410000000000000000",
-        "minOut":      "405900000000000000",
-        "adapterData": "0x...",
-        "fees":        [500]
+        "adapter":  "ONEMEME_BC",
+        "tokenIn":  "0x0000000000000000000000000000000000000000",
+        "tokenOut": "0xc5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4",
+        "amountIn": "500000000000000000",
+        "amountOut": "3504386000000000000000",
+        "minOut":   "3451820000000000000000",
+        "fees":     null
+      }
+    ],
+    "sources": [
+      { "adapter": "ONEMEME_BC", "fees": null, "amountOut": "3504386000000000000000" },
+      { "adapter": "PANCAKE_V2", "fees": null, "amountOut": "3201000000000000000000" }
+    ]
+  }
+}
+```
+
+**Response — two-step bridge route** (ERC20 tokenIn → WBNB → BC token, `singleStep: false`)
+
+When neither tokenIn nor tokenOut is WBNB/BNB and a bonding-curve adapter wins, the router automatically prepends a tokenIn → WBNB AMM hop. OneDex unwraps WBNB to native BNB internally before the BC buy step.
+
+```json
+{
+  "data": {
+    "to":          "0xOneDexContractAddress",
+    "calldata":    "0x...",
+    "value":       "0",
+    "gasLimit":    "550000",
+    "nativeIn":    false,
+    "nativeOut":   false,
+    "singleStep":  false,
+    "tokenIn":     "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+    "tokenOut":    "0xc5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4",
+    "amountIn":    "5000000000000000000",
+    "feeEstimate": "25000000000000000",
+    "netAmountIn": "4975000000000000000",
+    "minOut":      "3505576500000000000000",
+    "slippageBps": "150",
+    "deadline":    "1745130000",
+    "steps": [
+      {
+        "adapter":  "PANCAKE_V3",
+        "tokenIn":  "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+        "tokenOut": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "amountIn": "5000000000000000000",
+        "amountOut": "8621500000000000",
+        "minOut":   "8492277500000000",
+        "fees":     [500]
       },
       {
-        "adapter":     "FOURMEME",
-        "tokenIn":     "0xbb4c...",
-        "tokenOut":    "0xc5d6...",
-        "amountIn":    "410000000000000000",
-        "amountOut":   "398000000000000000000000",
-        "minOut":      "394020000000000000000000",
-        "adapterData": "0x..."
+        "adapter":  "ONEMEME_BC",
+        "tokenIn":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "tokenOut": "0xc5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4",
+        "amountIn": "8621500000000000",
+        "amountOut": "3558900000000000000000",
+        "minOut":   "3505576500000000000000",
+        "fees":     null
       }
+    ],
+    "sources": [
+      { "adapter": "PANCAKE_V3→ONEMEME_BC", "fees": [500], "amountOut": "3558900000000000000000" },
+      { "adapter": "PANCAKE_V2",            "fees": null,  "amountOut": "3102000000000000000000" }
     ]
   }
 }
@@ -849,10 +863,10 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/swap' \
 
 ## GET /dex/route
 
-Returns an optimally routed swap plan with pre-encoded `adapterData` for each step.
+Returns an optimally routed swap plan for inspection — does **not** build calldata.
+Use `POST /dex/swap` to get ready-to-broadcast calldata.
 
-Queries PancakeSwap V2/V3, Uniswap V2/V3, and bonding-curve protocols in parallel.
-V3 pool candidates are discovered from their subgraphs first so only real pools with liquidity are quoted. When neither tokenIn nor tokenOut is WBNB and a BC adapter wins, a two-step bridge route is returned automatically (`singleStep: false`). `sources[]` lists every source with its quoted output.
+Queries PancakeSwap V2/V3, Uniswap V2/V3, and bonding-curve protocols (ONEMEME_BC, FOURMEME, FLAPSH) in parallel. V3 pool candidates are discovered from their subgraphs first so only real pools with liquidity are quoted. When neither tokenIn nor tokenOut is WBNB and a BC adapter wins, a two-step bridge route is returned automatically (`singleStep: false`). `sources[]` lists every source with its quoted output.
 
 **Query Parameters**
 
@@ -870,29 +884,27 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/route?tokenIn=0xbb4cdb9cbd36b01bd1cb
 ```json
 {
   "data": {
-    "singleStep": true,
-    "nativeIn": false,
-    "nativeOut": false,
-    "value": "0",
+    "singleStep":    true,
+    "nativeIn":      false,
+    "nativeOut":     false,
+    "value":         "0",
     "steps": [
       {
-        "adapter": "PANCAKE_V3",
-        "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
-        "tokenIn": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-        "tokenOut": "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
-        "amountIn": "1000000000000000000",
-        "amountOut": "1248300000000000000000000",
-        "minOut": "1235817000000000000000000",
-        "adapterData": "0x...",
-        "fees": [500],
+        "adapter":     "PANCAKE_V3",
+        "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "tokenOut":    "0xa3f1e2d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0",
+        "amountIn":    "1000000000000000000",
+        "amountOut":   "1248300000000000000000000",
+        "minOut":      "1235817000000000000000000",
+        "fees":        [500],
         "tickSpacing": null,
-        "hooks": null
+        "hooks":       null
       }
     ],
-    "amountIn": "1000000000000000000",
-    "minFinalOut": "1235817000000000000000000",
+    "amountIn":      "1000000000000000000",
+    "minFinalOut":   "1235817000000000000000000",
     "aggregatorFee": "5000000000000000",
-    "slippageBps": "100",
+    "slippageBps":   "100",
     "sources": [
       { "adapter": "PANCAKE_V3", "fees": [500],  "amountOut": "1248300000000000000000000" },
       { "adapter": "PANCAKE_V2", "fees": null,   "amountOut": "1231847000000000000000000" },
@@ -902,16 +914,16 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/route?tokenIn=0xbb4cdb9cbd36b01bd1cb
 }
 ```
 
-The winning source is returned as the first and only element of `steps[]`. `sources[]` contains every source that returned a valid quote, sorted best-first — useful for showing users where liquidity was found.
+Step fields: `adapter`, `tokenIn`, `tokenOut`, `amountIn`, `amountOut`, `minOut`, `fees`, `tickSpacing`, `hooks`, `taxBps` (V2 FOT tokens only). No `adapterId` or `adapterData` — calldata is built server-side by `POST /dex/swap`.
 
 **Error — no liquidity found**
 ```json
 { "statusCode": 503, "message": "No route found — no liquidity source returned a valid quote for this pair" }
 ```
 
-**Native BNB** — pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut`. When `nativeIn: true`, the caller must attach `value` wei as `msg.value` with the transaction.
+**Native BNB** — pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut`. When `nativeIn: true`, attach `value` wei as `msg.value` when broadcasting via `POST /dex/swap`.
 
-**Two-step bridge response** — when neither tokenIn nor tokenOut is WBNB and a bonding-curve adapter wins (e.g. USDC → 1MEME token), the router automatically prepends a tokenIn → WBNB hop:
+**Two-step bridge example** — USDC → 1MEME bonding-curve token:
 
 ```bash
 curl 'https://api.1coin.meme/api/v1/bsc/dex/route?tokenIn=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d&amountIn=5000000000000000000&tokenOut=0xMEME&slippage=150'
@@ -920,39 +932,34 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/route?tokenIn=0x8ac76a51cc950d9822d6
 ```json
 {
   "data": {
-    "singleStep": false,
-    "nativeIn": false,
-    "nativeOut": false,
-    "value": "0",
+    "singleStep":    false,
+    "nativeIn":      false,
+    "nativeOut":     false,
+    "value":         "0",
     "steps": [
       {
-        "adapter": "PANCAKE_V3",
-        "adapterId": "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
-        "tokenIn": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+        "adapter":  "PANCAKE_V3",
+        "tokenIn":  "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
         "tokenOut": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
         "amountIn": "5000000000000000000",
         "amountOut": "8621500000000000",
-        "minOut": "8492277500000000",
-        "adapterData": "0x...",
-        "fees": [500],
-        "tickSpacing": null,
-        "hooks": null
+        "minOut":   "8492277500000000",
+        "fees":     [500]
       },
       {
-        "adapter": "ONEMEME_BC",
-        "adapterId": "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
-        "tokenIn": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "adapter":  "ONEMEME_BC",
+        "tokenIn":  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
         "tokenOut": "0x000000000000000000000000000000000000meme",
         "amountIn": "8621500000000000",
         "amountOut": "3558900000000000000000",
-        "minOut": "3505576500000000000000",
-        "adapterData": "0x..."
+        "minOut":   "3505576500000000000000",
+        "fees":     null
       }
     ],
-    "amountIn": "5000000000000000000",
-    "minFinalOut": "3505576500000000000000",
+    "amountIn":      "5000000000000000000",
+    "minFinalOut":   "3505576500000000000000",
     "aggregatorFee": "25000000000000000",
-    "slippageBps": "150",
+    "slippageBps":   "150",
     "sources": [
       { "adapter": "PANCAKE_V3→ONEMEME_BC", "fees": [500], "amountOut": "3558900000000000000000" },
       { "adapter": "PANCAKE_V2",            "fees": null,  "amountOut": "3102000000000000000000" }
@@ -963,80 +970,13 @@ curl 'https://api.1coin.meme/api/v1/bsc/dex/route?tokenIn=0x8ac76a51cc950d9822d6
 
 ---
 
-## POST /dex/batch-swap
-
-Builds ABI-encoded calldata for `OneMEMEAggregator.batchSwap()`.
-Use steps from `GET /dex/route` or compose them manually from `/dex/quote` outputs.
-The aggregator fee (0.5%) is charged once on the initial `amountIn`.
-
-```bash
-curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
-  -H 'Content-Type: application/json' \
-  -d '{
-  "steps": [
-    {
-      "adapterId":   "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
-      "tokenIn":     "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-      "tokenOut":    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-      "minOut":      "8492277500000000",
-      "adapterData": "0x..."
-    },
-    {
-      "adapterId":   "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
-      "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-      "tokenOut":    "0x000000000000000000000000000000000000meme",
-      "minOut":      "3505576500000000000000",
-      "adapterData": "0x..."
-    }
-  ],
-  "amountIn":    "5000000000000000000",
-  "minFinalOut": "3505576500000000000000",
-  "to":          "0xUserWalletAddress",
-  "deadline":    1746400000
-}'
-```
-
-```json
-{
-  "data": {
-    "to":          "0x6F66042eab4D01BC1F7C87968481Bbad46a1Da5B",
-    "calldata":    "0x...",
-    "nativeIn":    false,
-    "nativeOut":   false,
-    "value":       "0",
-    "gasLimit":    "400000",
-    "steps": [
-      {
-        "adapterId":   "0x70616e63616b655f76330000000000000000000000000000000000000000000000",
-        "tokenIn":     "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-        "tokenOut":    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-        "minOut":      "8492277500000000",
-        "adapterData": "0x..."
-      },
-      {
-        "adapterId":   "0x6f6e656d656d655f62630000000000000000000000000000000000000000000000",
-        "tokenIn":     "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-        "tokenOut":    "0x000000000000000000000000000000000000meme",
-        "minOut":      "3505576500000000000000",
-        "adapterData": "0x..."
-      }
-    ],
-    "amountIn":    "5000000000000000000",
-    "feeEstimate": "25000000000000000",
-    "minFinalOut": "3505576500000000000000",
-    "deadline":    "1746400000"
-  }
-}
-```
-
-
 ## Error Reference
 
 | Status | Cause |
 |---|---|
-| `400 Bad Request` | Invalid address, bad amounts, unknown adapter, missing fees, expired deadline |
+| `400 Bad Request` | Invalid address, bad amounts, unknown adapter name, missing fees, expired deadline |
 | `404 Not Found` | Token address not found in either subgraph |
-| `503 Service Unavailable` | Required env var not set (`AGGREGATOR_SUBGRAPH_URL`, `THE_GRAPH_API_KEY`, `BSC_RPC_URL`, etc.) or upstream RPC/subgraph unreachable |
+| `503 Service Unavailable` | Required env var not set (`AGGREGATOR_SUBGRAPH_URL`, `THE_GRAPH_API_KEY`, `BSC_RPC_URL`, `ONEDEX_ADDRESS`, etc.) or upstream RPC/subgraph unreachable |
 
 ---
 
@@ -1048,7 +988,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
 |---|---|---|
 | `SUBGRAPH_URL` | Yes (read: 1MEME tokens/trades) | Main launchpad subgraph GraphQL endpoint |
 | `SUBGRAPH_API_KEY` | No | Bearer token for the main launchpad subgraph |
-| `AGGREGATOR_SUBGRAPH_URL` | Yes (read: FOURMEME/FLAPSH + DEX swaps) | OneMEMEAggregator subgraph endpoint |
+| `AGGREGATOR_SUBGRAPH_URL` | Yes (read: FOURMEME/FLAPSH + DEX swaps) | Aggregator subgraph endpoint |
 | `AGGREGATOR_SUBGRAPH_API_KEY` | No | Bearer token for the aggregator subgraph |
 | `THE_GRAPH_API_KEY` | Yes (V3 pools) | The Graph gateway API key for PancakeSwap V3 and Uniswap V2/V3 subgraphs |
 | `PANCAKE_V2_SUBGRAPH_URL` | No | Override default NodeReal PancakeSwap V2 endpoint |
@@ -1062,14 +1002,17 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/dex/batch-swap' \
 
 | Variable | Required | Description |
 |---|---|---|
-| `AGGREGATOR_ADDRESS` | Yes (`POST /dex/swap`, `POST /dex/batch-swap`) | OneMEMEAggregator — BSC mainnet: `0x6F66042eab4D01BC1F7C87968481Bbad46a1Da5B` |
+| `ONEDEX_ADDRESS` | Yes (`POST /dex/swap`) | OneDex contract address |
 | `BSC_RPC_URL` | Yes (quotes) | BSC HTTP RPC for contract reads |
-| `FOURMEME_HELPER_ADDRESS` | No | TokenManagerHelper3 address (default: BSC mainnet) |
-| `FLAPSH_PORTAL_ADDRESS` | No | Flap.SH Portal address (default: BSC mainnet) |
+| `BONDING_CURVE_ADDRESS` | Yes (ONEMEME_BC routes) | OneMEME BondingCurve contract address |
+| `FOURMEME_HELPER_ADDRESS` | No | FourMEME TokenManagerHelper3 (default: BSC mainnet) |
+| `FLAPSH_PORTAL_ADDRESS` | No | Flap.SH Portal (default: BSC mainnet) |
 | `PANCAKE_V2_ROUTER_ADDRESS` | No | PancakeSwap V2 Router (default: BSC mainnet) |
-| `PANCAKE_V3_QUOTER_ADDRESS` | No | PancakeSwap V3 QuoterV2 (default: BSC mainnet) |
+| `PANCAKE_V3_ROUTER_ADDRESS` | No | PancakeSwap V3 SmartRouter for execution (default: BSC mainnet) |
+| `PANCAKE_V3_QUOTER_ADDRESS` | No | PancakeSwap V3 QuoterV2 for quoting (default: BSC mainnet) |
 | `UNISWAP_V2_ROUTER_ADDRESS` | No | Uniswap V2 Router (default: BSC mainnet) |
-| `UNISWAP_V3_QUOTER_ADDRESS` | No | Uniswap V3 Quoter (no BSC default; set if deployed) |
+| `UNISWAP_V3_ROUTER_ADDRESS` | No | Uniswap V3 Router for execution (no BSC default; set if deployed) |
+| `UNISWAP_V3_QUOTER_ADDRESS` | No | Uniswap V3 Quoter for quoting (no BSC default; set if deployed) |
 | `PANCAKE_V4_QUOTER_ADDRESS` | No | PancakeSwap V4 Quoter _(unused while V4 routing is disabled)_ |
 | `UNISWAP_V4_QUOTER_ADDRESS` | No | Uniswap V4 Quoter _(unused while V4 routing is disabled)_ |
 

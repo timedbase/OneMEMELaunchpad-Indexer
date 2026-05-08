@@ -7,7 +7,7 @@ import {
   dexCount,
   mainFetch,
 } from "./dex-subgraph";
-import { ADAPTER_IDS, ADAPTER_NAMES } from "./dex-rpc";
+import { ADAPTER_NAMES } from "./dex-rpc";
 import { isAddress, normalizeAddress, paginated, parsePagination, parseOrderBy, parseOrderDir } from "../../helpers";
 
 // ─── Aggregator subgraph types (FOURMEME / FLAPSH bonding-curve + Aggregator swaps) ──
@@ -807,7 +807,7 @@ export class DexService {
     if (from !== null && isNaN(from)) throw new BadRequestException("from must be a unix timestamp");
     if (to   !== null && isNaN(to))   throw new BadRequestException("to must be a unix timestamp");
 
-    if (adapter && !(adapter.toUpperCase() in ADAPTER_IDS)) {
+    if (adapter && !ADAPTER_NAMES.includes(adapter.toUpperCase() as typeof ADAPTER_NAMES[number])) {
       throw new BadRequestException(`Invalid adapter. Allowed: ${ADAPTER_NAMES.join(", ")}`);
     }
 
@@ -857,7 +857,6 @@ export class DexService {
   adapters() {
     const entries = ADAPTER_NAMES.map(name => ({
       name,
-      id:       ADAPTER_IDS[name],
       category: name === "ONEMEME_BC" || name === "FOURMEME" || name === "FLAPSH"
         ? "bonding-curve"
         : name.includes("V2") ? "amm-v2"
