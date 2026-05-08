@@ -854,7 +854,7 @@ export class DexService {
 
   // ── GET /dex/adapters ────────────────────────────────────────────────────────
 
-  adapters() {
+  platforms() {
     const entries = ADAPTER_NAMES.map(name => ({
       name,
       category: name === "ONEMEME_BC" || name === "FOURMEME" || name === "FLAPSH"

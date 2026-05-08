@@ -30,12 +30,12 @@ export class DexController {
   ) {}
 
   /**
-   * GET /dex/adapters
-   * Returns all registered adapter names and their keccak256 bytes32 IDs.
+   * GET /dex/platforms
+   * Returns all supported routing platform names and their categories.
    */
-  @Get("adapters")
-  adapters() {
-    return this.dex.adapters();
+  @Get("platforms")
+  platforms() {
+    return this.dex.platforms();
   }
 
   /**

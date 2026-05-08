@@ -597,7 +597,7 @@ All DEX endpoints live under `/api/v1/{chain}/dex/`. They require the aggregator
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/{chain}/dex/adapters` | Supported routing adapters and their on-chain `bytes32` IDs |
+| `GET` | `/api/v1/{chain}/dex/platforms` | Supported routing platform names and categories |
 | `GET` | `/api/v1/{chain}/dex/stats` | Aggregated DEX platform statistics |
 | `GET` | `/api/v1/{chain}/dex/tokens` | Paginated DEX token list (pools, volume, price) |
 | `GET` | `/api/v1/{chain}/dex/tokens/:address` | Single DEX token with pools and price |
@@ -625,7 +625,7 @@ Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in 
 | `nativeOut` | `true` when the original `tokenOut` was the zero address — final output is unwrapped BNB |
 | `value` | ETH value to attach to the transaction (wei string, `"0"` when `nativeIn` is false) |
 
-**Supported adapters**
+**Supported platforms**
 
 | Name | Category | Notes |
 |---|---|---|

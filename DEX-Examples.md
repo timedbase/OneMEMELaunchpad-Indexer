@@ -11,7 +11,7 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 
 ## Table of Contents
 
-1. [GET /dex/adapters](#get-dexadapters)
+1. [GET /dex/platforms](#get-dexplatforms)
 2. [GET /dex/stats](#get-dexstats)
 3. [GET /dex/tokens](#get-dextokens)
 4. [GET /dex/tokens/:address](#get-dextokensaddress)
@@ -26,15 +26,15 @@ Numeric amounts are always **strings in wei** unless noted otherwise.
 
 ---
 
-## GET /dex/adapters
+## GET /dex/platforms
 
-Returns all supported routing adapter labels and their categories.
+Returns all supported routing platform names and their categories.
 No configuration required — this is a static response.
 
-> **Note:** `PANCAKE_V4` and `UNISWAP_V4` are defined but currently excluded from automatic routing (pool discovery disabled). All other adapters are active.
+> **Note:** `PANCAKE_V4` and `UNISWAP_V4` are defined but currently excluded from automatic routing (pool discovery disabled). All other platforms are active.
 
 ```bash
-curl 'https://api.1coin.meme/api/v1/bsc/dex/adapters'
+curl 'https://api.1coin.meme/api/v1/bsc/dex/platforms'
 ```
 
 ```json
