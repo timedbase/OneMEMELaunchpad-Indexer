@@ -113,14 +113,12 @@ Fill in every value:
 # Database
 DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
 
-BSC_WSS_URL=wss://your-rpc-endpoint
+# BSC RPC — used for bonding-curve quotes, price feed, and OneSwap routing
 BSC_RPC_URL=https://your-rpc-endpoint
 CHAIN_ID=56
 
 # Contracts
-FACTORY_ADDRESS=0x...
 BONDING_CURVE_ADDRESS=0x...
-VESTING_WALLET_ADDRESS=0x...
 START_BLOCK=...
 
 # Subgraph
@@ -141,7 +139,6 @@ BETTERSTACK_TOKEN=...
 
 # Points export — required for GET /points/export
 ADMIN_SECRET=your-strong-random-secret
-
 ```
 
 ---

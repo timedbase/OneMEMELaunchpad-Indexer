@@ -218,6 +218,9 @@ All `bigint` / `numeric` fields are returned as **strings** to preserve precisio
 | `/api/v1/{chain}/tokens/*/quote/*` | 20 req / min (live RPC) |
 | `/api/v1/{chain}/oneswap/quote` | 20 req / min (live RPC) |
 | `/api/v1/{chain}/oneswap/route` | 20 req / min (live RPC) |
+| `/api/v1/{chain}/oneswap/execute` | 20 req / min (live RPC) |
+| `/api/v1/{chain}/oneswap/execute/permit2` | 20 req / min (live RPC) |
+| `/api/v1/{chain}/oneswap/execute/permit2/submit` | 20 req / min (live RPC) |
 | `/api/v1/{chain}/oneswap/tokens/*` | 20 req / min (live RPC) |
 | `/api/v1/{chain}/stats` | 10 req / min (heavy aggregation) |
 | `POST *` | 10 req / min |
