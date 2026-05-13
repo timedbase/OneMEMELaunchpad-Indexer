@@ -180,7 +180,12 @@ export class OneswapService {
     slippageBps: bigint,
   ): Promise<Route> {
     this.getClient();
-    const route = await this._optimizer!.buildRoute({ tokenIn, tokenOut, amountIn, recipient, slippageBps });
+    let route: Route | null;
+    try {
+      route = await this._optimizer!.buildRoute({ tokenIn, tokenOut, amountIn, recipient, slippageBps });
+    } catch (err: unknown) {
+      throw new ServiceUnavailableException(`Routing failed: ${String(err)}`);
+    }
     if (!route) throw new NotFoundException("No route found for this token pair");
     return route;
   }
@@ -231,11 +236,12 @@ export class OneswapService {
   }
 
   private serializeQuote(q: Quote) {
+    // meta is intentionally omitted — adapters can store bigints there which
+    // are not JSON-serializable and are internal routing detail only.
     return {
       protocol:  q.protocol,
       amountOut: q.amountOut.toString(),
       fee:       q.fee.toString(),
-      meta:      q.meta ?? null,
     };
   }
 
@@ -264,7 +270,12 @@ export class OneswapService {
 
     const client     = this.getClient();
     const aggregator = this._aggregator!;
-    const quotes     = await aggregator.getQuotes(client, { tokenIn, tokenOut, amountIn });
+    let quotes: Quote[];
+    try {
+      quotes = await aggregator.getQuotes(client, { tokenIn, tokenOut, amountIn });
+    } catch (err: unknown) {
+      throw new ServiceUnavailableException(`Quote fetch failed: ${String(err)}`);
+    }
 
     return {
       data: {
@@ -464,7 +475,12 @@ export class OneswapService {
 
     const client = this.getClient();
     const token  = address.toLowerCase() as Address;
-    const result = await detectToken(client, token);
+    let result: Awaited<ReturnType<typeof detectToken>>;
+    try {
+      result = await detectToken(client, token);
+    } catch (err: unknown) {
+      throw new ServiceUnavailableException(`Token detection failed: ${String(err)}`);
+    }
 
     return { data: this.serializeDetection(result, token) };
   }
