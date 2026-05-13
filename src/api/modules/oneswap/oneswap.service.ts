@@ -128,6 +128,16 @@ export class OneswapService {
       throw new ServiceUnavailableException("BSC_RPC_URL is not configured.");
     }
     if (!this._client) {
+      // Override the SDK's hardcoded ONEMEME_BONDING_CURVE address with the
+      // one from env so detectToken() and the OneMeme adapter hit the correct
+      // contract. All SDK modules reference this property at call-time via the
+      // CommonJS exports object, so patching it here is safe.
+      if (process.env.BONDING_CURVE_ADDRESS) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const sdkConst = require("@1swap/sdk/dist/constants.js") as Record<string, string>;
+        sdkConst["ONEMEME_BONDING_CURVE"] = process.env.BONDING_CURVE_ADDRESS;
+      }
+
       const chainId = parseInt(process.env.CHAIN_ID ?? "56");
       const chain = defineChain({
         id:             chainId,
