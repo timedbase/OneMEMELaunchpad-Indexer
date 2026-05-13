@@ -142,13 +142,6 @@ BETTERSTACK_TOKEN=...
 # Points export — required for GET /points/export
 ADMIN_SECRET=your-strong-random-secret
 
-# DEX layer (optional — omit to disable /dex/* endpoints)
-AGGREGATOR_SUBGRAPH_URL=
-THE_GRAPH_API_KEY=
-ONEDEX_ADDRESS=
-BONDING_CURVE_ADDRESS=
-GOPLUS_APP_KEY=
-GOPLUS_APP_SECRET=
 ```
 
 ---

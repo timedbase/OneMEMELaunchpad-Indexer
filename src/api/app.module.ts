@@ -22,8 +22,7 @@ import { ChatModule }          from "./modules/chat/chat.module";
 import { VestingModule }       from "./modules/vesting/vesting.module";
 import { PointsModule }        from "./modules/points/points.module";
 import { ReferralsModule }     from "./modules/referrals/referrals.module";
-import { DexModule }           from "./modules/dex/dex.module";
-
+import { OneswapModule }       from "./modules/oneswap/oneswap.module";
 import {
   QuoteRateLimitMiddleware,
   StatsRateLimitMiddleware,
@@ -49,7 +48,7 @@ import {
     VestingModule,
     PointsModule,
     ReferralsModule,
-    DexModule,
+    OneswapModule,
   ],
   controllers: [HealthController],
 })
@@ -59,9 +58,13 @@ export class AppModule implements NestModule {
     consumer
       .apply(QuoteRateLimitMiddleware)
       .forRoutes(
-        { path: "tokens/*/quote/*", method: RequestMethod.GET },
-        { path: "dex/quote",        method: RequestMethod.GET },
-        { path: "dex/route",        method: RequestMethod.GET },
+        { path: "tokens/*/quote/*",  method: RequestMethod.GET },
+        { path: "oneswap/quote",                    method: RequestMethod.GET  },
+        { path: "oneswap/route",                    method: RequestMethod.GET  },
+        { path: "oneswap/execute",                  method: RequestMethod.GET  },
+        { path: "oneswap/execute/permit2",          method: RequestMethod.GET  },
+        { path: "oneswap/execute/permit2/submit",   method: RequestMethod.POST },
+        { path: "oneswap/tokens/*",                 method: RequestMethod.GET  },
       );
 
     // Stats — 10 req/min (runs 6 parallel aggregation queries)

@@ -216,10 +216,10 @@ All `bigint` / `numeric` fields are returned as **strings** to preserve precisio
 | Route pattern | Limit |
 |---|---|
 | `/api/v1/{chain}/tokens/*/quote/*` | 20 req / min (live RPC) |
-| `/api/v1/{chain}/dex/quote` | 20 req / min (live RPC) |
-| `/api/v1/{chain}/dex/route` | 20 req / min (live RPC) |
+| `/api/v1/{chain}/oneswap/quote` | 20 req / min (live RPC) |
+| `/api/v1/{chain}/oneswap/route` | 20 req / min (live RPC) |
+| `/api/v1/{chain}/oneswap/tokens/*` | 20 req / min (live RPC) |
 | `/api/v1/{chain}/stats` | 10 req / min (heavy aggregation) |
-| `/api/v1/{chain}/dex/tokens/*/security` | 10 req / min (GoPlus upstream) |
 | `POST *` | 10 req / min |
 | Everything else (GET) | 60 req / min |
 
@@ -589,55 +589,39 @@ The bonus (10 pts) is awarded to the **referrer**. The check runs every 30 secon
 
 ---
 
-### DEX
+### OneSwap
 
-All DEX endpoints live under `/api/v1/{chain}/dex/`. They require the aggregator subgraph and DEX contract addresses to be configured — all return `503` when the DEX layer is not set up. See [DEX-Examples.md](DEX-Examples.md) for full request/response examples.
+Multi-protocol swap routing powered by the [`@1swap/sdk`](https://github.com/timedbase/1SWAP) aggregator. All endpoints require `BSC_RPC_URL` and return `503` when it is not set.
 
-**Data endpoints**
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/{chain}/dex/platforms` | Supported routing platform names and categories |
-| `GET` | `/api/v1/{chain}/dex/stats` | Aggregated DEX platform statistics |
-| `GET` | `/api/v1/{chain}/dex/tokens` | Paginated DEX token list (pools, volume, price) |
-| `GET` | `/api/v1/{chain}/dex/tokens/:address` | Single DEX token with pools and price |
-| `GET` | `/api/v1/{chain}/dex/tokens/:address/pools` | Liquidity pools for a token |
-| `GET` | `/api/v1/{chain}/dex/tokens/:address/trades` | Trade history for a DEX token |
-| `GET` | `/api/v1/{chain}/dex/tokens/:address/security` | GoPlus security report: tax rates, honeypot check, risk level, warnings |
-| `POST` | `/api/v1/{chain}/dex/tokens/:address/security/refresh` | Evict cached GoPlus report and re-fetch immediately |
-| `GET` | `/api/v1/{chain}/dex/swaps` | All DEX swap events, paginated |
-
-**Swap / quote endpoints**
+Pass `0x0000000000000000000000000000000000000000` or the string `"native"` as `tokenIn` / `tokenOut` to use native BNB.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/{chain}/dex/quote` | On-chain quote — best-price aggregation across all sources |
-| `GET` | `/api/v1/{chain}/dex/route` | Optimal route plan — adapter selection is fully internal |
-| `POST` | `/api/v1/{chain}/dex/swap` | Build `OneDex.execute()` calldata — single or multi-step, self-broadcast |
+| `GET` | `/api/v1/{chain}/oneswap/quote` | All protocol quotes for a pair, sorted best-first |
+| `GET` | `/api/v1/{chain}/oneswap/route` | Optimal route (direct / split / multihop) with `executionData` and `minAmountOut` |
+| `GET` | `/api/v1/{chain}/oneswap/execute` | Complete unsigned tx — `tx` + `approval` (or null for BNB) ready to broadcast |
+| `GET` | `/api/v1/{chain}/oneswap/execute/permit2` | Step 1 — EIP-712 `typedData` for Permit2 gasless approval (ERC20 only) |
+| `POST` | `/api/v1/{chain}/oneswap/execute/permit2/submit` | Step 2 — returns `executeWithPermit2()` calldata after signature |
+| `GET` | `/api/v1/{chain}/oneswap/tokens/:address` | Detect token protocol — `bondingCurve`, `graduated`, `isTaxToken`, `ammProtocols` |
 
-**Native BNB support**
+**Common query params:** `tokenIn`, `tokenOut`, `amountIn` (wei), `recipient`, `slippageBps` (default: 50, max: 1000), `deadline` (unix ts, default: now + 5 min)
 
-Pass `0x0000000000000000000000000000000000000000` as `tokenIn` or `tokenOut` in any swap/quote/route endpoint. The API automatically normalises it to WBNB for routing. Responses include:
+**Route / execute response fields:**
 
 | Field | Description |
 |---|---|
-| `nativeIn` | `true` when the original `tokenIn` was the zero address — caller must send `msg.value = amountIn` |
-| `nativeOut` | `true` when the original `tokenOut` was the zero address — final output is unwrapped BNB |
-| `value` | ETH value to attach to the transaction (wei string, `"0"` when `nativeIn` is false) |
+| `amountOut` | Net output after 0.5% OneDex fee (wei string) |
+| `minAmountOut` | `amountOut` with slippage applied — pass to `OneDex.execute()` |
+| `kind` | `"direct"` \| `"split"` \| `"multihop"` |
+| `oneDex` | OneDex contract address to call |
+| `executionData` | Encoded step data for `OneDex.execute()` (route only) |
+| `tx` | `{ to, data, value, from }` — unsigned tx (execute only) |
+| `approval` | `{ token, spender, amount }` for ERC20 inputs, `null` for native BNB |
+| `paths[]` | Per-path breakdown: `splitBps`, `amountIn`, `amountOut`, `steps[]` |
 
-**Supported platforms**
-
-| Name | Category | Notes |
-|---|---|---|
-| `ONEMEME_BC` | bonding-curve | OneMEME Launchpad bonding curve |
-| `FOURMEME` | bonding-curve | FourMEME bonding curve |
-| `FLAPSH` | bonding-curve | Flap.SH bonding curve |
-| `PANCAKE_V2` | amm-v2 | PancakeSwap V2 |
-| `PANCAKE_V3` | amm-v3 | PancakeSwap V3 (fee param required) |
-| `PANCAKE_V4` | amm-v4 | PancakeSwap V4 _(registered on-chain; routing disabled)_ |
-| `UNISWAP_V2` | amm-v2 | Uniswap V2 on BSC |
-| `UNISWAP_V3` | amm-v3 | Uniswap V3 on BSC |
-| `UNISWAP_V4` | amm-v4 | Uniswap V4 on BSC _(registered on-chain; routing disabled)_ |
+**Permit2 flow** (ERC20 → single tx, no separate approve):
+1. `GET /execute/permit2` — get `typedData`, sign it with the wallet
+2. `POST /execute/permit2/submit` — send `{ signature, permit2Nonce, ...same params }` → get final tx
 
 ---
 
@@ -752,40 +736,12 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 | `START_BLOCK` | No | Fallback for `POINTS_START_BLOCK` when that var is unset |
 | `ADMIN_SECRET` | No | Enables `GET /points/export`; pass as `X-Admin-Key` header |
 
-**DEX layer** (all optional — omit to disable `/dex/*` endpoints)
-
-| Variable | Description |
-|---|---|
-| `AGGREGATOR_SUBGRAPH_URL` | Aggregator subgraph endpoint (FourMEME / Flap.SH / OneMEMEAggregator data) |
-| `AGGREGATOR_SUBGRAPH_API_KEY` | Bearer auth for the aggregator subgraph |
-| `THE_GRAPH_API_KEY` | The Graph decentralised network key for PancakeSwap V3 and Uniswap subgraphs |
-| `PANCAKE_V2_SUBGRAPH_URL` | Override for PancakeSwap V2 subgraph |
-| `PANCAKE_V3_SUBGRAPH_URL` | Override for PancakeSwap V3 subgraph |
-| `PANCAKE_V4_SUBGRAPH_URL` | Override for PancakeSwap V4 subgraph _(unused while V4 routing is disabled)_ |
-| `UNISWAP_V2_SUBGRAPH_URL` | Override for Uniswap V2 subgraph |
-| `UNISWAP_V3_SUBGRAPH_URL` | Override for Uniswap V3 subgraph |
-| `UNISWAP_V4_SUBGRAPH_URL` | Override for Uniswap V4 subgraph _(unused while V4 routing is disabled)_ |
-| `ONEDEX_ADDRESS` | OneDex contract address (required for `POST /dex/swap`) |
-| `BONDING_CURVE_ADDRESS` | OneMEME BondingCurve contract address (required for ONEMEME_BC routes) |
-| `PANCAKE_V2_ROUTER_ADDRESS` | Override PancakeSwap V2 router (default: BSC mainnet) |
-| `PANCAKE_V3_ROUTER_ADDRESS` | Override PancakeSwap V3 SmartRouter for execution (default: BSC mainnet) |
-| `PANCAKE_V3_QUOTER_ADDRESS` | Override PancakeSwap V3 QuoterV2 (default: BSC mainnet) |
-| `UNISWAP_V2_ROUTER_ADDRESS` | Override Uniswap V2 router (default: BSC mainnet) |
-| `UNISWAP_V3_ROUTER_ADDRESS` | Uniswap V3 router for execution (no BSC default — set if deployed) |
-| `UNISWAP_V3_QUOTER_ADDRESS` | Uniswap V3 quoter (no BSC default — set if deployed) |
-| `PANCAKE_V4_QUOTER_ADDRESS` | PancakeSwap V4 quoter _(unused while V4 routing is disabled)_ |
-| `UNISWAP_V4_QUOTER_ADDRESS` | Uniswap V4 quoter _(unused while V4 routing is disabled)_ |
-| `FOURMEME_HELPER_ADDRESS` | Override FourMEME TokenManagerHelper3 (default: BSC mainnet) |
-| `FLAPSH_PORTAL_ADDRESS` | Override Flap.SH Portal contract (default: BSC mainnet) |
-| `GOPLUS_APP_KEY` | GoPlus app key — used with `GOPLUS_APP_SECRET` to obtain a Bearer access token; omit both for free tier (rate-limited) |
-| `GOPLUS_APP_SECRET` | GoPlus app secret — paired with `GOPLUS_APP_KEY`; sign = SHA1(app_key + unix_time + app_secret) |
-
 ---
 
 ## Project Structure
 
 ```
-├── abis/                        # Contract ABIs (used by rpc.ts + dex-rpc.ts)
+├── abis/                        # Contract ABIs
 ├── src/api/
 │   ├── main.ts
 │   ├── app.module.ts
@@ -813,15 +769,7 @@ The API is stateless — no volumes needed. All persistent state is in PostgreSQ
 │       ├── upload/              # /api/v1/{chain}/metadata/upload
 │       ├── points/              # /api/v1/{chain}/points/* (background poller + export)
 │       ├── referrals/           # /api/v1/{chain}/referrals/*
-│       ├── dex/                 # /api/v1/{chain}/dex/* — aggregator, quotes, swap, meta-tx
-│       │   ├── dex.service.ts       # subgraph data: tokens, pools, swaps, stats
-│       │   ├── dex.controller.ts
-│       │   ├── dex-subgraph.ts      # per-protocol subgraph clients
-│       │   ├── dex-rpc.ts           # viem quoters, swap builders, relay execution
-│       │   ├── route.service.ts     # aggregation: multi-source routing, calldata building
-│       │   ├── route.controller.ts
-│       │   ├── security.service.ts  # GoPlus security reports + tax-bps lookup
-│       │   ├── goplus.ts            # GoPlus API client (cached, in-flight dedup)
+│       ├── oneswap/             # /api/v1/{chain}/oneswap/* — @1swap/sdk quote + route + token detect
 │       └── index/               # GET /api/v1/{chain} — route index
 ├── docker-compose.yml           # local Postgres for off-chain tables
 ├── Dockerfile
