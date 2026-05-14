@@ -233,7 +233,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/route?tokenIn=native&tokenOut=0x
     "kind":          "direct",
     "slippageBps":   "50",
     "totalFee":      "0",
-    "oneDex":        "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":        "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "executionData": "0x...",
     "paths": [
       {
@@ -271,7 +271,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/route?tokenIn=native&tokenOut=0x
     "kind":          "split",
     "slippageBps":   "100",
     "totalFee":      "0",
-    "oneDex":        "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":        "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "executionData": "0x...",
     "paths": [
       {
@@ -323,7 +323,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/route?tokenIn=native&tokenOut=0x
     "kind":          "direct",
     "slippageBps":   "50",
     "totalFee":      "0",
-    "oneDex":        "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":        "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "executionData": "0x...",
     "paths": [
       {
@@ -371,7 +371,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/route?tokenIn=0x55d398326f99059f
     "kind":          "multihop",
     "slippageBps":   "50",
     "totalFee":      "0",
-    "oneDex":        "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":        "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "executionData": "0x...",
     "paths": [
       {
@@ -416,7 +416,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/route?tokenIn=0xYourToken&tokenO
     "kind":          "multihop",
     "slippageBps":   "50",
     "totalFee":      "0",
-    "oneDex":        "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":        "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "executionData": "0x...",
     "paths": [
       {
@@ -461,7 +461,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/route?tokenIn=0xTokenA&tokenOut=
     "kind":          "multihop",
     "slippageBps":   "50",
     "totalFee":      "0",
-    "oneDex":        "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":        "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "executionData": "0x...",
     "paths": [
       {
@@ -504,7 +504,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/execute?tokenIn=native&tokenOut=
 {
   "data": {
     "tx": {
-      "to":    "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+      "to":    "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
       "data":  "0x...",
       "value": "500000000000000000",
       "from":  "0xYourWallet"
@@ -518,7 +518,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/execute?tokenIn=native&tokenOut=
     "kind":         "direct",
     "slippageBps":  "50",
     "deadline":     "1715000300",
-    "oneDex":       "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":       "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "permit2":      "0x000000000022D473030F116dDEE9F6B43aC78BA3",
     "paths": [ "..." ]
   }
@@ -539,14 +539,14 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/execute?tokenIn=0xYourToken&toke
 {
   "data": {
     "tx": {
-      "to":    "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+      "to":    "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
       "data":  "0x...",
       "value": "0",
       "from":  "0xYourWallet"
     },
     "approval": {
       "token":   "0xyourtoken",
-      "spender": "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+      "spender": "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
       "amount":  "1000000000000000000000"
     },
     "tokenIn":      "0xyourtoken",
@@ -557,7 +557,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/execute?tokenIn=0xYourToken&toke
     "kind":         "direct",
     "slippageBps":  "50",
     "deadline":     "1715000300",
-    "oneDex":       "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":       "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "permit2":      "0x000000000022D473030F116dDEE9F6B43aC78BA3",
     "paths": [ "..." ]
   }
@@ -581,14 +581,14 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/execute?tokenIn=0x55d398326f9905
 {
   "data": {
     "tx": {
-      "to":    "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+      "to":    "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
       "data":  "0x...",
       "value": "0",
       "from":  "0xYourWallet"
     },
     "approval": {
       "token":   "0x55d398326f99059ff775485246999027b3197955",
-      "spender": "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+      "spender": "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
       "amount":  "10000000000000000000"
     },
     "tokenIn":      "0x55d398326f99059ff775485246999027b3197955",
@@ -599,7 +599,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/execute?tokenIn=0x55d398326f9905
     "kind":         "multihop",
     "slippageBps":  "50",
     "deadline":     "1715000300",
-    "oneDex":       "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":       "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "permit2":      "0x000000000022D473030F116dDEE9F6B43aC78BA3",
     "paths": [ "..." ]
   }
@@ -615,14 +615,14 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/execute?tokenIn=0xTokenA&tokenOu
 {
   "data": {
     "tx": {
-      "to":    "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+      "to":    "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
       "data":  "0x...",
       "value": "0",
       "from":  "0xYourWallet"
     },
     "approval": {
       "token":   "0xtokena",
-      "spender": "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+      "spender": "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
       "amount":  "1000000000000000000000"
     },
     "tokenIn":      "0xtokena",
@@ -633,7 +633,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/execute?tokenIn=0xTokenA&tokenOu
     "kind":         "multihop",
     "slippageBps":  "50",
     "deadline":     "1715000300",
-    "oneDex":       "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":       "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "permit2":      "0x000000000022D473030F116dDEE9F6B43aC78BA3",
     "paths": [ "..." ]
   }
@@ -680,7 +680,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/execute/permit2?tokenIn=0xYourTo
           "token":  "0xyourtoken",
           "amount": "1000000000000000000000"
         },
-        "spender":  "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+        "spender":  "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
         "nonce":    "72348912340000000000000000000",
         "deadline": "1715000300"
       }
@@ -695,7 +695,7 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/execute/permit2?tokenIn=0xYourTo
     "kind":         "direct",
     "slippageBps":  "50",
     "deadline":     "1715000300",
-    "oneDex":       "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":       "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "permit2":      "0x000000000022D473030F116dDEE9F6B43aC78BA3",
     "paths": [ "..." ]
   }
@@ -727,7 +727,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/oneswap/execute/permit2/submit' 
 {
   "data": {
     "tx": {
-      "to":    "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+      "to":    "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
       "data":  "0x...",
       "value": "0",
       "from":  "0xYourWallet"
@@ -742,7 +742,7 @@ curl -X POST 'https://api.1coin.meme/api/v1/bsc/oneswap/execute/permit2/submit' 
     "kind":         "direct",
     "slippageBps":  "50",
     "deadline":     "1715000300",
-    "oneDex":       "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "oneDex":       "0xbE9dFD8E5e26baAF2bC44914dEB83051a61096c2",
     "permit2":      "0x000000000022D473030F116dDEE9F6B43aC78BA3",
     "paths": [ "..." ]
   }
