@@ -22,6 +22,8 @@ All `/oneswap` endpoints require `BSC_RPC_URL` to be configured. All amounts are
 10. [Error responses](#10-error-responses)
 11. [Wallet integration (viem)](#11-wallet-integration-viem)
 
+**Supported protocols:** `onememe` · `flapsh` · `fourmeme` · `pancake_v2` · `uniswap_v2` · `pancake_v3` · `uniswap_v3` · `uniswap_v4`
+
 ---
 
 ## 1. Token Detect
@@ -169,6 +171,28 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/quote?tokenIn=0xYourToken&tokenO
 ```
 
 ```bash
+# Buy a Flapsh bonding-curve token with 0.1 BNB
+curl 'https://api.1coin.meme/api/v1/bsc/oneswap/quote?tokenIn=native&tokenOut=0xFlapshToken&amountIn=100000000000000000'
+```
+
+```json
+{
+  "data": {
+    "tokenIn":  "0x0000000000000000000000000000000000000000",
+    "tokenOut": "0xflapshtoken",
+    "amountIn": "100000000000000000",
+    "quotes": [
+      {
+        "protocol": "flapsh",
+        "amountOut": "9250000000000000000000",
+        "fee": "0"
+      }
+    ]
+  }
+}
+```
+
+```bash
 # Token-to-token — returns empty (no direct pair); use /route for multi-hop
 curl 'https://api.1coin.meme/api/v1/bsc/oneswap/quote?tokenIn=0x55d398326f99059fF775485246999027B3197955&tokenOut=0xYourToken&amountIn=10000000000000000000'
 ```
@@ -274,6 +298,44 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/route?tokenIn=native&tokenOut=0x
             "tokenOut":  "0x55d398326f99059ff775485246999027b3197955",
             "amountIn":  "400000000000000000",
             "amountOut": "119500000000000000000"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+```bash
+# Direct route — buy a Flapsh bonding-curve token with 0.5 BNB
+curl 'https://api.1coin.meme/api/v1/bsc/oneswap/route?tokenIn=native&tokenOut=0xFlapshToken&amountIn=500000000000000000&recipient=0xYourWallet'
+```
+
+```json
+{
+  "data": {
+    "tokenIn":       "0x0000000000000000000000000000000000000000",
+    "tokenOut":      "0xflapshtoken",
+    "amountIn":      "500000000000000000",
+    "amountOut":     "45800000000000000000000",
+    "minAmountOut":  "45571000000000000000000",
+    "kind":          "direct",
+    "slippageBps":   "50",
+    "totalFee":      "0",
+    "oneDex":        "0x4283F36F8B7A03513FE5C228c2823a147efF253C",
+    "executionData": "0x...",
+    "paths": [
+      {
+        "splitBps":  "10000",
+        "amountIn":  "500000000000000000",
+        "amountOut": "45800000000000000000000",
+        "steps": [
+          {
+            "protocol":  "flapsh",
+            "tokenIn":   "0x0000000000000000000000000000000000000000",
+            "tokenOut":  "0xflapshtoken",
+            "amountIn":  "500000000000000000",
+            "amountOut": "45800000000000000000000"
           }
         ]
       }

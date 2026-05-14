@@ -194,11 +194,9 @@ export class OneswapService {
     try {
       route = await this._optimizer!.buildRoute({ tokenIn, tokenOut, amountIn, recipient, slippageBps });
     } catch (err: unknown) {
-      console.error(`[oneswap] buildRoute threw: ${String(err)}`);
       throw new ServiceUnavailableException(`Routing failed: ${String(err)}`);
     }
     if (!route) {
-      console.warn(`[oneswap] no route: ${tokenIn} → ${tokenOut} amountIn=${amountIn}`);
       throw new NotFoundException("No route found for this token pair");
     }
     return route;
@@ -288,10 +286,8 @@ export class OneswapService {
     try {
       quotes = await aggregator.getQuotes(client, { tokenIn, tokenOut, amountIn });
     } catch (err: unknown) {
-      console.error(`[oneswap] getQuotes threw: ${String(err)}`);
       throw new ServiceUnavailableException(`Quote fetch failed: ${String(err)}`);
     }
-    console.log(`[oneswap] quote ${tokenIn} → ${tokenOut} amountIn=${amountIn}: ${quotes.length} quote(s)`, quotes.map(q => `${q.protocol}=${q.amountOut}`).join(", ") || "none");
 
     return {
       data: {
