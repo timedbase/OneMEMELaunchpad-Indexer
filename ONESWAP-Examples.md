@@ -140,9 +140,10 @@ curl 'https://api.1coin.meme/api/v1/bsc/oneswap/quote?tokenIn=native&tokenOut=0x
     "tokenOut": "0x55d398326f99059ff775485246999027b3197955",
     "amountIn": "1000000000000000000",
     "quotes": [
-      { "protocol": "pancake_v3", "amountOut": "298750000000000000000", "fee": "0" },
-      { "protocol": "uniswap_v3", "amountOut": "298200000000000000000", "fee": "0" },
-      { "protocol": "pancake_v2", "amountOut": "297100000000000000000", "fee": "0" }
+      { "protocol": "pancake_v3",  "amountOut": "298750000000000000000", "fee": "0" },
+      { "protocol": "uniswap_v3",  "amountOut": "298200000000000000000", "fee": "0" },
+      { "protocol": "uniswap_v4",  "amountOut": "297900000000000000000", "fee": "0" },
+      { "protocol": "pancake_v2",  "amountOut": "297100000000000000000", "fee": "0" }
     ]
   }
 }
